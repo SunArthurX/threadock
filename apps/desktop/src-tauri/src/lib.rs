@@ -509,6 +509,137 @@ fn import_from_minimax(
     import_raw_to_state(&state, raw, Some("MiniMax Code"))
 }
 
+// ── Codex (ChatGPT CLI/Desktop) 真实来源导入 ──────────────────────────
+
+/// Codex home 路径。
+fn codex_home() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    Ok(format!("{home}/.codex"))
+}
+
+/// 列出 Codex 会话。
+#[tauri::command]
+fn list_codex_sessions() -> Result<Vec<SourceSessionDto>, String> {
+    let home = codex_home()?;
+    let sessions = ch_adapter_codex::discover_sessions(&home)
+        .map_err(|e| format!("discover codex: {e}"))?;
+    Ok(sessions
+        .into_iter()
+        .map(|s| SourceSessionDto {
+            session_id: s.session_id,
+            title: s.title,
+            detail: format!("{} KB", s.size_bytes / 1024),
+            message_count: None,
+        })
+        .collect())
+}
+
+/// 从 Codex 导入一条会话。
+#[tauri::command]
+fn import_from_codex(
+    state: tauri::State<DaemonState>,
+    session_id: String,
+) -> Result<ImportResultDto, String> {
+    let home = codex_home()?;
+    let sessions = ch_adapter_codex::discover_sessions(&home)
+        .map_err(|e| format!("discover codex: {e}"))?;
+    let session = sessions
+        .into_iter()
+        .find(|s| s.session_id == session_id)
+        .ok_or_else(|| format!("session not found: {session_id}"))?;
+    let raw = ch_adapter_codex::parse_session(&session.file_path)
+        .map_err(|e| format!("parse codex: {e}"))?;
+    import_raw_to_state(&state, raw, Some("Codex"))
+}
+
+// ── CodeAgentOps：指标采集与聚合查询（plan codeagent-ops M2）──────────
+
+/// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
+#[tauri::command]
+fn ops_sync(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("同步中，请稍候…".into());
+    }
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    let mut usage_written = 0usize;
+    let mut tools_written = 0usize;
+    let result = (|| -> Result<(), String> {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        // provider 表需要存在对应行（JOIN 用）
+        for p in [
+            ch_domain::Provider::ZCode,
+            ch_domain::Provider::MinimaxCode,
+            ch_domain::Provider::ClaudeCode,
+            ch_domain::Provider::Codex,
+        ] {
+            repo.upsert_provider(p).map_err(|e| e.to_string())?;
+        }
+
+        // ZCode: turn_usage + tool_usage
+        if let Ok((u, t)) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")) {
+            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+        }
+        // MiniMax: token_usage
+        if let Ok(u) = ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite")) {
+            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+        }
+        // Claude Code: JSONL usage + tool_use
+        if let Ok((u, t)) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")) {
+            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+        }
+        // Codex: token_count 快照 + function_call
+        if let Ok((u, t)) = ch_ops_metrics::collect_codex(format!("{home}/.codex")) {
+            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })();
+    IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+    result?;
+    Ok(serde_json::json!({
+        "usage_written": usage_written,
+        "tools_written": tools_written,
+    }))
+}
+
+#[tauri::command]
+fn ops_overview(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<ch_storage::OpsOverview, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_overview(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_by_provider(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ProviderUsage>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_by_provider(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_by_model(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ModelUsage>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_by_model(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_timeseries(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::DailyUsage>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_timeseries_daily(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_tool_toplist(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::ToolUsageRow>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_tool_toplist(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_domain::ToolCallRecord>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())
+}
+
 /// 启动时自动拉取 ZCode / Claude Code / Cursor / MiniMax 最新会话（plan §6.1 自动发现/同步）。
 /// 返回导入统计。最多各导入 limit 个最新会话。
 /// 若已有重置/同步在进行中，返回「同步中」标记（不阻塞 UI）。
@@ -528,6 +659,8 @@ fn auto_sync(
     let mut cursor_ok = 0u32;
     let mut cursor_skip = 0u32;
     let mut mm_ok = 0u32;
+    let mut codex_ok = 0u32;
+    let mut codex_skip = 0u32;
     let mut mm_skip = 0u32;
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
@@ -657,6 +790,37 @@ fn auto_sync(
         }
     }
 
+    // Codex (ChatGPT CLI/Desktop)：JSONL 会话
+    let codex_home_dir = format!("{home}/.codex/sessions");
+    if std::path::Path::new(&codex_home_dir).exists() {
+        match ch_adapter_codex::discover_sessions(format!("{home}/.codex")) {
+            Ok(sessions) => {
+                for s in sessions.into_iter().take(lim) {
+                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+                    let exists = repo
+                        .list_conversations(None)
+                        .map_err(|e| e.to_string())?
+                        .into_iter()
+                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::Codex);
+                    drop(repo);
+                    if exists {
+                        codex_skip += 1;
+                        continue;
+                    }
+                    match ch_adapter_codex::parse_session(&s.file_path) {
+                        Ok(raw) => {
+                            if import_raw_to_state(&state, raw, Some("Codex")).is_ok() {
+                                codex_ok += 1;
+                            }
+                        }
+                        Err(e) => tracing::warn!(session = %s.session_id, error = %e, "codex parse failed"),
+                    }
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "codex discover failed"),
+        }
+    }
+
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
     Ok(serde_json::json!({
         "zcode_imported": zcode_ok,
@@ -667,6 +831,8 @@ fn auto_sync(
         "cursor_skipped": cursor_skip,
         "minimax_imported": mm_ok,
         "minimax_skipped": mm_skip,
+        "codex_imported": codex_ok,
+        "codex_skipped": codex_skip,
     }))
 }
 
@@ -970,6 +1136,15 @@ pub fn run() {
             import_from_cursor,
             list_minimax_sessions,
             import_from_minimax,
+            list_codex_sessions,
+            import_from_codex,
+            ops_sync,
+            ops_overview,
+            ops_by_provider,
+            ops_by_model,
+            ops_timeseries,
+            ops_tool_toplist,
+            ops_risky_calls,
             auto_sync,
             reset_all_data,
             export_conversation,

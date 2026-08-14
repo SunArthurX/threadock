@@ -499,6 +499,86 @@ impl Event {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// CodeAgentOps：用量与工具调用指标（plan codeagent-ops §3）
+// ────────────────────────────────────────────────────────────────────────────
+
+/// 一次模型调用的用量记录（turn 级或 request 级）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UsageRecord {
+    pub id: String,
+    pub provider: Provider,
+    /// 来源侧会话 ID（对应 Conversation.source_conversation_id）。
+    pub source_session_id: String,
+    pub turn_id: Option<String>,
+    pub model: Option<String>,
+    pub ts: Timestamp,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    /// 来源侧已算好的成本（MiniMax 自带）；None 表示需本地定价补算。
+    pub cost_usd: Option<f64>,
+    pub status: UsageStatus,
+    pub duration_ms: Option<i64>,
+    pub retry_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UsageStatus {
+    Running,
+    Completed,
+    Error,
+    Cancelled,
+}
+
+impl UsageStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UsageStatus::Running => "running",
+            UsageStatus::Completed => "completed",
+            UsageStatus::Error => "error",
+            UsageStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn parse(s: &str) -> UsageStatus {
+        match s {
+            "running" => UsageStatus::Running,
+            "error" => UsageStatus::Error,
+            "cancelled" => UsageStatus::Cancelled,
+            _ => UsageStatus::Completed,
+        }
+    }
+}
+
+/// 一次工具调用（治理核心对象）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    pub provider: Provider,
+    pub source_session_id: String,
+    pub tool_name: String,
+    pub ts: Timestamp,
+    pub read_only: Option<bool>,
+    /// 是否破坏性操作（ZCode 原生标记；其他来源靠规则推断）。
+    pub destructive: Option<bool>,
+    pub approval_status: Option<String>,
+    pub exit_code: Option<i64>,
+    pub duration_ms: Option<i64>,
+    pub status: UsageStatus,
+    /// Bash 类工具保留命令文本（审计用）。
+    pub command_text: Option<String>,
+}
+
+impl UsageRecord {
+    /// 计费口径：input + output + reasoning（cache 不计费，单列）。
+    pub fn billable_tokens(&self) -> i64 {
+        self.input_tokens + self.output_tokens + self.reasoning_tokens
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // 工具函数
 // ────────────────────────────────────────────────────────────────────────────
 

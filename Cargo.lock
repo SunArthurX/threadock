@@ -201,6 +201,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-adapter-codex"
+version = "0.1.0"
+dependencies = [
+ "ch-domain",
+ "ch-normalization",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "ch-adapter-cursor"
 version = "0.1.0"
 dependencies = [
@@ -433,6 +447,20 @@ dependencies = [
  "ch-domain",
  "serde",
  "serde_json",
+ "thiserror",
+ "time",
+ "tracing",
+]
+
+[[package]]
+name = "ch-ops-metrics"
+version = "0.1.0"
+dependencies = [
+ "ch-domain",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
  "thiserror",
  "time",
  "tracing",

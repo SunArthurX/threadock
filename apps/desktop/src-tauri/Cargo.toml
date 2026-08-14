@@ -37,6 +37,8 @@ ch-adapter-claude-code = { path = "../../../crates/adapter-claude-code" }
 ch-adapter-zcode = { path = "../../../crates/adapter-zcode" }
 ch-adapter-cursor = { path = "../../../crates/adapter-cursor" }
 ch-adapter-minimax = { path = "../../../crates/adapter-minimax" }
+ch-adapter-codex = { path = "../../../crates/adapter-codex" }
+ch-ops-metrics = { path = "../../../crates/ops-metrics" }
 ch-knowledge = { path = "../../../crates/knowledge" }
 ch-export = { path = "../../../crates/export" }
 

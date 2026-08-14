@@ -1,0 +1,19 @@
+[package]
+name = "ch-ops-metrics"
+description = "CodeAgentOps 采集层：从各 Agent 数据源提取用量/工具调用指标（plan codeagent-ops M1）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-domain = { path = "../domain" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rusqlite = { version = "0.31", features = ["bundled"] }
+tracing.workspace = true
+time.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

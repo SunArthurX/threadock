@@ -276,3 +276,45 @@ pub const SCHEMA_V5: &str = r#"
 ALTER TABLE conversations ADD COLUMN source_parent_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(source_parent_id);
 "#;
+
+/// V6：CodeAgentOps 指标表（plan codeagent-ops §3.2）。
+pub const SCHEMA_V6: &str = r#"
+CREATE TABLE IF NOT EXISTS usage_records (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    source_session_id TEXT NOT NULL,
+    turn_id TEXT,
+    model TEXT,
+    ts INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+    cost_usd REAL,
+    status TEXT NOT NULL DEFAULT 'completed',
+    duration_ms INTEGER,
+    retry_count INTEGER,
+    UNIQUE(provider_id, source_session_id, turn_id, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage_records(ts);
+CREATE INDEX IF NOT EXISTS idx_usage_provider_ts ON usage_records(provider_id, ts);
+
+CREATE TABLE IF NOT EXISTS tool_call_records (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    source_session_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    read_only INTEGER,
+    destructive INTEGER,
+    approval_status TEXT,
+    exit_code INTEGER,
+    duration_ms INTEGER,
+    status TEXT NOT NULL DEFAULT 'completed',
+    command_text TEXT,
+    UNIQUE(provider_id, source_session_id, tool_name, ts)
+);
+CREATE INDEX IF NOT EXISTS idx_tool_ts ON tool_call_records(ts);
+CREATE INDEX IF NOT EXISTS idx_tool_destructive ON tool_call_records(destructive) WHERE destructive = 1;
+"#;

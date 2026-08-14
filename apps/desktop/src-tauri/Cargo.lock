@@ -537,6 +537,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-adapter-codex"
+version = "0.1.0"
+dependencies = [
+ "ch-domain",
+ "ch-normalization",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "ch-adapter-cursor"
 version = "0.1.0"
 dependencies = [
@@ -697,6 +710,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-ops-metrics"
+version = "0.1.0"
+dependencies = [
+ "ch-domain",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "ch-raw-store"
 version = "0.1.0"
 dependencies = [
@@ -777,6 +803,7 @@ name = "conversation-hub-desktop"
 version = "0.1.0"
 dependencies = [
  "ch-adapter-claude-code",
+ "ch-adapter-codex",
  "ch-adapter-cursor",
  "ch-adapter-jsonl",
  "ch-adapter-markdown",
@@ -788,6 +815,7 @@ dependencies = [
  "ch-identity-resolver",
  "ch-knowledge",
  "ch-normalization",
+ "ch-ops-metrics",
  "ch-raw-store",
  "ch-search",
  "ch-storage",

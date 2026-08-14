@@ -19,6 +19,8 @@ members = [
     "crates/adapter-zcode",
     "crates/adapter-cursor",
     "crates/adapter-minimax",
+    "crates/adapter-codex",
+    "crates/ops-metrics",
     "crates/adapter-jsonl",
     "crates/cli",
 ]

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import OpsView from "./OpsView";
 
 // ── 后端返回类型（与 Rust serde 对应）──────────────────────────────────
 
@@ -101,6 +102,9 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() =>
     (localStorage.getItem("ch-theme") as "dark" | "light") || "dark"
   );
+  const [view, setView] = useState<"chat" | "ops">(() =>
+    (localStorage.getItem("ch-view") as "chat" | "ops") || "chat"
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -110,7 +114,7 @@ export default function App() {
   const [events, setEvents] = useState<EventDto[]>([]);
   const [completenessLabel, setCompletenessLabel] = useState<string>("");
   const [knowledge, setKnowledge] = useState<ExtractionResult | null>(null);
-  const [sourcePanel, setSourcePanel] = useState<"zcode" | "claude-code" | "cursor" | "minimax" | null>(null);
+  const [sourcePanel, setSourcePanel] = useState<"zcode" | "claude-code" | "cursor" | "minimax" | "codex" | null>(null);
   const [sourceSessions, setSourceSessions] = useState<SourceSession[]>([]);
   const [importing, setImporting] = useState(false);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
@@ -154,6 +158,7 @@ export default function App() {
         ["claude_code", "Claude Code"],
         ["cursor", "Cursor"],
         ["minimax", "MiniMax"],
+        ["codex", "Codex"],
       ];
       for (const [key, label] of sources) {
         const ok = result[`${key}_imported`] ?? 0;
@@ -179,6 +184,11 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("ch-theme", theme);
   }, [theme]);
+
+  // 视图切换持久化
+  useEffect(() => {
+    localStorage.setItem("ch-view", view);
+  }, [view]);
 
   // 首次加载：先展示已有数据，再后台同步
   useEffect(() => {
@@ -507,7 +517,7 @@ export default function App() {
   };
 
   // 加载来源会话列表
-  const loadSourceSessions = async (source: "zcode" | "claude-code" | "cursor" | "minimax") => {
+  const loadSourceSessions = async (source: "zcode" | "claude-code" | "cursor" | "minimax" | "codex") => {
     setSourcePanel(source);
     setSourceSessions([]);
     setError(null);
@@ -517,6 +527,7 @@ export default function App() {
         "claude-code": "list_claude_code_sessions",
         "cursor": "list_cursor_sessions",
         "minimax": "list_minimax_sessions",
+        "codex": "list_codex_sessions",
       }[source];
       const sessions = await invoke<SourceSession[]>(cmd);
       setSourceSessions(sessions);
@@ -535,6 +546,7 @@ export default function App() {
         "claude-code": "import_from_claude_code",
         "cursor": "import_from_cursor",
         "minimax": "import_from_minimax",
+        "codex": "import_from_codex",
       }[sourcePanel!]!;
       const result = await invoke<ImportResultDto>(cmd, { sessionId });
       await loadWorkspaces();
@@ -560,6 +572,7 @@ export default function App() {
       "claude-code": "import_from_claude_code",
       "cursor": "import_from_cursor",
       "minimax": "import_from_minimax",
+      "codex": "import_from_codex",
     }[sourcePanel]!;
     let ok = 0;
     let fail = 0;
@@ -684,29 +697,49 @@ export default function App() {
       )}
       <div className="topbar">
         <h1>Conversation Hub</h1>
-        {syncing && <span className="sync-status">⟳ 同步中…</span>}
-        {!syncing && syncResult && (
-          <span className="sync-status done" title={syncResult}>
-            ✓ {syncResult}
-          </span>
-        )}
-        <div className="search-box">
-          <input
-            ref={searchInputRef}
-            type="text"
-            placeholder="搜索所有会话…  (⌘K)"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && doSearch()}
-          />
-          <button onClick={doSearch}>搜索</button>
-          {searchResults && <button onClick={clearSearch}>清除</button>}
+        {/* 视图切换：对话 | 治理 */}
+        <div className="view-switcher">
+          <button
+            className={`view-tab ${view === "chat" ? "active" : ""}`}
+            onClick={() => setView("chat")}
+          >
+            💬 对话
+          </button>
+          <button
+            className={`view-tab ${view === "ops" ? "active" : ""}`}
+            onClick={() => setView("ops")}
+          >
+            📊 治理
+          </button>
         </div>
-        <button onClick={importHandler} title="导入 Markdown/JSONL 文件">＋ 文件</button>
-        <button onClick={() => loadSourceSessions("zcode")}>ZCode</button>
-        <button onClick={() => loadSourceSessions("claude-code")}>Claude Code</button>
-        <button onClick={() => loadSourceSessions("cursor")}>Cursor</button>
-        <button onClick={() => loadSourceSessions("minimax")}>MiniMax</button>
+        {view === "chat" && (
+          <>
+            {syncing && <span className="sync-status">⟳ 同步中…</span>}
+            {!syncing && syncResult && (
+              <span className="sync-status done" title={syncResult}>
+                ✓ {syncResult}
+              </span>
+            )}
+            <div className="search-box">
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="搜索所有会话…  (⌘K)"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && doSearch()}
+              />
+              <button onClick={doSearch}>搜索</button>
+              {searchResults && <button onClick={clearSearch}>清除</button>}
+            </div>
+            <button onClick={importHandler} title="导入 Markdown/JSONL 文件">＋ 文件</button>
+            <button onClick={() => loadSourceSessions("zcode")}>ZCode</button>
+            <button onClick={() => loadSourceSessions("claude-code")}>Claude Code</button>
+            <button onClick={() => loadSourceSessions("cursor")}>Cursor</button>
+            <button onClick={() => loadSourceSessions("minimax")}>MiniMax</button>
+            <button onClick={() => loadSourceSessions("codex")}>Codex</button>
+          </>
+        )}
         <button
           className="reset-btn"
           disabled={resetting}
@@ -783,6 +816,9 @@ export default function App() {
         </div>
       )}
 
+      {view === "ops" ? (
+        <OpsView />
+      ) : (
       <div className="main">
         {/* 左栏：Workspaces（按来源归组）*/}
         <div className="panel">
@@ -859,7 +895,7 @@ export default function App() {
                 >
                   全部
                 </button>
-                {["zcode", "claude-code", "cursor", "minimax-code"].map((p) => (
+                {["zcode", "claude-code", "cursor", "minimax-code", "codex"].map((p) => (
                   <button
                     key={p}
                     className={`filter-chip ${providerFilter === p ? "active" : ""}`}
@@ -1005,6 +1041,7 @@ export default function App() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -11,7 +11,7 @@ use ch_domain::now_utc;
 use rusqlite::Connection;
 
 /// 当前 schema 目标版本。
-pub const LATEST_VERSION: u32 = 5;
+pub const LATEST_VERSION: u32 = 6;
 
 /// 一个迁移步骤：版本号 + 描述 + SQL。
 struct Migration {
@@ -47,6 +47,11 @@ fn migrations() -> Vec<Migration> {
             version: 5,
             description: "conversation parent/child relationship (source_parent_id)",
             sql: crate::schema::SCHEMA_V5,
+        },
+        Migration {
+            version: 6,
+            description: "CodeAgentOps metrics (usage_records / tool_call_records)",
+            sql: crate::schema::SCHEMA_V6,
         },
     ]
 }

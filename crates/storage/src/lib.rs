@@ -13,5 +13,8 @@ pub mod timestamp;
 
 pub use error::{StorageError, StorageResult};
 pub use filter::ConversationFilter;
-pub use repository::{KnowledgeRecord, RedactionRuleRecord, Repository};
+pub use repository::{
+    DailyUsage, KnowledgeRecord, ModelUsage, OpsOverview, ProviderUsage, RedactionRuleRecord,
+    Repository, ToolUsageRow,
+};
 pub use search::{build_match_expr, SearchQuery, SearchResult};

@@ -459,7 +459,301 @@ impl Repository {
         conn.execute("DELETE FROM source_workspaces", [])?;
         conn.execute("DELETE FROM providers", [])?;
         conn.execute("DELETE FROM installations", [])?;
+        conn.execute("DELETE FROM usage_records", [])?;
+        conn.execute("DELETE FROM tool_call_records", [])?;
         Ok(())
+    }
+
+    // ── CodeAgentOps：用量/工具调用指标（plan codeagent-ops §3.2）────────
+
+    /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
+    pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for r in records {
+            let changed = tx.execute(
+                "INSERT OR IGNORE INTO usage_records
+                    (id, provider_id, source_session_id, turn_id, model, ts,
+                     input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
+                     cache_write_tokens, cost_usd, status, duration_ms, retry_count)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                params![
+                    r.id,
+                    format!("prov_{}", r.provider.as_str()),
+                    r.source_session_id,
+                    r.turn_id,
+                    r.model,
+                    timestamp::to_millis(Some(r.ts)).unwrap_or(0),
+                    r.input_tokens,
+                    r.output_tokens,
+                    r.reasoning_tokens,
+                    r.cache_read_tokens,
+                    r.cache_write_tokens,
+                    r.cost_usd,
+                    r.status.as_str(),
+                    r.duration_ms,
+                    r.retry_count,
+                ],
+            )?;
+            n += changed;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// 批量写入工具调用记录（事务 + 幂等）。
+    pub fn upsert_tool_call_batch(
+        &self,
+        records: &[ch_domain::ToolCallRecord],
+    ) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for r in records {
+            let changed = tx.execute(
+                "INSERT OR IGNORE INTO tool_call_records
+                    (id, provider_id, source_session_id, tool_name, ts, read_only,
+                     destructive, approval_status, exit_code, duration_ms, status, command_text)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    r.id,
+                    format!("prov_{}", r.provider.as_str()),
+                    r.source_session_id,
+                    r.tool_name,
+                    timestamp::to_millis(Some(r.ts)).unwrap_or(0),
+                    r.read_only,
+                    r.destructive,
+                    r.approval_status,
+                    r.exit_code,
+                    r.duration_ms,
+                    r.status.as_str(),
+                    r.command_text,
+                ],
+            )?;
+            n += changed;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// 时间范围过滤子句：days=None 全量，否则最近 N 天。
+    fn range_clause(days: Option<i64>) -> (String, Option<i64>) {
+        match days {
+            Some(d) => {
+                let cutoff = timestamp::to_millis(Some(ch_domain::now_utc())).unwrap_or(0)
+                    - d * 86_400_000;
+                ("ts >= ?1".to_string(), Some(cutoff))
+            }
+            None => ("1=1".to_string(), None),
+        }
+    }
+
+    /// 治理总览 KPI。
+    pub fn ops_overview(&self, days: Option<i64>) -> StorageResult<OpsOverview> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT
+                (SELECT COUNT(*) FROM usage_records WHERE {clause_u}),
+                COALESCE((SELECT SUM(input_tokens + output_tokens + reasoning_tokens) FROM usage_records WHERE {clause_u}), 0),
+                COALESCE((SELECT SUM(input_tokens) FROM usage_records WHERE {clause_u}), 0),
+                COALESCE((SELECT SUM(output_tokens) FROM usage_records WHERE {clause_u}), 0),
+                COALESCE((SELECT SUM(cost_usd) FROM usage_records WHERE cost_usd IS NOT NULL AND {clause_u}), 0),
+                COALESCE((SELECT AVG(duration_ms) FROM usage_records WHERE duration_ms IS NOT NULL AND {clause_u}), 0),
+                (SELECT COUNT(*) FROM usage_records WHERE status = 'error' AND {clause_u}),
+                (SELECT COUNT(DISTINCT source_session_id) FROM usage_records WHERE {clause_u}),
+                COALESCE((SELECT COUNT(*) FROM tool_call_records WHERE destructive = 1 AND {clause_t}), 0),
+                (SELECT COUNT(*) FROM tool_call_records WHERE {clause_t})",
+            clause_u = clause, clause_t = clause,
+        );
+        let args: Vec<SqlValue> = [cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff]
+            .iter()
+            .filter_map(|c| c.map(|v| v.into()))
+            .collect();
+        conn.query_row(&sql, params_from_iter(args.iter()), |r| {
+            Ok(OpsOverview {
+                total_requests: r.get(0)?,
+                total_tokens: r.get(1)?,
+                input_tokens: r.get(2)?,
+                output_tokens: r.get(3)?,
+                cost_usd: r.get(4)?,
+                avg_duration_ms: r.get(5)?,
+                error_count: r.get(6)?,
+                session_count: r.get(7)?,
+                destructive_calls: r.get(8)?,
+                total_tool_calls: r.get(9)?,
+            })
+        })
+        .map_err(Into::into)
+    }
+
+    /// 按 provider 聚合。
+    pub fn ops_by_provider(&self, days: Option<i64>) -> StorageResult<Vec<ProviderUsage>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name, COUNT(*),
+                    SUM(input_tokens + output_tokens + reasoning_tokens),
+                    SUM(output_tokens),
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE {clause}
+             GROUP BY u.provider_id ORDER BY 3 DESC",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(ProviderUsage {
+                provider: r.get(0)?,
+                requests: r.get(1)?,
+                total_tokens: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                output_tokens: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                errors: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 按模型聚合。
+    pub fn ops_by_model(&self, days: Option<i64>) -> StorageResult<Vec<ModelUsage>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT COALESCE(model, '(unknown)'), u.provider_id, COUNT(*),
+                    SUM(input_tokens), SUM(output_tokens),
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)
+             FROM usage_records u
+             WHERE {clause}
+             GROUP BY model, u.provider_id ORDER BY 4 DESC",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(ModelUsage {
+                model: r.get(0)?,
+                provider_id: r.get(1)?,
+                requests: r.get(2)?,
+                input_tokens: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                output_tokens: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                errors: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 每日用量时间序列。
+    pub fn ops_timeseries_daily(&self, days: Option<i64>) -> StorageResult<Vec<DailyUsage>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT date(ts/1000, 'unixepoch', 'localtime') AS day,
+                    SUM(input_tokens + output_tokens + reasoning_tokens),
+                    COUNT(*)
+             FROM usage_records WHERE {clause}
+             GROUP BY day ORDER BY day",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(DailyUsage {
+                day: r.get(0)?,
+                total_tokens: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                requests: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 工具调用 Top N。
+    pub fn ops_tool_toplist(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<ToolUsageRow>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT tool_name, COUNT(*),
+                    SUM(CASE WHEN destructive = 1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
+                    COALESCE(AVG(duration_ms), 0)
+             FROM tool_call_records WHERE {clause}
+             GROUP BY tool_name ORDER BY 2 DESC LIMIT ?2",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = [cutoff.map(|v| v.into()), Some(n.into())]
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(ToolUsageRow {
+                tool_name: r.get(0)?,
+                calls: r.get(1)?,
+                destructive: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                errors: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+                avg_duration_ms: r.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 风险调用列表（破坏性 / 出错 / 需审批）。
+    pub fn ops_risky_calls(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT id, p.name, source_session_id, tool_name, ts, read_only,
+                    destructive, approval_status, exit_code, duration_ms, status, command_text
+             FROM tool_call_records t JOIN providers p ON p.id = t.provider_id
+             WHERE (destructive = 1 OR status = 'error' OR (exit_code IS NOT NULL AND exit_code != 0))
+               AND {clause}
+             ORDER BY ts DESC LIMIT ?2",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = [cutoff.map(|v| v.into()), Some(n.into())]
+            .into_iter()
+            .flatten()
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(ch_domain::ToolCallRecord {
+                id: r.get(0)?,
+                provider: ch_domain::Provider::from_str(&r.get::<_, String>(1)?)
+                    .unwrap_or(ch_domain::Provider::Unknown),
+                source_session_id: r.get(2)?,
+                tool_name: r.get(3)?,
+                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?)).unwrap_or_else(ch_domain::now_utc),
+                read_only: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
+                destructive: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
+                approval_status: r.get(7)?,
+                exit_code: r.get(8)?,
+                duration_ms: r.get(9)?,
+                status: ch_domain::UsageStatus::parse(&r.get::<_, String>(10)?),
+                command_text: r.get(11)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
     }
 
     // ── Message（幂等：按 content_hash + sequence 去重） ──────────────────
@@ -1023,6 +1317,62 @@ fn row_to_event(r: &rusqlite::Row<'_>) -> rusqlite::Result<Event> {
     e.completed_at = timestamp::from_millis(r.get(10)?);
     e.raw_payload_id = r.get(11)?;
     Ok(e)
+}
+
+// ── CodeAgentOps 聚合结果结构（plan codeagent-ops §3.2）────────────────
+
+/// 治理总览 KPI。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OpsOverview {
+    pub total_requests: i64,
+    pub total_tokens: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cost_usd: f64,
+    pub avg_duration_ms: f64,
+    pub error_count: i64,
+    pub session_count: i64,
+    pub destructive_calls: i64,
+    pub total_tool_calls: i64,
+}
+
+/// 按 provider 聚合。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProviderUsage {
+    pub provider: String,
+    pub requests: i64,
+    pub total_tokens: i64,
+    pub output_tokens: i64,
+    pub errors: i64,
+}
+
+/// 按模型聚合。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ModelUsage {
+    pub model: String,
+    pub provider_id: String,
+    pub requests: i64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub errors: i64,
+}
+
+/// 每日用量。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DailyUsage {
+    pub day: String,
+    pub total_tokens: i64,
+    pub requests: i64,
+}
+
+/// 工具调用统计行。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToolUsageRow {
+    pub tool_name: String,
+    pub calls: i64,
+    pub destructive: i64,
+    pub errors: i64,
+    pub avg_duration_ms: f64,
 }
 
 fn parse_status(s: &str) -> Status {
