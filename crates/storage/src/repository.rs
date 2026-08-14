@@ -1536,7 +1536,7 @@ impl Repository {
             let success_rate = if total > 0 { completed as f64 / total as f64 * 100.0 } else { 0.0 };
             let error_rate = if total > 0 { errors as f64 / total as f64 * 100.0 } else { 0.0 };
             let retry_rate = if total > 0 { retries as f64 / total as f64 * 100.0 } else { 0.0 };
-            let stability = ((success_rate * 0.6 - retry_rate * 0.3 - error_rate * 0.1).max(0.0)).min(100.0);
+            let stability = (success_rate * 0.6 - retry_rate * 0.3 - error_rate * 0.1).clamp(0.0, 100.0);
             Ok(AgentHealth {
                 provider: r.get(0)?,
                 total_requests: total,
