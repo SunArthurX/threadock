@@ -1508,6 +1508,117 @@ impl Repository {
         Ok(out)
     }
 
+    // ── M10-M12：健康度 / 延迟 / Token 浪费 ─────────────────────────────
+
+    /// M10：Agent 健康度（成功率/错误率/重试率/稳定性评分 0-100）。
+    pub fn ops_agent_health(&self, days: Option<i64>) -> StorageResult<Vec<AgentHealth>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name, COUNT(*),
+                    SUM(CASE WHEN u.status = 'error' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN u.status = 'completed' THEN 1 ELSE 0 END),
+                    COALESCE(SUM(u.retry_count), 0),
+                    COUNT(DISTINCT u.source_session_id)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE {clause}
+             GROUP BY p.name",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            let total: i64 = r.get(1)?;
+            let errors: i64 = r.get::<_, Option<i64>>(2)?.unwrap_or(0);
+            let completed: i64 = r.get::<_, Option<i64>>(3)?.unwrap_or(0);
+            let retries: i64 = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
+            let sessions: i64 = r.get(5)?;
+            let success_rate = if total > 0 { completed as f64 / total as f64 * 100.0 } else { 0.0 };
+            let error_rate = if total > 0 { errors as f64 / total as f64 * 100.0 } else { 0.0 };
+            let retry_rate = if total > 0 { retries as f64 / total as f64 * 100.0 } else { 0.0 };
+            let stability = ((success_rate * 0.6 - retry_rate * 0.3 - error_rate * 0.1).max(0.0)).min(100.0);
+            Ok(AgentHealth {
+                provider: r.get(0)?,
+                total_requests: total,
+                errors, completed, retries, sessions,
+                success_rate, error_rate, retry_rate, stability_score: stability,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows { v.push(r?); }
+        Ok(v)
+    }
+
+    /// M11：延迟 P50/P95/平均值 per agent。
+    pub fn ops_latency_stats(&self, days: Option<i64>) -> StorageResult<Vec<LatencyStat>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name, u.duration_ms FROM usage_records u
+             JOIN providers p ON p.id = u.provider_id
+             WHERE u.duration_ms IS NOT NULL AND u.duration_ms > 0 AND {clause}",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
+        let mut by_p: std::collections::HashMap<String, Vec<i64>> = Default::default();
+        for r in rows { let (p, d) = r?; by_p.entry(p).or_default().push(d); }
+        let mut result = Vec::new();
+        for (p, mut ds) in by_p {
+            ds.sort();
+            let n = ds.len();
+            result.push(LatencyStat {
+                provider: p,
+                sample_count: n as i64,
+                p50_ms: ds[n * 50 / 100] as f64,
+                p95_ms: ds[n * 95 / 100] as f64,
+                avg_ms: ds.iter().sum::<i64>() as f64 / n as f64,
+            });
+        }
+        result.sort_by(|a, b| b.p95_ms.partial_cmp(&a.p95_ms).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(result)
+    }
+
+    /// M12：Token 浪费检测（input/output > 10 = 上下文累积/全量重放模式）。
+    pub fn ops_token_waste(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<TokenWaste>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name, u.source_session_id,
+                    SUM(u.input_tokens), SUM(u.output_tokens), COUNT(*), SUM(u.cache_read_tokens)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE {clause}
+             GROUP BY u.source_session_id, p.name
+             HAVING SUM(u.input_tokens) > 10000 AND SUM(u.output_tokens) > 0
+                AND (CAST(SUM(u.input_tokens) AS REAL) / SUM(u.output_tokens)) > 10
+             ORDER BY SUM(u.input_tokens) DESC LIMIT ?",
+            clause = clause,
+        );
+        let mut args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        args.push(n.into());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            let inp: i64 = r.get::<_, Option<i64>>(2)?.unwrap_or(0);
+            let outp: i64 = r.get::<_, Option<i64>>(3)?.unwrap_or(0);
+            let reqs: i64 = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
+            let cached: i64 = r.get::<_, Option<i64>>(5)?.unwrap_or(0);
+            let ratio = if outp > 0 { inp as f64 / outp as f64 } else { 0.0 };
+            let cache_ratio = if inp > 0 { cached as f64 / inp as f64 } else { 0.0 };
+            let waste = ((ratio / 100.0).min(1.0) * 60.0 + (1.0 - cache_ratio) * 40.0).min(100.0);
+            Ok(TokenWaste {
+                provider: r.get(0)?, session_id: r.get(1)?,
+                input_tokens: inp, output_tokens: outp, ratio, requests: reqs,
+                cache_read: cached, waste_score: waste,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows { v.push(r?); }
+        Ok(v)
+    }
+
     // ── 审计：策略规则 + 预算设置 + 消息扫描流（plan codeagent-ops M4/M5）──
 
     /// 列出策略规则。
@@ -2355,6 +2466,44 @@ pub struct AnomalyRow {
     pub agent: String,
     pub detail: String,
     pub severity: String,
+}
+
+/// Agent 健康度（M10）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AgentHealth {
+    pub provider: String,
+    pub total_requests: i64,
+    pub errors: i64,
+    pub completed: i64,
+    pub retries: i64,
+    pub sessions: i64,
+    pub success_rate: f64,
+    pub error_rate: f64,
+    pub retry_rate: f64,
+    pub stability_score: f64,
+}
+
+/// 延迟统计（M11）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct LatencyStat {
+    pub provider: String,
+    pub sample_count: i64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub avg_ms: f64,
+}
+
+/// Token 浪费（M12）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TokenWaste {
+    pub provider: String,
+    pub session_id: String,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub ratio: f64,
+    pub requests: i64,
+    pub cache_read: i64,
+    pub waste_score: f64,
 }
 
 fn parse_status(s: &str) -> Status {

@@ -107,6 +107,38 @@ interface AnomalyRow {
   severity: string;
 }
 
+interface AgentHealth {
+  provider: string;
+  total_requests: number;
+  errors: number;
+  completed: number;
+  retries: number;
+  sessions: number;
+  success_rate: number;
+  error_rate: number;
+  retry_rate: number;
+  stability_score: number;
+}
+
+interface LatencyStat {
+  provider: string;
+  sample_count: number;
+  p50_ms: number;
+  p95_ms: number;
+  avg_ms: number;
+}
+
+interface TokenWaste {
+  provider: string;
+  session_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  ratio: number;
+  requests: number;
+  cache_read: number;
+  waste_score: number;
+}
+
 interface AuditFinding {
   kind: string;
   severity: "low" | "medium" | "high";
@@ -200,6 +232,9 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
   const [dirCosts, setDirCosts] = useState<DirCost[]>([]);
   const [cacheStats, setCacheStats] = useState<CacheStat[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyRow[]>([]);
+  const [health, setHealth] = useState<AgentHealth[]>([]);
+  const [latency, setLatency] = useState<LatencyStat[]>([]);
+  const [waste, setWaste] = useState<TokenWaste[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -229,6 +264,9 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       push(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then(setTimeseries), "timeseries");
       push(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then(setTopTools), "topTools");
       push(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then(setCacheStats), "cache");
+      push(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then(setHealth), "health");
+      push(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then(setLatency), "latency");
+      push(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then(setWaste), "waste");
     } else if (sec === "cost") {
       push(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
       push(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
@@ -564,6 +602,81 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
                 ))}
                 {topTools.length === 0 && !loading && <div className="ops-table-empty">暂无数据</div>}
               </div>
+            </div>
+          </div>
+          )}
+
+          {/* ── M10：Agent 健康度 — 概览 ── */}
+          {section === "overview" && (
+          <div className="ops-card">
+            <div className="ops-card-title">
+              🏥 Agent 健康度
+              <span className="ops-card-sub">稳定性 = 成功率×0.6 - 重试率×0.3 - 错误率×0.1</span>
+            </div>
+            {health.length === 0 ? (
+              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+            ) : (
+              <table className="ops-table">
+                <thead><tr><th>Agent</th><th>请求</th><th>成功率</th><th>错误率</th><th>重试率</th><th>稳定性</th></tr></thead>
+                <tbody>
+                  {health.map((h, i) => (
+                    <tr key={i}>
+                      <td><span className={`badge source ${h.provider}`}>{meta(h.provider).label}</span></td>
+                      <td>{h.total_requests.toLocaleString()}</td>
+                      <td style={{ color: h.success_rate > 95 ? "var(--c-codex)" : h.success_rate > 80 ? "var(--warn)" : "var(--danger)" }}>{h.success_rate.toFixed(1)}%</td>
+                      <td>{h.error_rate.toFixed(1)}%</td>
+                      <td>{h.retry_rate.toFixed(1)}%</td>
+                      <td>
+                        <div className="ops-tool-bar-bg" style={{ width: 50, display: "inline-block", marginRight: 4 }}>
+                          <div className="ops-tool-bar" style={{ width: `${h.stability_score}%`, background: h.stability_score > 80 ? "var(--c-codex)" : h.stability_score > 50 ? "var(--warn)" : "var(--danger)" }} />
+                        </div>
+                        {h.stability_score.toFixed(0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          )}
+
+          {/* ── M11：延迟 — 概览 ── */}
+          {section === "overview" && latency.length > 0 && (
+          <div className="ops-card">
+            <div className="ops-card-title">
+              ⚡ 延迟 P50 / P95
+              <span className="ops-card-sub">模型请求耗时百分位</span>
+            </div>
+            <div className="ops-risky">
+              {latency.map((l, i) => (
+                <div key={i} className="ops-tool-row">
+                  <span className="ops-tool-name">{meta(l.provider).label}</span>
+                  <span className="mono" style={{ fontSize: 11 }}>P50 {formatDuration(l.p50_ms)}</span>
+                  <span className="mono" style={{ fontSize: 11, color: l.p95_ms > 30000 ? "var(--danger)" : "var(--text-muted)" }}>P95 {formatDuration(l.p95_ms)}</span>
+                  <span className="legend-req">{l.sample_count.toLocaleString()} 样本</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          )}
+
+          {/* ── M12：Token 浪费 — 概览 ── */}
+          {section === "overview" && waste.length > 0 && (
+          <div className="ops-card">
+            <div className="ops-card-title">
+              🔥 Token 浪费检测（{waste.length}）
+              <span className="ops-card-sub">in/out &gt; 10× = 上下文累积</span>
+            </div>
+            <div className="ops-risky">
+              {waste.map((w, i) => (
+                <div key={i} className="ops-risky-row">
+                  <span className={`badge source ${w.provider}`}>{meta(w.provider).label}</span>
+                  <span className="mono" style={{ fontSize: 10.5 }}>{w.session_id.slice(0, 16)}…</span>
+                  <span className="risk-flag medium">{w.ratio.toFixed(0)}×</span>
+                  <span className="mono" style={{ fontSize: 10.5 }}>in {formatTokens(w.input_tokens)} / out {formatTokens(w.output_tokens)}</span>
+                  <span className="legend-req">缓存 {formatTokens(w.cache_read)}</span>
+                </div>
+              ))}
             </div>
           </div>
           )}

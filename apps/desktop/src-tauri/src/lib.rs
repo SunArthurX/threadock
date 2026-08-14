@@ -995,6 +995,26 @@ fn ops_anomalies(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<
     repo.ops_anomalies(days).map_err(|e| e.to_string())
 }
 
+// ── M10-M12：健康度 / 延迟 / Token 浪费 ────────────────────────────────
+
+#[tauri::command]
+fn ops_agent_health(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentHealth>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_agent_health(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_latency_stats(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::LatencyStat>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_latency_stats(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_token_waste(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::TokenWaste>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_token_waste(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+}
+
 // ── M5：定价模型 ───────────────────────────────────────────────────────
 
 /// 默认定价（$/M tokens，可被 app_data/pricing.json 覆盖）。
@@ -1155,9 +1175,10 @@ fn auto_sync_inner(
     let mut pending_index: Vec<ch_search::index::IndexableMessage> = Vec::new();
 
     // 一次性加载已导入集合 + 新鲜度表（增量导入：stale 会话也要重导入新消息）
+    type SrcKey = (String, String);
     let (existing, istate): (
-        std::collections::HashSet<(String, String)>,
-        std::collections::HashMap<(String, String), i64>,
+        std::collections::HashSet<SrcKey>,
+        std::collections::HashMap<SrcKey, i64>,
     ) = {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
         let sources = repo.list_conversation_sources().map_err(|e| e.to_string())?;
@@ -1767,6 +1788,9 @@ pub fn run() {
             ops_cost_by_dir,
             ops_cache_stats,
             ops_anomalies,
+            ops_agent_health,
+            ops_latency_stats,
+            ops_token_waste,
             get_conversation_by_source,
             audit_scan,
             audit_export_html,
