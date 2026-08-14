@@ -1035,6 +1035,53 @@ impl Repository {
         Ok(v)
     }
 
+    /// 整源替换用量记录：同一 provider 的口径切换（如 zcode turn→model 级）时，
+    /// 先删后插防止两种口径叠加导致总量翻倍。单事务分块执行。
+    pub fn replace_provider_usage(
+        &self,
+        provider_id: &str,
+        records: &[ch_domain::UsageRecord],
+    ) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let mut n = 0;
+        let mut first = true;
+        for chunk in records.chunks(2000) {
+            let tx = conn.transaction()?;
+            if first {
+                tx.execute("DELETE FROM usage_records WHERE provider_id = ?1", params![provider_id])?;
+                first = false;
+            }
+            for r in chunk {
+                n += tx.execute(
+                    "INSERT OR IGNORE INTO usage_records
+                        (id, provider_id, source_session_id, turn_id, model, ts,
+                         input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
+                         cache_write_tokens, cost_usd, status, duration_ms, retry_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                    params![
+                        r.id,
+                        provider_id,
+                        r.source_session_id,
+                        r.turn_id,
+                        r.model,
+                        timestamp::to_millis(Some(r.ts)).unwrap_or(0),
+                        r.input_tokens,
+                        r.output_tokens,
+                        r.reasoning_tokens,
+                        r.cache_read_tokens,
+                        r.cache_write_tokens,
+                        r.cost_usd,
+                        r.status.as_str(),
+                        r.duration_ms,
+                        r.retry_count,
+                    ],
+                )?;
+            }
+            tx.commit()?;
+        }
+        Ok(n)
+    }
+
     /// 按单价更新该模型每行的 cost_usd（行内 tokens × 单价，行成本可加总）。
     pub fn update_model_pricing(
         &self,

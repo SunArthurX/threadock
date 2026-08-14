@@ -24,7 +24,10 @@ fn main() {
     // 2. 分块入库
     let t = Instant::now();
     let repo = st.repo.lock().unwrap();
-    let n1 = repo.upsert_usage_batch(&u_all).unwrap();
+    let zc_usage: Vec<_> = u_all.iter().filter(|r| r.provider == ch_domain::Provider::ZCode).cloned().collect();
+    let others: Vec<_> = u_all.iter().filter(|r| r.provider != ch_domain::Provider::ZCode).cloned().collect();
+    let nz = repo.replace_provider_usage("prov_zcode", &zc_usage).unwrap();
+    let n1 = repo.upsert_usage_batch(&others).unwrap() + nz;
     let n2 = repo.upsert_tool_call_batch(&t_all).unwrap();
     println!("── 入库: {:?}  usage 新增 {n1} tools 新增 {n2}", t.elapsed());
 

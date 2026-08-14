@@ -587,8 +587,9 @@ fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<ser
         }
 
         // ZCode: turn_usage + tool_usage
+        // ZCode：model_usage 请求级口径，整源替换（与 turn 级互斥，防双算）
         if let Ok((u, t)) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")) {
-            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_zcode", &u).map_err(|e| e.to_string())?;
             tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
         }
         // MiniMax: token_usage

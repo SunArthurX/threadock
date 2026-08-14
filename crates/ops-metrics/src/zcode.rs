@@ -1,12 +1,17 @@
-//! ZCode ops 采集：`turn_usage` + `model_usage` → UsageRecord；
+//! ZCode ops 采集：`model_usage` → UsageRecord（请求级，含模型名/状态/耗时/重试）；
 //! `tool_usage` → ToolCallRecord（原生含 destructive/approval）。
+//!
+//! 注意：model_usage 与 turn_usage 是同一批 tokens 的两种口径
+//! （请求级 vs turn 级汇总），只能二选一入库，否则总量翻倍。
+//! 请求级信息更全（模型明细/错误/耗时/重试），故采用 model_usage，
+//! 配合 repository.replace_provider_usage 做整源替换。
 
 use crate::{ms_to_ts, open_ro, OpsResult};
 use ch_domain::{Provider, ToolCallRecord, UsageRecord, UsageStatus};
 
 use std::path::Path;
 
-/// 采集 ZCode 用量（turn 级）+ 工具调用。
+/// 采集 ZCode 用量（model_usage 请求级）+ 工具调用。
 /// 返回 (usage, tool_calls)。库不存在时返回空（静默）。
 pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
     if !db_path.as_ref().exists() {
@@ -14,33 +19,33 @@ pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, 
     }
     let conn = open_ro(db_path)?;
 
-    // 1. turn_usage → UsageRecord（turn 级汇总）
+    // 1. model_usage → UsageRecord（每次模型请求一条，含模型名/状态/耗时/重试）
     let mut usage = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT session_id, turn_id, started_at, status, duration_ms, model_retry_count,
-                    input_tokens, output_tokens, reasoning_tokens,
+            "SELECT id, session_id, turn_id, model_id, started_at, status, duration_ms,
+                    retry_count, input_tokens, output_tokens, reasoning_tokens,
                     cache_read_input_tokens, cache_creation_input_tokens
-             FROM turn_usage",
+             FROM model_usage",
         )?;
         let rows = stmt.query_map([], |r| {
-            let status: String = r.get(3)?;
+            let status: String = r.get(5)?;
             Ok(UsageRecord {
-                id: format!("zu_{}_{}", r.get::<_, String>(1)?, r.get::<_, i64>(2)?),
+                id: format!("zmu_{}", r.get::<_, String>(0)?),
                 provider: Provider::ZCode,
-                source_session_id: r.get(0)?,
-                turn_id: Some(r.get(1)?),
-                model: None,
-                ts: ms_to_ts(r.get(2)?),
-                input_tokens: r.get(6)?,
-                output_tokens: r.get(7)?,
-                reasoning_tokens: r.get(8)?,
-                cache_read_tokens: r.get(9)?,
-                cache_write_tokens: r.get(10)?,
+                source_session_id: r.get(1)?,
+                turn_id: r.get(2)?,
+                model: r.get(3)?,
+                ts: ms_to_ts(r.get(4)?),
+                input_tokens: r.get(8)?,
+                output_tokens: r.get(9)?,
+                reasoning_tokens: r.get(10)?,
+                cache_read_tokens: r.get(11)?,
+                cache_write_tokens: r.get(12)?,
                 cost_usd: None,
                 status: UsageStatus::parse(&status),
-                duration_ms: Some(r.get(4)?),
-                retry_count: Some(r.get(5)?),
+                duration_ms: r.get(6)?,
+                retry_count: r.get(7)?,
             })
         })?;
         for row in rows {
@@ -97,8 +102,8 @@ mod tests {
         let db = dir.path().join("zc.db");
         let conn = rusqlite::Connection::open(&db).unwrap();
         conn.execute_batch(
-            "CREATE TABLE turn_usage (session_id TEXT, turn_id TEXT, started_at INTEGER,
-                status TEXT, duration_ms INTEGER, model_retry_count INTEGER,
+            "CREATE TABLE model_usage (id TEXT, session_id TEXT, turn_id TEXT, model_id TEXT,
+                started_at INTEGER, status TEXT, duration_ms INTEGER, retry_count INTEGER,
                 input_tokens INTEGER, output_tokens INTEGER, reasoning_tokens INTEGER,
                 cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER);
              CREATE TABLE tool_usage (session_id TEXT, tool_name TEXT, started_at INTEGER,
@@ -107,7 +112,7 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO turn_usage VALUES ('s1','t1',1000000,'completed',5000,0,100,50,10,200,0)",
+            "INSERT INTO model_usage VALUES ('mu1','s1','t1','GLM-5.2',1000000,'completed',5000,0,100,50,10,200,0)",
             [],
         )
         .unwrap();
@@ -120,6 +125,8 @@ mod tests {
 
         let (usage, tools) = collect_zcode(&db).unwrap();
         assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].id, "zmu_mu1");
+        assert_eq!(usage[0].model.as_deref(), Some("GLM-5.2"));
         assert_eq!(usage[0].input_tokens, 100);
         assert_eq!(usage[0].cache_read_tokens, 200);
         assert_eq!(usage[0].billable_tokens(), 160);
