@@ -772,14 +772,20 @@ impl Repository {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
 
-        // provider（幂等）
+        // provider（幂等；adapter_id/adapter_version NOT NULL，与 upsert_provider 同口径）
         let provider_id = format!("prov_{}", conv.provider.as_str());
         let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
         tx.execute(
             "INSERT INTO providers (id, name, adapter_id, adapter_version, created_at, updated_at)
-             VALUES (?1, ?2, NULL, NULL, ?3, ?3)
-             ON CONFLICT(id) DO UPDATE SET updated_at = ?3",
-            params![provider_id, conv.provider.as_str(), now_ms],
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+             ON CONFLICT(id) DO UPDATE SET updated_at = ?5",
+            params![
+                provider_id,
+                conv.provider.as_str(),
+                format!("{}-adapter", conv.provider.as_str()),
+                "0.1.0",
+                now_ms
+            ],
         )?;
 
         // workspace 查找/创建
@@ -2286,6 +2292,24 @@ mod tests {
         r.restore_conversation(&cid).unwrap();
         let conv = r.get_conversation(&cid).unwrap().unwrap();
         assert_eq!(conv.source_status, Status::Active);
+    }
+
+    #[test]
+    fn import_conversation_batch_works_after_clear_all() {
+        // 回归：providers.adapter_id NOT NULL，批量导入曾绑 NULL 导致
+        // 重置后所有导入静默失败（2026-08-14 真实事故）
+        let r = Repository::open_in_memory().unwrap();
+        r.clear_all().unwrap();
+        let conv = ch_domain::Conversation::new(Provider::ZCode, "src-batch-regress");
+        let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
+        let id = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode")).unwrap();
+        let got = r.get_conversation(&id).unwrap().unwrap();
+        assert_eq!(got.source_conversation_id, "src-batch-regress");
+        assert_eq!(r.list_messages(&id).unwrap().len(), 1);
+        // 幂等重放
+        let id2 = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode")).unwrap();
+        assert_eq!(id, id2);
+        assert_eq!(r.list_messages(&id).unwrap().len(), 1, "重放不产生重复消息");
     }
 
     #[test]

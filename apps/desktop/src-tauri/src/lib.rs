@@ -156,6 +156,8 @@ fn reset_all_data(state: tauri::State<DaemonState>) -> Result<(), String> {
         return Err("重置中，请稍候…".into());
     }
     let result = state.wipe_all().map_err(|e| e.to_string());
+    // 重置后 ops 节流标记必须清零，否则治理页 5 分钟内拿不到新数据
+    LAST_OPS_SYNC_MS.store(0, std::sync::atomic::Ordering::SeqCst);
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
     result
 }
@@ -890,9 +892,12 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_zcode::parse_session(&zcode_db, &s.session_id) {
                         Ok(raw) => {
-                            if let Ok(o) = import_raw_inner(state, raw, Some("ZCode")) {
-                                pending_index.extend(o.indexable);
-                                zcode_ok += 1;
+                            match import_raw_inner(state, raw, Some("ZCode")) {
+                                Ok(o) => {
+                                    pending_index.extend(o.indexable);
+                                    zcode_ok += 1;
+                                }
+                                Err(e) => tracing::warn!(session = %s.session_id, error = %e, "zcode import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "zcode parse failed"),
@@ -916,9 +921,12 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_claude_code::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if let Ok(o) = import_raw_inner(state, raw, Some("Claude Code")) {
-                                pending_index.extend(o.indexable);
-                                cc_ok += 1;
+                            match import_raw_inner(state, raw, Some("Claude Code")) {
+                                Ok(o) => {
+                                    pending_index.extend(o.indexable);
+                                    cc_ok += 1;
+                                }
+                                Err(e) => tracing::warn!(session = %s.session_id, error = %e, "cc import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "cc parse failed"),
@@ -942,9 +950,12 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_cursor::parse_session(&cursor_db, &s.session_id) {
                         Ok(raw) => {
-                            if let Ok(o) = import_raw_inner(state, raw, Some("Cursor")) {
-                                pending_index.extend(o.indexable);
-                                cursor_ok += 1;
+                            match import_raw_inner(state, raw, Some("Cursor")) {
+                                Ok(o) => {
+                                    pending_index.extend(o.indexable);
+                                    cursor_ok += 1;
+                                }
+                                Err(e) => tracing::warn!(session = %s.session_id, error = %e, "cursor import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "cursor parse failed"),
@@ -973,9 +984,12 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_minimax::parse_session(&mm_db, &s.session_id) {
                         Ok(raw) => {
-                            if let Ok(o) = import_raw_inner(state, raw, Some("MiniMax Code")) {
-                                pending_index.extend(o.indexable);
-                                mm_ok += 1;
+                            match import_raw_inner(state, raw, Some("MiniMax Code")) {
+                                Ok(o) => {
+                                    pending_index.extend(o.indexable);
+                                    mm_ok += 1;
+                                }
+                                Err(e) => tracing::warn!(session = %s.session_id, error = %e, "mm import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "mm parse failed"),
@@ -999,9 +1013,12 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_codex::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if let Ok(o) = import_raw_inner(state, raw, Some("Codex")) {
-                                pending_index.extend(o.indexable);
-                                codex_ok += 1;
+                            match import_raw_inner(state, raw, Some("Codex")) {
+                                Ok(o) => {
+                                    pending_index.extend(o.indexable);
+                                    codex_ok += 1;
+                                }
+                                Err(e) => tracing::warn!(session = %s.session_id, error = %e, "codex import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "codex parse failed"),
@@ -1322,6 +1339,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // 日志：导入失败等 warn 输出到 stderr（此前静默，事故排查困难）
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::INFO)
+                .with_target(false)
+                .init();
+
             // 数据库放在 app data 目录（plan §9.6 布局）
             let data_dir = app
                 .path()

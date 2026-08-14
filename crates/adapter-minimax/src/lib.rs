@@ -81,7 +81,7 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
 /// updated_at 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
 pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
-    // 只选 parentSessionId 为 null 的主任务；过滤 runtime 内部隐藏/归档残留
+    // 只选 parentSessionId 为 null 且有标题的主任务（过滤 runtime 无标题残根）
     let mut stmt = conn.prepare(
         "SELECT s.session_id, s.record_json, s.updated_at_ms,
                 (SELECT count(*) FROM local_runtime_message_rows m WHERE m.session_id = s.session_id) AS msg_count,
@@ -91,8 +91,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
                  WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id) AS max_child_updated
          FROM local_runtime_sessions s
          WHERE json_extract(s.record_json, '$.parentSessionId') IS NULL
-           AND json_extract(s.record_json, '$.visibility') IS NOT 'hidden'
-           AND json_extract(s.record_json, '$.archived') IS NOT 1
+           AND json_extract(s.record_json, '$.title') IS NOT NULL
          ORDER BY max_child_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -145,7 +144,8 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
 
 /// 列出 MiniMax **所有**会话（主任务 + 子任务），按更新时间降序。
 /// 用于 auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID）。
-/// 过滤 runtime 内部隐藏/归档残留（visibility=hidden / archived=1 的无标题空会话）。
+/// 过滤 runtime 内部残留：MiniMax 的子任务 visibility=hidden 是正常形态（保留），
+/// 仅排除 record_json 无 title 字段的空残根（__local_runtime_v2__ 生成）。
 pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn.prepare(
@@ -158,8 +158,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                 s.updated_at_ms AS effective_updated,
                 json_extract(s.record_json, '$.parentSessionId') AS parent
          FROM local_runtime_sessions s
-         WHERE json_extract(s.record_json, '$.visibility') IS NOT 'hidden'
-           AND json_extract(s.record_json, '$.archived') IS NOT 1
+         WHERE json_extract(s.record_json, '$.title') IS NOT NULL
          ORDER BY effective_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -422,6 +421,29 @@ mod tests {
         assert_eq!(sessions[0].title, "测试会话");
         assert_eq!(sessions[0].agent_name, "coder");
         assert_eq!(sessions[0].message_count, 2);
+    }
+
+    #[test]
+    fn discover_keeps_hidden_titled_drops_untitled_stubs() {
+        // MiniMax 子任务 visibility=hidden 是正常形态（有标题，保留）；
+        // 仅排除无 title 的 runtime 残根（__local_runtime_v2__）
+        let dir = tempfile::TempDir::new().unwrap();
+        let db = dir.path().join("h.db");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+             CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
+        ).unwrap();
+        // 有标题的隐藏子任务 → 保留
+        conn.execute("INSERT INTO local_runtime_sessions VALUES ('c1', '{\"sessionId\":\"c1\",\"title\":\"真实子任务\",\"parentSessionId\":\"p1\",\"visibility\":\"hidden\"}', 1000)", []).unwrap();
+        // 无标题残根 → 排除
+        conn.execute("INSERT INTO local_runtime_sessions VALUES ('s1', '{\"sessionId\":\"s1\",\"parentSessionId\":null,\"visibility\":\"hidden\",\"archived\":true}', 2000)", []).unwrap();
+        drop(conn);
+
+        let all = discover_all_sessions(&db).unwrap();
+        assert!(all.iter().any(|s| s.session_id == "c1"), "隐藏但有标题的子任务应保留");
+        assert!(!all.iter().any(|s| s.session_id == "s1"), "无标题残根应排除");
+        assert_eq!(all[0].parent_session_id.as_deref(), Some("p1"));
     }
 
     #[test]
