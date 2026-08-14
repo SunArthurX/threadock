@@ -179,6 +179,15 @@ threadock/
 | Raw + Normalized 双存储 | ✅ |
 | 第三方只读 | ✅ |
 
+
+## 测试
+
+```bash
+lsof -nP -i :1420 -sTCP:LISTEN -t | xargs kill -9
+cd apps/desktop
+npx tauri dev
+```
+
 ## License
 
 MIT OR Apache-2.0

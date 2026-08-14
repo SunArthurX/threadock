@@ -98,6 +98,9 @@ const COLLAPSE_THRESHOLD = 600;
 
 export default function App() {
   const [loading, setLoading] = useState(true);
+  const [theme, setTheme] = useState<"dark" | "light">(() =>
+    (localStorage.getItem("ch-theme") as "dark" | "light") || "dark"
+  );
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
@@ -170,6 +173,12 @@ export default function App() {
     }
     setSyncing(false);
   };
+
+  // 主题应用与持久化
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("ch-theme", theme);
+  }, [theme]);
 
   // 首次加载：先展示已有数据，再后台同步
   useEffect(() => {
@@ -693,7 +702,7 @@ export default function App() {
           <button onClick={doSearch}>搜索</button>
           {searchResults && <button onClick={clearSearch}>清除</button>}
         </div>
-        <button onClick={importHandler}>＋ 文件</button>
+        <button onClick={importHandler} title="导入 Markdown/JSONL 文件">＋ 文件</button>
         <button onClick={() => loadSourceSessions("zcode")}>ZCode</button>
         <button onClick={() => loadSourceSessions("claude-code")}>Claude Code</button>
         <button onClick={() => loadSourceSessions("cursor")}>Cursor</button>
@@ -705,6 +714,13 @@ export default function App() {
           title="删除所有数据并重新加载"
         >
           {resetting ? "重置中…" : "↻ 重置"}
+        </button>
+        <button
+          className="theme-toggle"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          title={theme === "dark" ? "切换到浅色" : "切换到深色"}
+        >
+          {theme === "dark" ? "☀" : "☾"}
         </button>
       </div>
 
@@ -780,9 +796,11 @@ export default function App() {
                 className={`list-item ${selectedWs === ws.id ? "active" : ""}`}
                 onClick={() => selectWorkspace(ws.id)}
               >
-                <div className="title">{sourceLabel(provider)}</div>
+                <div className="title">
+                  <span className={`ws-dot ${provider}`} />
+                  {sourceLabel(provider)}
+                </div>
                 <div className="meta">
-                  <span className={`badge source ${provider}`}>{sourceLabel(provider)}</span>
                   <span className="ws-time">{formatDate(ws.updated_at_ms)}</span>
                 </div>
               </div>
@@ -901,7 +919,12 @@ export default function App() {
                   className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""}`}
                 >
                   <div className="role">
-                    {m.role}
+                    <span className={`avatar ${m.role}`}>
+                      {m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}
+                    </span>
+                    <span className="role-label">
+                      {m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : m.role}
+                    </span>
                     {m.created_at_ms && (
                       <span className="msg-time">{formatTime(m.created_at_ms)}</span>
                     )}
