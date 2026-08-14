@@ -192,8 +192,8 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                         if text.is_empty() {
                             continue;
                         }
-                        // 过滤环境注入的用户指令（AGENTS.md 注入等）
-                        if role == Role::User && text.starts_with("# AGENTS.md") {
+                        // 过滤 Codex 注入的环境/系统块（非真实用户输入）
+                        if role == Role::User && is_injected_context(&text) {
                             continue;
                         }
                         messages.push(RawMessage {
@@ -241,10 +241,11 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
         return Err(CodexError::Empty(session_id));
     }
 
-    // 标题：首条用户消息前 60 字
+    // 标题：首条真实用户消息（注入块已过滤），回退到首条助手消息
     let title = messages
         .iter()
         .find(|m| m.role == Role::User)
+        .or_else(|| messages.iter().find(|m| m.role == Role::Assistant))
         .and_then(|m| m.text.as_deref())
         .map(|t| {
             let t = t.trim();
@@ -265,6 +266,27 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
         events,
         source_parent_id: None,
     })
+}
+
+/// Codex 注入块判定：环境上下文 / 系统指令 / 插件推荐等 XML 标签开头，或 AGENTS.md。
+/// 这些是 runtime 注入而非用户真实输入，不应入库为消息或用作标题。
+fn is_injected_context(text: &str) -> bool {
+    let t = text.trim_start();
+    if t.starts_with("# AGENTS.md") || t.starts_with("# Systems") {
+        return true;
+    }
+    const INJECTED_TAGS: &[&str] = &[
+        "<environment_context>",
+        "<user_instructions>",
+        "<recommended_plugins>",
+        "<turn_context>",
+        "<turn_aborted>",
+        "<runtime_credentials>",
+        "<IDE_INFORMATION>",
+        "<system-reminder>",
+        "<ENVIRONMENT",
+    ];
+    INJECTED_TAGS.iter().any(|tag| t.starts_with(tag))
 }
 
 /// 解析 ISO 8601 时间戳。
@@ -333,5 +355,27 @@ mod tests {
         let sessions = discover_sessions(dir.path()).unwrap();
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "a1");
+    }
+
+    #[test]
+    fn filters_xml_injection_blocks_and_title_fallback() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let f = dir.path().join("rollout-inject.jsonl");
+        let lines = [
+            r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"inj1"}}"#,
+            // 各种注入块：全应被过滤
+            r##"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/Users/x/proj</cwd>\n</environment_context>"}]}}"##,
+            r##"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\nHere is a list of plugins"}]}}"##,
+            r##"{"timestamp":"2026-08-01T10:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>\nsome rules"}]}}"##,
+            // 真实对话
+            r##"{"timestamp":"2026-08-01T10:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"好的，我先分析项目结构。"}]}}"##,
+        ];
+        std::fs::write(&f, lines.join("\n")).unwrap();
+
+        let raw = parse_session(&f).unwrap();
+        assert_eq!(raw.messages.len(), 1, "三种注入块全被过滤");
+        assert_eq!(raw.messages[0].role, Role::Assistant);
+        // 无真实用户消息 → 标题回退到助手消息
+        assert_eq!(raw.title.as_deref(), Some("好的，我先分析项目结构。"));
     }
 }

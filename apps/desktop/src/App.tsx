@@ -98,7 +98,10 @@ const COLLAPSE_THRESHOLD = 600;
 // ── 组件 ────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [loading, setLoading] = useState(true);
+  // 面板级加载态：不阻塞整个应用，各区域独立显示加载中
+  const [wsLoading, setWsLoading] = useState(true);
+  const [convsLoading, setConvsLoading] = useState(false);
+  const [msgsLoading, setMsgsLoading] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(() =>
     (localStorage.getItem("ch-theme") as "dark" | "light") || "dark"
   );
@@ -138,12 +141,14 @@ export default function App() {
 
   // 加载 workspace 列表
   const loadWorkspaces = async () => {
+    setWsLoading(true);
     try {
       const ws = await invoke<Workspace[]>("list_workspaces");
       setWorkspaces(ws);
     } catch (e) {
       showError(e);
     }
+    setWsLoading(false);
   };
 
   // 自动同步（silent=true 时不阻塞，后台定时同步用）
@@ -190,13 +195,10 @@ export default function App() {
     localStorage.setItem("ch-view", view);
   }, [view]);
 
-  // 首次加载：先展示已有数据，再后台同步
+  // 首次加载：界面立即可用，各面板独立加载，同步完全后台
   useEffect(() => {
-    (async () => {
-      await loadWorkspaces();
-      setLoading(false);
-      autoSync();
-    })();
+    loadWorkspaces();
+    autoSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -211,7 +213,7 @@ export default function App() {
 
   // provider 筛选变化时重新加载当前 workspace 的会话
   useEffect(() => {
-    if (selectedWs && !loading) {
+    if (selectedWs) {
       selectWorkspace(selectedWs);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,6 +243,7 @@ export default function App() {
     setSearchResults(null);
     setExpandedParents(new Set());
     setChildConvs({});
+    setConvsLoading(true);
     try {
       const convs = await invoke<Conversation[]>("list_conversations", {
         workspaceId: id,
@@ -257,6 +260,7 @@ export default function App() {
     } catch (e) {
       showError(e);
     }
+    setConvsLoading(false);
   };
 
   // 选择会话 → 加载详情
@@ -264,6 +268,7 @@ export default function App() {
     setSelectedConv(c);
     setHighlightMsgId(highlightId ?? null);
     setCollapsedMsgs(new Set());
+    setMsgsLoading(true);
     try {
       const detail = await invoke<ConversationDetailDto>("get_conversation_detail", {
         conversationId: c.id,
@@ -283,6 +288,7 @@ export default function App() {
     } catch (e) {
       showError(e);
     }
+    setMsgsLoading(false);
   };
 
   // 展开/折叠主任务的子任务列表
@@ -704,13 +710,6 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* 首次加载覆盖层 */}
-      {loading && (
-        <div className="loading-overlay">
-          <div className="spinner" />
-          <div className="loading-text">加载数据中…</div>
-        </div>
-      )}
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} (点击关闭)
@@ -844,7 +843,13 @@ export default function App() {
         {/* 左栏：Workspaces（按来源归组）*/}
         <div className="panel">
           <div className="panel-header">来源 ({workspaces.length})</div>
-          {workspaces.map((ws) => {
+          {wsLoading && (
+            <div className="panel-loading">
+              <div className="spinner spinner-sm" />
+              <span>加载来源…</span>
+            </div>
+          )}
+          {!wsLoading && workspaces.map((ws) => {
             const name = ws.user_title ?? ws.display_name;
             const provider = wsNameToProvider(name);
             return (
@@ -863,7 +868,7 @@ export default function App() {
               </div>
             );
           })}
-          {workspaces.length === 0 && <div className="empty">暂无来源</div>}
+          {!wsLoading && workspaces.length === 0 && <div className="empty">暂无来源</div>}
         </div>
 
         {/* 中栏：搜索结果 或 会话列表 */}
@@ -926,8 +931,14 @@ export default function App() {
                   </button>
                 ))}
               </div>
-              {conversations.map((c) => renderConvItem(c))}
-              {conversations.length === 0 && (
+              {convsLoading && (
+                <div className="panel-loading">
+                  <div className="spinner spinner-sm" />
+                  <span>加载会话…</span>
+                </div>
+              )}
+              {!convsLoading && conversations.map((c) => renderConvItem(c))}
+              {!convsLoading && conversations.length === 0 && (
                 <div className="empty">{selectedWs ? "该项目下暂无会话" : "选择左侧项目"}</div>
               )}
             </>
@@ -969,6 +980,12 @@ export default function App() {
                   ⤓ JSON
                 </button>
               </div>
+              {msgsLoading && (
+                <div className="panel-loading">
+                  <div className="spinner spinner-sm" />
+                  <span>加载对话内容…</span>
+                </div>
+              )}
               {messages.map((m) => (
                 <div
                   key={m.id}

@@ -1016,8 +1016,10 @@ fn auto_sync_inner(
         "codex_imported": codex_ok,
         "codex_skipped": codex_skip,
     }))
+}
 
 /// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
+/// 性能：单事务批量写入（每会话一次 fsync），大幅降低主锁占用 → UI 不卡。
 fn import_raw_to_state(
     state: &DaemonState,
     raw: RawConversation,
@@ -1030,37 +1032,25 @@ fn import_raw_to_state(
     drop(raw_store);
 
     let normalized = normalize(raw).map_err(|e| e.to_string())?;
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.upsert_provider(provider).map_err(|e| e.to_string())?;
 
-    let workspace_id = workspace_name.map(|name| {
-        if let Ok(Some(existing)) = repo.find_workspace_by_name(name) {
-            existing.id
-        } else {
-            let ws = Workspace::new(name);
-            repo.upsert_workspace(&ws).unwrap_or_default()
-        }
-    });
-
+    // 挂 raw_payload + 单事务入库
     let mut conv = normalized.conversation.clone();
-    conv.workspace_id = workspace_id.clone();
     conv.raw_payload_id = Some(raw_payload.hash);
-    let conversation_id = repo.upsert_conversation(&conv).map_err(|e| e.to_string())?;
-    for m in &normalized.messages {
-        let mut m = m.clone();
-        m.conversation_id = conversation_id.clone();
-        repo.upsert_message(&m).map_err(|e| e.to_string())?;
-    }
-    for e in &normalized.events {
-        let mut e = e.clone();
-        e.conversation_id = conversation_id.clone();
-        repo.upsert_event(&e).map_err(|e| e.to_string())?;
-    }
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let conversation_id = repo
+        .import_conversation_batch(
+            &conv,
+            &normalized.messages,
+            &normalized.events,
+            workspace_name,
+        )
+        .map_err(|e| e.to_string())?;
+    let workspace_id = conv.workspace_id.clone();
     let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
     let conv_title = conv.effective_title().to_string();
     drop(repo);
 
-    // Tantivy 索引
+    // Tantivy 索引（锁外执行）
     let idx = state.search_index.lock().map_err(|e| e.to_string())?;
     let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
     for m in &messages {

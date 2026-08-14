@@ -1871,3 +1871,20 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* 面板内加载态（不阻塞操作） */
+.panel-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 18px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.spinner-sm {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+  flex-shrink: 0;
+}

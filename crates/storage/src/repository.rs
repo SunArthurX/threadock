@@ -756,6 +756,186 @@ impl Repository {
         Ok(v)
     }
 
+    /// 单事务批量导入一条会话（会话 + 全部消息 + 事件）。
+    ///
+    /// 性能关键路径：逐条 upsert 每次独立提交（WAL + synchronous=FULL 下
+    /// 每条一次 fsync），大批量导入会拖垮主锁 → UI 卡顿。这里整会话一个事务，
+    /// 只在提交时 fsync 一次，快 1-2 个数量级。
+    /// workspace_name 非空时按名查找/创建并挂到会话上。
+    pub fn import_conversation_batch(
+        &self,
+        conv: &Conversation,
+        messages: &[Message],
+        events: &[Event],
+        workspace_name: Option<&str>,
+    ) -> StorageResult<String> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        // provider（幂等）
+        let provider_id = format!("prov_{}", conv.provider.as_str());
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        tx.execute(
+            "INSERT INTO providers (id, name, adapter_id, adapter_version, created_at, updated_at)
+             VALUES (?1, ?2, NULL, NULL, ?3, ?3)
+             ON CONFLICT(id) DO UPDATE SET updated_at = ?3",
+            params![provider_id, conv.provider.as_str(), now_ms],
+        )?;
+
+        // workspace 查找/创建
+        let workspace_id: Option<String> = workspace_name.map(|name| {
+            tx.query_row(
+                "SELECT id FROM workspaces WHERE display_name = ?1 AND status = 'active'
+                 ORDER BY created_at ASC LIMIT 1",
+                params![name],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| {
+                let ws = Workspace::new(name);
+                let ws_id = ws.id.clone();
+                let ws_now = timestamp::to_millis(Some(ws.created_at)).unwrap_or(0);
+                let _ = tx.execute(
+                    "INSERT OR IGNORE INTO workspaces
+                        (id, display_name, user_title, canonical_path, git_remote, git_common_dir,
+                         status, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                    params![
+                        ws.id,
+                        ws.display_name,
+                        ws.user_title,
+                        ws.canonical_path,
+                        ws.git_remote,
+                        ws.git_common_dir,
+                        ws.status.as_str(),
+                        ws_now,
+                    ],
+                );
+                ws_id
+            })
+        });
+
+        // 会话幂等查找 + upsert（与 upsert_conversation 同口径）
+        let existing: Option<String> = tx
+            .query_row(
+                "SELECT id FROM conversations
+                 WHERE provider_id = ?1
+                   AND COALESCE(installation_id, '') = COALESCE(?2, '')
+                   AND source_conversation_id = ?3",
+                params![provider_id, conv.installation_id, conv.source_conversation_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let id = existing.unwrap_or_else(|| conv.id.clone());
+
+        tx.execute(
+            "INSERT INTO conversations
+                (id, workspace_id, provider_id, installation_id, source_conversation_id,
+                 title, user_title, status, model, started_at, updated_at, completed_at,
+                 source_status, source_url, completeness_score, content_hash, raw_payload_id,
+                 source_parent_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+             ON CONFLICT(id) DO UPDATE SET
+                workspace_id = ?2, title = ?6, status = ?8, model = ?9,
+                started_at = ?10, updated_at = ?11, completed_at = ?12,
+                source_status = ?13, source_url = ?14, completeness_score = ?15,
+                content_hash = ?16, raw_payload_id = ?17, source_parent_id = ?18",
+            params![
+                id,
+                workspace_id,
+                provider_id,
+                conv.installation_id,
+                conv.source_conversation_id,
+                conv.title,
+                conv.user_title,
+                conv.status.map(|s| s.as_str()),
+                conv.model,
+                timestamp::to_millis(conv.started_at),
+                timestamp::to_millis(conv.updated_at),
+                timestamp::to_millis(conv.completed_at),
+                conv.source_status.as_str(),
+                conv.source_url,
+                conv.completeness_score,
+                conv.content_hash,
+                conv.raw_payload_id,
+                conv.source_parent_id,
+            ],
+        )?;
+
+        // 消息（幂等：conversation_id + sequence，与 upsert_message 同列集）
+        for m in messages {
+            let existing_msg: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM messages WHERE conversation_id = ?1 AND sequence_number = ?2",
+                    params![id, m.sequence_number],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let msg_id = existing_msg.unwrap_or_else(|| m.id.clone());
+            tx.execute(
+                "INSERT INTO messages
+                    (id, conversation_id, turn_id, source_message_id, role, content_text,
+                     content_json, sequence_number, created_at, content_hash, raw_payload_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                 ON CONFLICT(id) DO UPDATE SET
+                    turn_id = ?3, source_message_id = ?4, role = ?5, content_text = ?6,
+                    content_json = ?7, created_at = ?9, content_hash = ?10, raw_payload_id = ?11",
+                params![
+                    msg_id,
+                    id,
+                    m.turn_id,
+                    m.source_message_id,
+                    m.role.as_str(),
+                    m.content_text,
+                    m.content_json.as_ref().map(|v| v.to_string()),
+                    m.sequence_number,
+                    timestamp::to_millis(m.created_at),
+                    m.content_hash,
+                    m.raw_payload_id,
+                ],
+            )?;
+        }
+        // 事件（幂等：conversation_id + sequence）
+        for e in events {
+            let existing_ev: Option<String> = tx
+                .query_row(
+                    "SELECT id FROM events WHERE conversation_id = ?1 AND sequence_number = ?2",
+                    params![id, e.sequence_number],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let ev_id = existing_ev.unwrap_or_else(|| e.id.clone());
+            tx.execute(
+                "INSERT INTO events
+                    (id, conversation_id, turn_id, source_event_id, event_type, status, summary,
+                     payload_json, sequence_number, created_at, completed_at, raw_payload_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                 ON CONFLICT(id) DO UPDATE SET
+                    turn_id = ?3, source_event_id = ?4, event_type = ?5, status = ?6, summary = ?7,
+                    payload_json = ?8, created_at = ?10, completed_at = ?11, raw_payload_id = ?12",
+                params![
+                    ev_id,
+                    id,
+                    e.turn_id,
+                    e.source_event_id,
+                    e.event_type.as_str(),
+                    e.status.map(|s| s.as_str()),
+                    e.summary,
+                    e.payload_json.as_ref().map(|v| v.to_string()),
+                    e.sequence_number,
+                    timestamp::to_millis(e.created_at),
+                    timestamp::to_millis(e.completed_at),
+                    e.raw_payload_id,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(id)
+    }
+
     /// 修复旧数据的主子链路：当来源侧有 parent 而库内为 NULL/不一致时更新。
     /// 返回是否实际更新。用于 auto_sync 对已存在会话补 source_parent_id。
     pub fn repair_conversation_parent(
