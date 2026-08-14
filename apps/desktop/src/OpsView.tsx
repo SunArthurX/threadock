@@ -270,13 +270,13 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
     }
   };
 
-  // 进入 tab：立即加载该区已有数据，后台节流同步后刷新
+  // 进入 tab：立即加载已有数据；同步完全 fire-and-forget（永不阻塞渲染）
   useEffect(() => {
+    const tasks: Promise<void>[] = [loadSection(section)];
+    if (section === "cost") tasks.push(loadBudget());
+    if (section === "security") tasks.push(loadPolicies());
+    // 同步走后台，完成后再刷新（不 await，不等它）
     (async () => {
-      const tasks: Promise<void>[] = [loadSection(section)];
-      if (section === "cost") tasks.push(loadBudget());
-      if (section === "security") tasks.push(loadPolicies());
-      await Promise.all(tasks);
       setSyncing(true);
       try {
         await invoke("ops_sync", { force: false });
@@ -284,12 +284,11 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
           invoke("assets_sync", { force: false }).catch(() => {}),
           invoke("automations_sync", { force: false }).catch(() => {}),
         ]);
-        await loadSection(section);
-        if (section === "cost") await loadBudget();
-      } catch {
-        /* 正在同步中时静默跳过 */
-      }
+      } catch { }
       setSyncing(false);
+      // 同步完成后刷新数据（此时 skeleton 已被初始数据替换，仅刷新值）
+      loadSection(section);
+      if (section === "cost") loadBudget();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
@@ -629,19 +628,33 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
               <span className="ops-card-sub">skills / plugins / 内置技能 · 红框含危险模式</span>
             </div>
             {assets.length === 0 ? (
-              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据（首次进入后台同步中）</div>
+              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据（后台同步中）</div>
             ) : (
-              <div className="assets-grid">
-                {assets.map((a, i) => (
-                  <div key={i} className={`asset-item ${a.risky_hits > 0 ? "risky" : ""}`}>
-                    <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
-                    <span className="asset-kind">{a.kind === "builtin_skill" ? "内置" : a.kind}</span>
-                    <span className="asset-name mono" title={a.path ?? ""}>{a.name}</span>
-                    {a.version && <span className="asset-ver mono">v{a.version}</span>}
-                    {a.risky_hits > 0 && <span className="risk-flag high">⚠ {a.risky_hits}</span>}
+              Object.entries(
+                assets.reduce<Record<string, AssetRow[]>>((g, a) => {
+                  (g[a.provider] = g[a.provider] || []).push(a);
+                  return g;
+                }, {})
+              ).map(([prov, items]) => (
+                <div key={prov} className="asset-group">
+                  <div className="asset-group-header">
+                    <span className={`badge source ${prov}`}>{meta(prov).label}</span>
+                    <span className="asset-group-count">{items.length} 项</span>
                   </div>
-                ))}
-              </div>
+                  <div className="assets-grid">
+                    {items.map((a, i) => (
+                      <div key={i} className={`asset-item kind-${a.kind} ${a.risky_hits > 0 ? "risky" : ""}`}>
+                        <span className={`asset-kind-chip kind-${a.kind}`}>
+                          {a.kind === "builtin_skill" ? "内置" : a.kind === "plugin" ? "插件" : a.kind === "mcp" ? "MCP" : "技能"}
+                        </span>
+                        <span className="asset-name mono" title={a.path ?? ""}>{a.name}</span>
+                        {a.version && <span className="asset-ver mono">v{a.version}</span>}
+                        {a.risky_hits > 0 && <span className="risk-flag high">⚠ {a.risky_hits}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))
             )}
           </div>
           )}
@@ -655,20 +668,37 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
             </div>
             {automations.length === 0 ? (
               loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
-            ) : (
-              <div className="ops-risky">
-                {automations.map((a, i) => (
-                  <div key={i} className="ops-risky-row">
-                    <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
-                    <span className="asset-name mono">{a.name}</span>
-                    <span className="policy-kind">{a.kind}</span>
-                    {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
-                    {a.status && <span className={`risk-flag ${a.status.includes("completed") || a.status.includes("trusted") || a.status.includes("configured") ? "low" : "medium"}`}>{a.status}</span>}
-                    <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
+            ) : (() => {
+              const isDone = (s: string | null) =>
+                s?.includes("completed") || s?.includes("finished") || s?.includes("idle");
+              const active = automations.filter((a) => !isDone(a.status));
+              const done = automations.filter((a) => isDone(a.status));
+              const row = (a: AutomationRow, i: number) => (
+                <div key={i} className="ops-risky-row">
+                  <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
+                  <span className="asset-name mono">{a.name}</span>
+                  <span className="policy-kind">{a.kind}</span>
+                  {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
+                  {a.status && <span className={`risk-flag ${isDone(a.status) ? "low" : "medium"}`}>{a.status}</span>}
+                  <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
+                </div>
+              );
+              return (
+                <>
+                  <div className="ops-risky">
+                    {active.length > 0 && <div className="automation-sub">进行中（{active.length}）</div>}
+                    {active.map(row)}
+                    {active.length === 0 && done.length === 0 && <div className="ops-table-empty">无任务</div>}
                   </div>
-                ))}
-              </div>
-            )}
+                  {done.length > 0 && (
+                    <details className="automation-done">
+                      <summary>已完成的任务（{done.length}）</summary>
+                      <div className="ops-risky">{done.map(row)}</div>
+                    </details>
+                  )}
+                </>
+              );
+            })()}
           </div>
           )}
 

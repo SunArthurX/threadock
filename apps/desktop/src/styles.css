@@ -2135,3 +2135,164 @@ button {
   min-width: 0;
 }
 .asset-ver { font-size: 10px; color: var(--text-faint); }
+
+/* ═══ 左侧可收起导航栏 ═══ */
+.app {
+  display: flex;
+  flex-direction: row;
+}
+
+.sidebar {
+  width: 160px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+  flex-shrink: 0;
+  transition: width 200ms ease;
+  overflow: hidden;
+  z-index: 10;
+}
+
+.sidebar-collapsed .sidebar {
+  width: 48px;
+}
+
+.sidebar-toggle {
+  align-self: flex-end;
+  margin: 4px 8px 12px;
+  padding: 4px 8px;
+  font-size: 14px;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.sidebar-collapsed .sidebar-toggle {
+  align-self: center;
+  margin: 4px 4px 12px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+  font-weight: 520;
+  color: var(--text-muted);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  background: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  width: 100%;
+  text-align: left;
+}
+
+.nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.nav-item.active {
+  color: var(--text-primary);
+  background: var(--accent-bg);
+  border-left-color: var(--accent);
+  font-weight: 620;
+}
+
+.nav-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ═══ 资产分组 + 类型颜色 + 自动化折叠 ═══ */
+.asset-group {
+  margin-bottom: 14px;
+}
+.asset-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.asset-group-count {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 4px 8px;
+}
+
+.asset-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9.5px;
+  font-weight: 650;
+  padding: 1px 8px;
+  border-radius: 99px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.asset-kind-chip.kind-skill { background: rgba(77, 163, 255, 0.13); color: #4da3ff; }
+.asset-kind-chip.kind-builtin_skill { background: rgba(167, 139, 250, 0.13); color: #a78bfa; }
+.asset-kind-chip.kind-plugin { background: rgba(61, 219, 160, 0.13); color: #3ddba0; }
+.asset-kind-chip.kind-mcp { background: rgba(244, 120, 180, 0.13); color: #f478b4; }
+
+.automation-sub {
+  font-size: 11px;
+  font-weight: 620;
+  color: var(--text-muted);
+  padding: 6px 0 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.automation-done {
+  margin-top: 8px;
+  border-top: 1px dashed var(--border-default);
+  padding-top: 8px;
+}
+.automation-done summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 0;
+  user-select: none;
+}
+.automation-done summary:hover {
+  color: var(--text-primary);
+}

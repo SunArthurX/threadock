@@ -1154,13 +1154,39 @@ fn auto_sync_inner(
     // 全部导入完成后一次性提交索引（单 writer 单 commit，性能关键路径）
     let mut pending_index: Vec<ch_search::index::IndexableMessage> = Vec::new();
 
-    // 一次性加载已导入 (provider_id, source_id) 集合：幂等快速检查
-    let existing: std::collections::HashSet<(String, String)> = {
+    // 一次性加载已导入集合 + 新鲜度表（增量导入：stale 会话也要重导入新消息）
+    let (existing, istate): (
+        std::collections::HashSet<(String, String)>,
+        std::collections::HashMap<(String, String), i64>,
+    ) = {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
-        repo.list_conversation_sources()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .collect()
+        let sources = repo.list_conversation_sources().map_err(|e| e.to_string())?;
+        let mut set = std::collections::HashSet::new();
+        let mut state_map = std::collections::HashMap::new();
+        for (pid, sid) in sources {
+            set.insert((pid.clone(), sid.clone()));
+            state_map.insert((pid, sid), 0); // 默认 0 = 未知，视为 stale
+        }
+        // 覆盖已知 observed_ms
+        for pid in ["prov_zcode", "prov_claude-code", "prov_cursor", "prov_minimax-code", "prov_codex"] {
+            if let Ok(m) = repo.import_state_map(pid) {
+                for (sid, obs) in m {
+                    if let Some(v) = obs {
+                        state_map.insert((pid.to_string(), sid), v);
+                    }
+                }
+            }
+        }
+        (set, state_map)
+    };
+
+
+    // stale = 源更新时间 > 导入时观察时间 → 有新消息，需重导入（增量）
+    let is_stale = |pid: &str, sid: &str, src_ms: i64| -> bool {
+        match istate.get(&(pid.to_string(), sid.to_string())) {
+            Some(&obs) => src_ms > obs,
+            None => true, // 无记录 = 从未导入过
+        }
     };
 
     // ZCode：discover_all 返回主任务 + 子任务（子任务带 source_parent_id）
@@ -1180,7 +1206,7 @@ fn auto_sync_inner(
                         break;
                     }
                     let key = ("prov_zcode".to_string(), s.session_id.clone());
-                    if existing.contains(&key) {
+                    if existing.contains(&key) && !is_stale("prov_zcode", &s.session_id, s.time_updated) {
                         if let Some(parent) = &s.parent_id {
                             repairs.push((s.session_id.clone(), parent.clone()));
                         }
@@ -1228,7 +1254,7 @@ fn auto_sync_inner(
                         break;
                     }
                     let key = ("prov_claude-code".to_string(), s.session_id.clone());
-                    if existing.contains(&key) {
+                    if existing.contains(&key) && !is_stale("prov_claude-code", &s.session_id, s.mtime_ms.unwrap_or(0)) {
                         cc_skip += 1;
                         continue;
                     }
@@ -1261,7 +1287,7 @@ fn auto_sync_inner(
                         break;
                     }
                     let key = ("prov_cursor".to_string(), s.session_id.clone());
-                    if existing.contains(&key) {
+                    if existing.contains(&key) && !is_stale("prov_cursor", &s.session_id, 0) {
                         cursor_skip += 1;
                         continue;
                     }
@@ -1298,7 +1324,7 @@ fn auto_sync_inner(
                         break;
                     }
                     let key = ("prov_minimax-code".to_string(), s.session_id.clone());
-                    if existing.contains(&key) {
+                    if existing.contains(&key) && !is_stale("prov_minimax-code", &s.session_id, s.updated_at_ms) {
                         if let Some(parent) = &s.parent_session_id {
                             mm_repairs.push((s.session_id.clone(), parent.clone()));
                         }
@@ -1346,7 +1372,7 @@ fn auto_sync_inner(
                         break;
                     }
                     let key = ("prov_codex".to_string(), s.session_id.clone());
-                    if existing.contains(&key) {
+                    if existing.contains(&key) && !is_stale("prov_codex", &s.session_id, s.mtime_ms.unwrap_or(0)) {
                         codex_skip += 1;
                         continue;
                     }

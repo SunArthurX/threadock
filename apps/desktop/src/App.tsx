@@ -125,6 +125,9 @@ export default function App() {
   const [resetting, setResetting] = useState(false);
   const [resetArmed, setResetArmed] = useState(false);
   const [importMenu, setImportMenu] = useState<"root" | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    localStorage.getItem("ch-sidebar") === "1"
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -180,6 +183,11 @@ export default function App() {
     localStorage.setItem("ch-view", view);
   }, [view]);
 
+  // 侧栏收起持久化
+  useEffect(() => {
+    localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0");
+  }, [sidebarCollapsed]);
+
   // 首次加载：首屏零争锁（先渲染面板数据），稍后再后台同步
   useEffect(() => {
     loadConversations();
@@ -188,14 +196,14 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 每 30 分钟全量数据更新（对话 + 治理指标），后台执行不打扰页面
+  // 每 10 分钟全量数据更新（对话 + 治理指标），后台执行不打扰页面
   useEffect(() => {
     const interval = setInterval(() => {
       (async () => {
         await autoSync(true);
         try { await invoke("ops_sync", { force: false }); } catch { /* 节流/互斥时静默 */ }
       })();
-    }, 30 * 60 * 1000);
+    }, 10 * 60 * 1000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -394,7 +402,7 @@ export default function App() {
       });
       await loadConversations();
       setError(null);
-      alert(`导入成功：${result.messages} 条消息，完整度 ${result.completeness}`);
+      alert(`✓ 导入成功\n消息 ${result.messages} 条 · 完整度 ${result.completeness}`);
     } catch (e) {
       showError(e);
     }
@@ -547,8 +555,20 @@ export default function App() {
       setImporting(false);
       setSourcePanel(null);
       alert(
-        `导入成功：${result.messages} 条消息，${result.events} 个事件，完整度 ${result.completeness}`
+        `✓ 导入成功\n消息 ${result.messages} 条 · 事件 ${result.events} 个 · 完整度 ${result.completeness}`
       );
+      // 自动选中该会话（新消息立即可见）
+      try {
+        const prov = sourcePanel === "minimax" ? "minimax-code" : sourcePanel;
+        const conv = await invoke<Conversation | null>("get_conversation_by_source", {
+          provider: prov,
+          sourceConversationId: sessionId,
+        });
+        if (conv) {
+          setView("chat");
+          await selectConversation(conv);
+        }
+      } catch { }
     } catch (e) {
       setImporting(false);
       showError(e);
@@ -586,7 +606,8 @@ export default function App() {
     setImporting(false);
     setBatchProgress(null);
     setSourcePanel(null);
-    alert(`批量导入完成：成功 ${ok} 条${fail > 0 ? `，失败 ${fail} 条` : ""}`);
+    const skipped = sourceSessions.length - pending.length;
+    alert(`批量增量导入\n新增 ${ok} 条${fail > 0 ? ` · 失败 ${fail} 条` : ""}${skipped > 0 ? ` · 已最新 ${skipped} 条` : ""}`);
   };
 
   // 事件类型中文标签
@@ -676,8 +697,39 @@ export default function App() {
     </div>
   );
 
+  const NAV_ITEMS = [
+    ["chat", "💬", "对话"],
+    ["overview", "📊", "概览"],
+    ["cost", "💰", "成本"],
+    ["security", "🛡", "安全"],
+    ["assets", "🧩", "资产"],
+  ] as const;
+
   return (
-    <div className="app">
+    <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+      {/* 左侧可收起导航栏 */}
+      <nav className="sidebar">
+        <button
+          className="sidebar-toggle"
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? "展开" : "收起"}
+        >
+          {sidebarCollapsed ? "»" : "«"}
+        </button>
+        {NAV_ITEMS.map(([v, icon, label]) => (
+          <button
+            key={v}
+            className={`nav-item ${view === v ? "active" : ""}`}
+            onClick={() => setView(v)}
+            title={label}
+          >
+            <span className="nav-icon">{icon}</span>
+            {!sidebarCollapsed && <span className="nav-label">{label}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="app-body">
       {error && (
         <div className="error-banner" onClick={() => setError(null)}>
           {error} (点击关闭)
@@ -685,24 +737,7 @@ export default function App() {
       )}
       <div className="topbar">
         <h1>Conversation Hub</h1>
-        {/* 视图切换：按用户意图分类的 5 个 tab */}
-        <div className="view-switcher">
-          {([
-            ["chat", "💬 对话"],
-            ["overview", "📊 概览"],
-            ["cost", "💰 成本"],
-            ["security", "🛡 安全"],
-            ["assets", "🧩 资产"],
-          ] as const).map(([v, label]) => (
-            <button
-              key={v}
-              className={`view-tab ${view === v ? "active" : ""}`}
-              onClick={() => setView(v)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+
         {view === "chat" && (
           <>
             {syncing ? (
@@ -778,6 +813,19 @@ export default function App() {
           title="删除所有数据并重新加载（点两次确认）"
         >
           {resetting ? "重置中…" : resetArmed ? "确认重置？" : "↻ 重置"}
+        </button>
+        <button
+          className="action-btn"
+          disabled={syncing}
+          title="增量导入所有来源的最新对话（10 分钟自动执行）"
+          onClick={async () => {
+            setSyncing(true);
+            try { await invoke("auto_sync", {}); } catch {}
+            setSyncing(false);
+            await loadConversations();
+          }}
+        >
+          {syncing ? "⟳" : "⇩ 增量"}
         </button>
         <button
           className="theme-toggle"
@@ -1063,6 +1111,7 @@ export default function App() {
         </div>
       </div>
       )}
+      </div>
     </div>
   );
 }
