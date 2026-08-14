@@ -14,7 +14,6 @@ pub fn collect_codex_session(
     if !path.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    use std::io::BufRead;
     let file = std::fs::File::open(path)?;
     let mut usage = Vec::new();
     let mut tools = Vec::new();
@@ -22,9 +21,18 @@ pub fn collect_codex_session(
     let mut last_snapshot: Option<(time::OffsetDateTime, i64, i64, i64, i64)> = None;
     let mut seq: i64 = 0;
 
-    for line in std::io::BufReader::new(file).lines() {
-        let line = line?;
-        let t = line.trim();
+    // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死）
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    loop {
+        let lr = crate::read_line_capped(&mut reader, &mut buf, crate::MAX_JSONL_LINE)?;
+        if !lr.complete && buf.is_empty() {
+            break;
+        }
+        if lr.oversized {
+            continue;
+        }
+        let t = std::str::from_utf8(&buf).unwrap_or("").trim();
         if t.is_empty() {
             continue;
         }
@@ -124,30 +132,51 @@ fn extract_cmd_from_args(name: &str, args: &str) -> Option<String> {
 }
 
 /// 采集整个 ~/.codex（sessions/ + archived_sessions/）。
+/// 文件级并行（按 CPU 数分片，封顶 8 线程）：114 个文件从串行 ~6.5s 降至 ~1s。
 pub fn collect_codex(codex_home: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
     let home = codex_home.as_ref();
     let mut files = Vec::new();
     scan_jsonl(&home.join("sessions"), &mut files);
     scan_jsonl(&home.join("archived_sessions"), &mut files);
-    let mut all_usage = Vec::new();
-    let mut all_tools = Vec::new();
-    for f in files {
-        let session_id = f
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        if session_id.is_empty() {
-            continue;
-        }
-        match collect_codex_session(&f, &session_id) {
-            Ok((mut u, mut t)) => {
-                all_usage.append(&mut u);
-                all_tools.append(&mut t);
-            }
-            Err(e) => tracing::warn!(file = %f.display(), error = %e, "codex ops collect failed"),
-        }
+
+    let n_threads = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .clamp(1, 8);
+    // 按大小交替分片让负载均衡（大文件分散到不同线程）
+    files.sort_by_key(|f| std::cmp::Reverse(std::fs::metadata(f).map(|m| m.len()).unwrap_or(0)));
+    let mut shards: Vec<Vec<std::path::PathBuf>> = vec![Vec::new(); n_threads];
+    for (i, f) in files.into_iter().enumerate() {
+        shards[i % n_threads].push(f);
     }
-    Ok((all_usage, all_tools))
+
+    let all_usage = std::sync::Mutex::new(Vec::new());
+    let all_tools = std::sync::Mutex::new(Vec::new());
+    std::thread::scope(|s| {
+        let usage_ref = &all_usage;
+        let tools_ref = &all_tools;
+        for shard in &shards {
+            s.spawn(move || {
+                for f in shard {
+                    let session_id = f
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    if session_id.is_empty() {
+                        continue;
+                    }
+                    match collect_codex_session(f, &session_id) {
+                        Ok((u, t)) => {
+                            usage_ref.lock().unwrap().extend(u);
+                            tools_ref.lock().unwrap().extend(t);
+                        }
+                        Err(e) => tracing::warn!(file = %f.display(), error = %e, "codex ops collect failed"),
+                    }
+                }
+            });
+        }
+    });
+    Ok((all_usage.into_inner().unwrap(), all_tools.into_inner().unwrap()))
 }
 
 fn scan_jsonl(dir: &Path, out: &mut Vec<std::path::PathBuf>) {

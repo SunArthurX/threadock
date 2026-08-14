@@ -469,8 +469,10 @@ impl Repository {
     /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
     pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
         let mut n = 0;
+        // 分块事务：每 2000 条一个事务，避免长持主锁阻塞 UI 查询
+        for records in records.chunks(2000) {
+        let tx = conn.transaction()?;
         for r in records {
             let changed = tx.execute(
                 "INSERT OR IGNORE INTO usage_records
@@ -499,17 +501,19 @@ impl Repository {
             n += changed;
         }
         tx.commit()?;
+        }
         Ok(n)
     }
 
-    /// 批量写入工具调用记录（事务 + 幂等）。
+    /// 批量写入工具调用记录（分块事务 + 幂等）。
     pub fn upsert_tool_call_batch(
         &self,
         records: &[ch_domain::ToolCallRecord],
     ) -> StorageResult<usize> {
         let mut conn = self.conn.lock().unwrap();
-        let tx = conn.transaction()?;
         let mut n = 0;
+        for records in records.chunks(2000) {
+        let tx = conn.transaction()?;
         for r in records {
             let changed = tx.execute(
                 "INSERT OR IGNORE INTO tool_call_records
@@ -534,6 +538,7 @@ impl Repository {
             n += changed;
         }
         tx.commit()?;
+        }
         Ok(n)
     }
 
@@ -1008,18 +1013,19 @@ impl Repository {
     }
 
     /// 模型 → (input_tokens, output_tokens) 汇总（成本重算用）。
-    pub fn ops_model_token_totals(&self) -> StorageResult<Vec<(String, i64, i64)>> {
+    pub fn ops_model_token_totals(&self) -> StorageResult<Vec<(String, String, i64, i64)>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT COALESCE(model, '(unknown)') AS m,
+            "SELECT COALESCE(model, '(unknown)') AS m, u.provider_id,
                     SUM(input_tokens), SUM(output_tokens)
-             FROM usage_records GROUP BY m",
+             FROM usage_records u GROUP BY m, u.provider_id",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, String>(1)?,
                 r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(3)?.unwrap_or(0),
             ))
         })?;
         let mut v = Vec::new();
@@ -1029,12 +1035,20 @@ impl Repository {
         Ok(v)
     }
 
-    /// 按模型名更新全部 cost_usd（重算用）。
-    pub fn update_model_cost(&self, model: &str, cost: f64) -> StorageResult<usize> {
+    /// 按单价更新该模型每行的 cost_usd（行内 tokens × 单价，行成本可加总）。
+    pub fn update_model_pricing(
+        &self,
+        model: &str,
+        provider_id: &str,
+        input_per_mtok: f64,
+        output_per_mtok: f64,
+    ) -> StorageResult<usize> {
         let conn = self.conn.lock().unwrap();
         let n = conn.execute(
-            "UPDATE usage_records SET cost_usd = ?1 WHERE COALESCE(model, '(unknown)') = ?2",
-            params![cost, model],
+            "UPDATE usage_records SET cost_usd =
+                (input_tokens * ?1 + output_tokens * ?2) / 1e6
+             WHERE COALESCE(model, '(unknown)') = ?3 AND provider_id = ?4",
+            params![input_per_mtok, output_per_mtok, model, provider_id],
         )?;
         Ok(n)
     }

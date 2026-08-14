@@ -33,3 +33,4 @@ tempfile = "3"
 
 [dev-dependencies]
 serde_json.workspace = true
+ch-ops-metrics = { path = "../ops-metrics" }

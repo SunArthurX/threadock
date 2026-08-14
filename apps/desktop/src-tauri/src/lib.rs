@@ -605,6 +605,10 @@ fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<ser
             usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
             tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
         }
+        // 自动成本重算：同步后立即按定价出数（此前需手动点重算，成本恒为 0）
+        if let Ok(pricing) = ops_pricing_get_inner(&state) {
+            let _ = apply_pricing(&repo, &pricing);
+        }
         Ok(())
     })();
     if result.is_ok() {
@@ -752,28 +756,53 @@ fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value
 // ── M5：定价模型 ───────────────────────────────────────────────────────
 
 /// 默认定价（$/M tokens，可被 app_data/pricing.json 覆盖）。
+/// "zcode"/"cursor" 为 provider 兜底价（模型未细分时使用）。
 const DEFAULT_PRICING: &str = r#"{
   "GLM-5.2": {"input_per_mtok": 0.5, "output_per_mtok": 2.0},
   "GLM-5.3": {"input_per_mtok": 0.5, "output_per_mtok": 2.0},
   "MiniMax-M3": {"input_per_mtok": 0.3, "output_per_mtok": 1.2},
   "codex": {"input_per_mtok": 2.0, "output_per_mtok": 8.0},
   "gpt-5": {"input_per_mtok": 1.25, "output_per_mtok": 10.0},
-  "claude": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}
+  "claude": {"input_per_mtok": 3.0, "output_per_mtok": 15.0},
+  "zcode": {"input_per_mtok": 0.5, "output_per_mtok": 2.0},
+  "cursor": {"input_per_mtok": 0.5, "output_per_mtok": 2.0}
 }"#;
+
+/// provider_id → 兜底定价键（模型未细分/unknown 时按来源计价）。
+const PROVIDER_PRICING_FALLBACK: &[(&str, &str)] = &[
+    ("prov_zcode", "zcode"),
+    ("prov_minimax-code", "MiniMax-M3"),
+    ("prov_claude-code", "claude"),
+    ("prov_codex", "codex"),
+    ("prov_cursor", "cursor"),
+];
 
 fn pricing_path(state: &tauri::State<DaemonState>) -> std::path::PathBuf {
     state.data_dir.join("pricing.json")
 }
 
-/// 读取定价表（不存在时写入默认值）。返回 {model: {input_per_mtok, output_per_mtok}}。
-#[tauri::command]
-fn ops_pricing_get(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
-    let path = pricing_path(&state);
+/// 读取定价表（不存在时写入默认值；旧文件缺新键时内存合并默认键，不回写）。
+fn ops_pricing_get_inner(state: &DaemonState) -> Result<serde_json::Value, String> {
+    let path = state.data_dir.join("pricing.json");
     if !path.exists() {
         std::fs::write(&path, DEFAULT_PRICING).map_err(|e| e.to_string())?;
     }
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&content).map_err(|e| e.to_string())
+    let mut pricing: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    // 旧文件缺省键合并（如后来新增的 zcode/cursor 兜底价）
+    if let (Some(dst), Ok(defs)) = (pricing.as_object_mut(), serde_json::from_str::<serde_json::Value>(DEFAULT_PRICING)) {
+        if let Some(def_map) = defs.as_object() {
+            for (k, v) in def_map {
+                dst.entry(k.clone()).or_insert(v.clone());
+            }
+        }
+    }
+    Ok(pricing)
+}
+
+#[tauri::command]
+fn ops_pricing_get(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    ops_pricing_get_inner(&state)
 }
 
 /// 保存定价表（前端编辑后写回）。
@@ -784,11 +813,9 @@ fn ops_pricing_set(state: tauri::State<DaemonState>, pricing: serde_json::Value)
     std::fs::write(&path, content).map_err(|e| e.to_string())
 }
 
-/// 按定价重算 cost_usd（模型名前缀匹配；改 pricing.json 后调用立即生效）。
-#[tauri::command]
-fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
-    let pricing = ops_pricing_get(state.clone())?;
-    // 展开为 Vec<(小写模型名, in 价, out 价)>
+/// 定价应用核心：模型名匹配（前缀/包含）→ 命中；未命中走 provider 兜底价。
+/// 返回 (更新模型数, 总成本)。ops_sync 自动调用 + 手动重算共用。
+fn apply_pricing(repo: &ch_storage::Repository, pricing: &serde_json::Value) -> (i64, f64) {
     let mut table: Vec<(String, f64, f64)> = Vec::new();
     if let Some(map) = pricing.as_object() {
         for (model, v) in map {
@@ -797,26 +824,44 @@ fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value
             table.push((model.to_lowercase(), pin, pout));
         }
     }
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    // 模型 → 累计 in/out
-    let models = repo
-        .ops_model_token_totals()
-        .map_err(|e| e.to_string())?;
+    let Ok(models) = repo.ops_model_token_totals() else {
+        return (0, 0.0);
+    };
     let mut updated = 0i64;
     let mut total_cost = 0f64;
-    for (model, in_tok, out_tok) in models {
-        // 前缀匹配（双向：定价键是模型名前缀，或模型名包含定价键）
-        let hit = table.iter().find(|(k, _, _)| {
-            let m = model.to_lowercase();
-            m.starts_with(k.as_str()) || k.starts_with(m.as_str()) || m.contains(k.as_str())
-        });
-        if let Some((_, pin, pout)) = hit {
-            let cost = (in_tok as f64 / 1e6) * pin + (out_tok as f64 / 1e6) * pout;
-            repo.update_model_cost(&model, cost).map_err(|e| e.to_string())?;
-            updated += 1;
-            total_cost += cost;
+    for (model, provider_id, in_tok, out_tok) in models {
+        let m = model.to_lowercase();
+        // 1) 模型名匹配
+        let hit = table
+            .iter()
+            .find(|(k, _, _)| m.starts_with(k.as_str()) || k.starts_with(m.as_str()) || m.contains(k.as_str()))
+            .map(|(k, _, _)| k.clone())
+            // 2) provider 兜底（模型未细分，如 zcode turn_usage 无模型字段）
+            .or_else(|| {
+                PROVIDER_PRICING_FALLBACK
+                    .iter()
+                    .find(|(p, _)| *p == provider_id)
+                    .map(|(_, k)| k.to_string())
+            });
+        if let Some(key) = hit {
+            if let Some((_, pin, pout)) = table.iter().find(|(k, _, _)| *k == key) {
+                // 按行内 tokens 单价写入：SUM(行成本) 与聚合口径一致
+                if repo.update_model_pricing(&model, &provider_id, *pin, *pout).is_ok() {
+                    updated += 1;
+                    total_cost += (in_tok as f64 / 1e6) * pin + (out_tok as f64 / 1e6) * pout;
+                }
+            }
         }
     }
+    (updated, total_cost)
+}
+
+/// 按定价重算 cost_usd（改 pricing.json 后调用立即生效）。
+#[tauri::command]
+fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    let pricing = ops_pricing_get(state.clone())?;
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let (updated, total_cost) = apply_pricing(&repo, &pricing);
     Ok(serde_json::json!({
         "models_updated": updated,
         "total_cost_usd": total_cost,

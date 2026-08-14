@@ -397,6 +397,7 @@ dependencies = [
  "ch-identity-resolver",
  "ch-knowledge",
  "ch-normalization",
+ "ch-ops-metrics",
  "ch-raw-store",
  "ch-search",
  "ch-storage",

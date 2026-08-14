@@ -16,6 +16,74 @@ use ch_domain::Timestamp;
 use std::path::Path;
 use thiserror::Error;
 
+/// JSONL 单行大小上限（2MB）：超过视为二进制/图片负载，跳过不解析。
+/// 背景：Codex 会话里存在单行数百 MB 的 base64 记录，整行读入 + JSON 解析
+/// 会造成 GB 级内存尖峰，把整机和 UI 拖死（2026-08-14 治理页卡死事故）。
+pub const MAX_JSONL_LINE: usize = 2 * 1024 * 1024;
+
+/// 一次限行读取的结果。
+pub struct CappedLine {
+    /// 是否读到行结束符（EOF 且无内容时为 false）。
+    pub complete: bool,
+    /// 是否因超过上限被截断（调用方应跳过该行）。
+    pub oversized: bool,
+}
+
+/// 流式读一行到 buf（复用容量，超限即停止存储、剩余直接丢弃）。
+/// 相比 `BufRead::lines()`：永不因单行超大而膨胀内存，也避免对超大行做 JSON 解析。
+pub fn read_line_capped<R: std::io::BufRead>(
+    r: &mut R,
+    buf: &mut Vec<u8>,
+    cap: usize,
+) -> std::io::Result<CappedLine> {
+    buf.clear();
+    let mut oversized = false;
+    loop {
+        let (done, consumed) = {
+            let available = match r.fill_buf() {
+                Ok(a) => a,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
+            };
+            if available.is_empty() {
+                return Ok(CappedLine { complete: false, oversized });
+            }
+            match available.iter().position(|&b| b == b'\n') {
+                Some(pos) => {
+                    if !oversized {
+                        let room = cap - buf.len();
+                        let want = (pos + 1).min(room);
+                        buf.extend_from_slice(&available[..want]);
+                        if want <= pos {
+                            oversized = true;
+                        }
+                    }
+                    (true, pos + 1)
+                }
+                None => {
+                    if !oversized {
+                        let room = cap - buf.len();
+                        if room > 0 {
+                            let want = available.len().min(room);
+                            buf.extend_from_slice(&available[..want]);
+                            if want < available.len() {
+                                oversized = true;
+                            }
+                        } else {
+                            oversized = true;
+                        }
+                    }
+                    (false, available.len())
+                }
+            }
+        };
+        r.consume(consumed);
+        if done {
+            return Ok(CappedLine { complete: true, oversized });
+        }
+    }
+}
+
 pub mod claude_code;
 pub mod codex;
 pub mod minimax;
@@ -82,6 +150,30 @@ pub fn infer_destructive(command: &str) -> bool {
 mod tests {
     use super::*;
     use ch_domain::{Provider, UsageRecord, UsageStatus};
+
+    #[test]
+    fn read_line_capped_skips_oversized_and_handles_last_line() {
+        use std::io::BufReader;
+        let giant = "x".repeat(64);
+        let data = format!("a\nb\n{}\nc", giant); // 最后行无换行
+        let mut r = BufReader::new(data.as_bytes());
+        let mut buf = Vec::new();
+        let cap = 32;
+
+        let l1 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        assert!(l1.complete && !l1.oversized);
+        assert_eq!(buf.as_slice().trim_ascii_end(), b"a");
+
+        let _ = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        assert_eq!(buf.as_slice().trim_ascii_end(), b"b");
+
+        let l3 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        assert!(l3.complete && l3.oversized, "超限行应标记 oversized");
+
+        let l4 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        assert!(!l4.complete, "EOF 且无更多内容");
+        assert_eq!(buf.as_slice().trim_ascii_end(), b"c", "末行无换行符也应读出");
+    }
 
     #[test]
     fn destructive_rules() {

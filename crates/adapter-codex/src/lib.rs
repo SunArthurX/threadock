@@ -106,14 +106,25 @@ pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<Disc
     Ok(sessions)
 }
 
-/// 读文件第一行并解析为 JSON（跳过空行）。
+/// JSONL 单行上限：超过视为二进制负载跳过（防超长行内存尖峰）。
+const MAX_LINE: usize = 2 * 1024 * 1024;
+
+/// 读文件第一行并解析为 JSON（跳过空行；限行防超长 base64 行）。
 fn read_first_json_line(path: &Path) -> AdapterResult<serde_json::Value> {
     use std::io::BufRead;
     let file = std::fs::File::open(path)?;
-    for line in std::io::BufReader::new(file).lines() {
-        let line = line?;
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    loop {
+        let n = reader.read_until(b'\n', &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let oversized = buf.len() > MAX_LINE;
+        let line = String::from_utf8_lossy(&buf).into_owned();
+        buf.clear();
         let t = line.trim();
-        if t.is_empty() {
+        if oversized || t.is_empty() {
             continue;
         }
         if let Ok(v) = serde_json::from_str(t) {
@@ -136,8 +147,20 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
     let mut events = Vec::new();
     let mut item_seq: i64 = 0;
 
-    for line in std::io::BufReader::new(file).lines() {
-        let line = line?;
+    // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死）
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    loop {
+        let n = reader.read_until(b'\n', &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        let oversized = buf.len() > MAX_LINE;
+        let line = String::from_utf8_lossy(&buf).into_owned();
+        buf.clear();
+        if oversized {
+            continue;
+        }
         let t = line.trim();
         if t.is_empty() {
             continue;

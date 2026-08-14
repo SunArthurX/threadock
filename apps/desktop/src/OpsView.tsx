@@ -414,7 +414,11 @@ export default function OpsView({ onJumpToConversation }: Props) {
                 <tbody>
                   {byModel.map((m, i) => (
                     <tr key={i}>
-                      <td className="mono">{m.model}</td>
+                      <td className="mono">
+                        {m.model === "(unknown)"
+                          ? `${meta(m.provider_id.replace("prov_", "")).label} ·默认`
+                          : m.model}
+                      </td>
                       <td>{m.requests.toLocaleString()}</td>
                       <td>{formatTokens(m.input_tokens)}</td>
                       <td>{formatTokens(m.output_tokens)}</td>

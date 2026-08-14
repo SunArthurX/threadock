@@ -14,15 +14,23 @@ pub fn collect_claude_code_session(
     if !path.exists() {
         return Ok((Vec::new(), Vec::new()));
     }
-    use std::io::BufRead;
     let file = std::fs::File::open(path)?;
     let mut usage = Vec::new();
     let mut tools = Vec::new();
     let mut seq: i64 = 0;
 
-    for line in std::io::BufReader::new(file).lines() {
-        let line = line?;
-        let t = line.trim();
+    // 限行流式读取：跳过单行 >2MB 的负载（防内存尖峰）
+    let mut reader = std::io::BufReader::new(file);
+    let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
+    loop {
+        let lr = crate::read_line_capped(&mut reader, &mut buf, crate::MAX_JSONL_LINE)?;
+        if !lr.complete && buf.is_empty() {
+            break;
+        }
+        if lr.oversized {
+            continue;
+        }
+        let t = std::str::from_utf8(&buf).unwrap_or("").trim();
         if t.is_empty() {
             continue;
         }
