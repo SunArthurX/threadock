@@ -373,13 +373,40 @@ struct SourceSessionDto {
     imported: bool,
 }
 
-/// 一次性加载 (provider_id, source_id) 已导入集合（来源面板批量标记用）。
-fn imported_set(state: &DaemonState) -> std::collections::HashSet<(String, String)> {
-    state
-        .repo
-        .lock()
-        .map(|r| r.list_conversation_sources().unwrap_or_default().into_iter().collect())
+/// 已导入判定上下文：存在集合 + 各 provider 新鲜度表。
+struct ImportCtx {
+    existing: std::collections::HashSet<(String, String)>,
+    states: std::collections::HashMap<String, std::collections::HashMap<String, Option<i64>>>,
+}
+
+fn import_ctx(state: &DaemonState) -> ImportCtx {
+    let repo = match state.repo.lock() {
+        Ok(r) => r,
+        Err(_) => return ImportCtx { existing: Default::default(), states: Default::default() },
+    };
+    let existing = repo
+        .list_conversation_sources()
         .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let mut states = std::collections::HashMap::new();
+    for pid in ["prov_zcode", "prov_claude-code", "prov_cursor", "prov_minimax-code", "prov_codex"] {
+        if let Ok(m) = repo.import_state_map(pid) {
+            states.insert(pid.to_string(), m);
+        }
+    }
+    ImportCtx { existing, states }
+}
+
+/// 「已导入」= 存在 且 源更新时间 ≤ 导入时观察时间（源有新对话 → false，可再导入）。
+fn imported_flag(ctx: &ImportCtx, provider_id: &str, source_id: &str, src_ms: Option<i64>) -> bool {
+    ch_storage::Repository::is_up_to_date(
+        ctx.states.get(provider_id).unwrap_or(&Default::default()),
+        &ctx.existing,
+        provider_id,
+        source_id,
+        src_ms,
+    )
 }
 
 /// 列出 ZCode 会话。
@@ -389,11 +416,11 @@ fn list_zcode_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSes
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
     let sessions = ch_adapter_zcode::discover_sessions(&db_path)
         .map_err(|e| format!("discover zcode: {e}"))?;
-    let imported = imported_set(&state);
+    let ictx = import_ctx(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
-            imported: imported.contains(&("prov_zcode".to_string(), s.session_id.clone())),
+            imported: imported_flag(&ictx, "prov_zcode", &s.session_id, Some(s.time_updated)),
             session_id: s.session_id,
             title: s.title,
             detail: s.directory,
@@ -412,7 +439,11 @@ fn import_from_zcode(
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
     let raw = ch_adapter_zcode::parse_session(&db_path, &session_id)
         .map_err(|e| format!("parse zcode: {e}"))?;
-    import_raw_to_state(&state, raw, Some("ZCode"))
+    let observed = ch_adapter_zcode::discover_sessions(&db_path)
+        .ok()
+        .and_then(|v| v.into_iter().find(|s| s.session_id == session_id))
+        .map(|s| s.time_updated);
+    import_raw_to_state(&state, raw, Some("ZCode"), observed)
 }
 
 /// 列出 Claude Code 会话。
@@ -422,11 +453,11 @@ fn list_claude_code_sessions(state: tauri::State<DaemonState>) -> Result<Vec<Sou
     let claude_home = format!("{home}/.claude");
     let sessions = ch_adapter_claude_code::discover_sessions(&claude_home)
         .map_err(|e| format!("discover claude code: {e}"))?;
-    let imported = imported_set(&state);
+    let ictx = import_ctx(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
-            imported: imported.contains(&("prov_claude-code".to_string(), s.session_id.clone())),
+            imported: imported_flag(&ictx, "prov_claude-code", &s.session_id, s.mtime_ms),
             session_id: s.session_id,
             title: s.project_dir.clone(),
             detail: format!("{} KB", s.size_bytes / 1024),
@@ -451,7 +482,7 @@ fn import_from_claude_code(
         .ok_or_else(|| format!("session not found: {session_id}"))?;
     let raw = ch_adapter_claude_code::parse_session(&session.file_path)
         .map_err(|e| format!("parse: {e}"))?;
-    import_raw_to_state(&state, raw, Some("Claude Code"))
+    import_raw_to_state(&state, raw, Some("Claude Code"), session.mtime_ms)
 }
 
 // ── Cursor / MiniMax 真实来源导入 ──────────────────────────────────────
@@ -474,11 +505,11 @@ fn list_cursor_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSe
     let db = cursor_db_path()?;
     let sessions = ch_adapter_cursor::discover_sessions(&db)
         .map_err(|e| format!("discover cursor: {e}"))?;
-    let imported = imported_set(&state);
+    let ictx = import_ctx(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
-            imported: imported.contains(&("prov_cursor".to_string(), s.session_id.clone())),
+            imported: imported_flag(&ictx, "prov_cursor", &s.session_id, None),
             session_id: s.session_id,
             title: s.title,
             detail: format!("{} 条消息", s.message_count),
@@ -496,7 +527,7 @@ fn import_from_cursor(
     let db = cursor_db_path()?;
     let raw = ch_adapter_cursor::parse_session(&db, &session_id)
         .map_err(|e| format!("parse cursor: {e}"))?;
-    import_raw_to_state(&state, raw, Some("Cursor"))
+    import_raw_to_state(&state, raw, Some("Cursor"), None)
 }
 
 /// 列出 MiniMax 会话。
@@ -505,7 +536,7 @@ fn list_minimax_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceS
     let db = minimax_db_path()?;
     let sessions = ch_adapter_minimax::discover_sessions(&db)
         .map_err(|e| format!("discover minimax: {e}"))?;
-    let imported = imported_set(&state);
+    let ictx = import_ctx(&state);
     Ok(sessions
         .into_iter()
         .map(|s| {
@@ -514,7 +545,7 @@ fn list_minimax_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceS
                 detail = format!("{} · {detail}", s.agent_name);
             }
             SourceSessionDto {
-                imported: imported.contains(&("prov_minimax-code".to_string(), s.session_id.clone())),
+                imported: imported_flag(&ictx, "prov_minimax-code", &s.session_id, Some(s.updated_at_ms)),
                 session_id: s.session_id,
                 title: s.title,
                 detail: if s.child_count > 0 {
@@ -537,7 +568,11 @@ fn import_from_minimax(
     let db = minimax_db_path()?;
     let raw = ch_adapter_minimax::parse_session(&db, &session_id)
         .map_err(|e| format!("parse minimax: {e}"))?;
-    import_raw_to_state(&state, raw, Some("MiniMax Code"))
+    let observed = ch_adapter_minimax::discover_sessions(&db)
+        .ok()
+        .and_then(|v| v.into_iter().find(|s| s.session_id == session_id))
+        .map(|s| s.updated_at_ms);
+    import_raw_to_state(&state, raw, Some("MiniMax Code"), observed)
 }
 
 // ── Codex (ChatGPT CLI/Desktop) 真实来源导入 ──────────────────────────
@@ -554,11 +589,11 @@ fn list_codex_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSes
     let home = codex_home()?;
     let sessions = ch_adapter_codex::discover_sessions(&home)
         .map_err(|e| format!("discover codex: {e}"))?;
-    let imported = imported_set(&state);
+    let ictx = import_ctx(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
-            imported: imported.contains(&("prov_codex".to_string(), s.session_id.clone())),
+            imported: imported_flag(&ictx, "prov_codex", &s.session_id, s.mtime_ms),
             session_id: s.session_id,
             title: s.title,
             detail: format!("{} KB", s.size_bytes / 1024),
@@ -582,7 +617,7 @@ fn import_from_codex(
         .ok_or_else(|| format!("session not found: {session_id}"))?;
     let raw = ch_adapter_codex::parse_session(&session.file_path)
         .map_err(|e| format!("parse codex: {e}"))?;
-    import_raw_to_state(&state, raw, Some("Codex"))
+    import_raw_to_state(&state, raw, Some("Codex"), session.mtime_ms)
 }
 
 // ── CodeAgentOps：指标采集与聚合查询（plan codeagent-ops M2）──────────
@@ -1136,8 +1171,10 @@ fn auto_sync_inner(
         match ch_adapter_zcode::discover_all_sessions(&zcode_db) {
             Ok(sessions) => {
                 let mut repairs: Vec<(String, String)> = Vec::new();
+                let mut zc_observed: Vec<(String, Option<i64>)> = Vec::new();
                 let mut imported_count = 0u32;
                 for s in sessions.into_iter().take(lim) {
+                    zc_observed.push((s.session_id.clone(), Some(s.time_updated)));
                     if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
                         cancelled = true;
                         break;
@@ -1152,7 +1189,7 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_zcode::parse_session(&zcode_db, &s.session_id) {
                         Ok(raw) => {
-                            match import_raw_inner(state, raw, Some("ZCode")) {
+                            match import_raw_inner(state, raw, Some("ZCode"), Some(s.time_updated)) {
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     zcode_ok += 1;
@@ -1171,6 +1208,9 @@ fn auto_sync_inner(
                     if let Ok(repo) = state.repo.lock() {
                         let _ = repo.repair_parents_batch("prov_zcode", &repairs);
                     }
+                }
+                if let Ok(repo) = state.repo.lock() {
+                    let _ = repo.record_import_states("prov_zcode", &zc_observed);
                 }
             }
             Err(e) => tracing::warn!(error = %e, "zcode discover failed"),
@@ -1194,7 +1234,7 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_claude_code::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            match import_raw_inner(state, raw, Some("Claude Code")) {
+                            match import_raw_inner(state, raw, Some("Claude Code"), s.mtime_ms) {
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     cc_ok += 1;
@@ -1227,7 +1267,7 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_cursor::parse_session(&cursor_db, &s.session_id) {
                         Ok(raw) => {
-                            match import_raw_inner(state, raw, Some("Cursor")) {
+                            match import_raw_inner(state, raw, Some("Cursor"), None) {
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     cursor_ok += 1;
@@ -1249,8 +1289,10 @@ fn auto_sync_inner(
         match ch_adapter_minimax::discover_all_sessions(&mm_db) {
             Ok(sessions) => {
                 let mut mm_repairs: Vec<(String, String)> = Vec::new();
+                let mut mm_observed: Vec<(String, Option<i64>)> = Vec::new();
                 let mut mm_imported = 0u32;
                 for s in sessions.into_iter().take(lim) {
+                    mm_observed.push((s.session_id.clone(), Some(s.updated_at_ms)));
                     if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
                         cancelled = true;
                         break;
@@ -1265,7 +1307,7 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_minimax::parse_session(&mm_db, &s.session_id) {
                         Ok(raw) => {
-                            match import_raw_inner(state, raw, Some("MiniMax Code")) {
+                            match import_raw_inner(state, raw, Some("MiniMax Code"), Some(s.updated_at_ms)) {
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     mm_ok += 1;
@@ -1284,6 +1326,9 @@ fn auto_sync_inner(
                     if let Ok(repo) = state.repo.lock() {
                         let _ = repo.repair_parents_batch("prov_minimax-code", &mm_repairs);
                     }
+                }
+                if let Ok(repo) = state.repo.lock() {
+                    let _ = repo.record_import_states("prov_minimax-code", &mm_observed);
                 }
             }
             Err(e) => tracing::warn!(error = %e, "mm discover failed"),
@@ -1307,7 +1352,7 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_codex::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            match import_raw_inner(state, raw, Some("Codex")) {
+                            match import_raw_inner(state, raw, Some("Codex"), s.mtime_ms) {
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     codex_ok += 1;
@@ -1359,6 +1404,7 @@ fn import_raw_inner(
     state: &DaemonState,
     raw: RawConversation,
     workspace_name: Option<&str>,
+    observed_updated_ms: Option<i64>,
 ) -> Result<ImportOutcome, String> {
     let provider = raw.provider;
     let raw_bytes = serde_json::to_vec(&raw).map_err(|e| e.to_string())?;
@@ -1378,6 +1424,7 @@ fn import_raw_inner(
             &normalized.messages,
             &normalized.events,
             workspace_name,
+            observed_updated_ms,
         )
         .map_err(|e| e.to_string())?;
     let workspace_id = conv.workspace_id.clone();
@@ -1434,8 +1481,9 @@ fn import_raw_to_state(
     state: &DaemonState,
     raw: RawConversation,
     workspace_name: Option<&str>,
+    observed_updated_ms: Option<i64>,
 ) -> Result<ImportResultDto, String> {
-    let outcome = import_raw_inner(state, raw, workspace_name)?;
+    let outcome = import_raw_inner(state, raw, workspace_name, observed_updated_ms)?;
     commit_index(state, &outcome.indexable)?;
     Ok(outcome.dto)
 }

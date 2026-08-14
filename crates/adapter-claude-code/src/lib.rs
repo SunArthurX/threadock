@@ -43,6 +43,8 @@ pub struct DiscoveredSession {
     pub file_path: PathBuf,
     pub project_dir: String,
     pub size_bytes: u64,
+    /// 文件修改时间（Unix 毫秒）——「已导入」新鲜度判定用。
+    pub mtime_ms: Option<i64>,
 }
 
 /// 扫描 Claude Code 数据目录，返回所有会话文件。
@@ -69,12 +71,19 @@ pub fn discover_sessions(claude_home: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .to_string();
-                let size = f.metadata().map(|m| m.len()).unwrap_or(0);
+                let meta = f.metadata();
+                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let mtime_ms = meta
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64);
                 sessions.push(DiscoveredSession {
                     session_id,
                     file_path: path,
                     project_dir: project_dir.clone(),
                     size_bytes: size,
+                    mtime_ms,
                 });
             }
         }

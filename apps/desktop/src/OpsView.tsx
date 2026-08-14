@@ -156,7 +156,11 @@ const meta = (p: string) => PROVIDER_META[p] ?? { label: p, color: "#8b96ad" };
 
 const SEV_LABEL: Record<string, string> = { high: "高危", medium: "中危", low: "低危" };
 
+type Section = "overview" | "cost" | "security" | "assets";
+
 interface Props {
+  /** 当前治理子页（App 5-tab 决定渲染哪些卡片、加载哪些数据） */
+  section: Section;
   /** 审计命中 → 跳回对话视图定位（App 提供） */
   onJumpToConversation?: (provider: string, sourceConversationId: string, messageId: string | null) => void;
 }
@@ -181,7 +185,7 @@ function AnimatedKpi({
   );
 }
 
-export default function OpsView({ onJumpToConversation }: Props) {
+export default function OpsView({ section, onJumpToConversation }: Props) {
   const [range, setRange] = useState<number | null>(30);
   const [overview, setOverview] = useState<OpsOverview | null>(null);
   const [byProvider, setByProvider] = useState<ProviderUsage[]>([]);
@@ -212,30 +216,32 @@ export default function OpsView({ onJumpToConversation }: Props) {
   const [budgetInput, setBudgetInput] = useState({ tokens: "", cost: "" });
   const [recalcMsg, setRecalcMsg] = useState<string | null>(null);
 
-  const loadAll = async () => {
+  /** 分区加载：每个 tab 只查自己的数据（性能 + 认知负载） */
+  const loadSection = async (sec: Section) => {
     setLoading(true);
-    // allSettled：单个接口失败只影响对应卡片，不再拖空整页数据
-    const [ov, bp, bm, ts, tt, rc, dc, cs, an] = await Promise.allSettled([
-      invoke<OpsOverview>("ops_overview", { days: range }),
-      invoke<ProviderUsage[]>("ops_by_provider", { days: range }),
-      invoke<ModelUsage[]>("ops_by_model", { days: range }),
-      invoke<DailyUsage[]>("ops_timeseries", { days: range }),
-      invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }),
-      invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }),
-      invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }),
-      invoke<CacheStat[]>("ops_cache_stats", { days: range }),
-      invoke<AnomalyRow[]>("ops_anomalies", { days: range }),
-    ]);
-    if (ov.status === "fulfilled") setOverview(ov.value);
-    else console.error("ops_overview failed", ov.reason);
-    if (bp.status === "fulfilled") setByProvider(bp.value);
-    if (bm.status === "fulfilled") setByModel(bm.value);
-    if (ts.status === "fulfilled") setTimeseries(ts.value);
-    if (tt.status === "fulfilled") setTopTools(tt.value);
-    if (rc.status === "fulfilled") setRisky(rc.value);
-    if (dc.status === "fulfilled") setDirCosts(dc.value);
-    if (cs.status === "fulfilled") setCacheStats(cs.value);
-    if (an.status === "fulfilled") setAnomalies(an.value);
+    const reqs: Promise<unknown>[] = [];
+    const tags: string[] = [];
+    const push = (p: Promise<unknown>, tag: string) => { reqs.push(p); tags.push(tag); };
+    if (sec === "overview") {
+      push(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
+      push(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then(setByProvider), "byProvider");
+      push(invoke<ModelUsage[]>("ops_by_model", { days: range }).then(setByModel), "byModel");
+      push(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then(setTimeseries), "timeseries");
+      push(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then(setTopTools), "topTools");
+      push(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then(setCacheStats), "cache");
+    } else if (sec === "cost") {
+      push(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
+      push(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
+    } else if (sec === "security") {
+      push(invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }).then(setRisky), "risky");
+      push(invoke<AnomalyRow[]>("ops_anomalies", { days: range }).then(setAnomalies), "anomalies");
+    } else {
+      push(invoke<AssetRow[]>("assets_list").then(setAssets), "assets");
+      push(invoke<AutomationRow[]>("automations_list").then(setAutomations), "automations");
+    }
+    await Promise.allSettled(reqs).then((rs) =>
+      rs.forEach((r, i) => { if (r.status === "rejected") console.error(tags[i], "failed", r.reason); })
+    );
     setLoading(false);
   };
 
@@ -264,14 +270,13 @@ export default function OpsView({ onJumpToConversation }: Props) {
     }
   };
 
-  // 首次进入：立即加载已有数据（不阻塞），后台节流同步指标，完成后刷新
+  // 进入 tab：立即加载该区已有数据，后台节流同步后刷新
   useEffect(() => {
     (async () => {
-      // 先展示库里已有的指标 + 资产/自动化
-      invoke<AssetRow[]>("assets_list").then(setAssets).catch(() => {});
-      invoke<AutomationRow[]>("automations_list").then(setAutomations).catch(() => {});
-      await Promise.all([loadAll(), loadBudget(), loadPolicies()]);
-      // 后台同步（均 30 分钟节流；若正忙静默跳过），完成后刷新数据
+      const tasks: Promise<void>[] = [loadSection(section)];
+      if (section === "cost") tasks.push(loadBudget());
+      if (section === "security") tasks.push(loadPolicies());
+      await Promise.all(tasks);
       setSyncing(true);
       try {
         await invoke("ops_sync", { force: false });
@@ -279,19 +284,20 @@ export default function OpsView({ onJumpToConversation }: Props) {
           invoke("assets_sync", { force: false }).catch(() => {}),
           invoke("automations_sync", { force: false }).catch(() => {}),
         ]);
-        invoke<AssetRow[]>("assets_list").then(setAssets).catch(() => {});
-        invoke<AutomationRow[]>("automations_list").then(setAutomations).catch(() => {});
-        await Promise.all([loadAll(), loadBudget()]);
+        await loadSection(section);
+        if (section === "cost") await loadBudget();
       } catch {
         /* 正在同步中时静默跳过 */
       }
       setSyncing(false);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [section]);
 
   useEffect(() => {
-    loadAll();
+    if (section === "assets") return; // 资产不受时间范围影响
+    loadSection(section);
+    if (section === "cost") loadBudget();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range]);
 
@@ -364,8 +370,8 @@ export default function OpsView({ onJumpToConversation }: Props) {
       const r = await invoke<{ models_updated: number; total_cost_usd: number }>("ops_cost_recalc");
       setRecalcMsg(`已按定价重算 ${r.models_updated} 个模型，总成本 ${formatCost(r.total_cost_usd)}`);
       setTimeout(() => setRecalcMsg(null), 4000);
-      await loadAll();
-      await loadBudget();
+      await loadSection(section);
+      if (section === "cost") await loadBudget();
     } catch (e) {
       setRecalcMsg(`重算失败: ${e}`);
     }
@@ -412,6 +418,7 @@ export default function OpsView({ onJumpToConversation }: Props) {
     <div className="ops-view">
       {/* 工具行 */}
       <div className="ops-toolbar">
+        {section !== "assets" && (
         <div className="ops-range">
           {[[7, "7天"], [30, "30天"], [90, "90天"], [null, "全部"]].map(([v, label]) => (
             <button
@@ -423,13 +430,16 @@ export default function OpsView({ onJumpToConversation }: Props) {
             </button>
           ))}
         </div>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="action-btn" disabled={syncing} onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadAll(); loadBudget(); }}>
+          <button className="action-btn" disabled={syncing} onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadSection(section); if (section === "cost") loadBudget(); }}>
             {syncing ? "同步指标中…" : "↻ 同步指标"}
           </button>
-          <button className="action-btn" onClick={recalcCost} title="按 pricing.json 重算成本">
-            $ 重算成本
-          </button>
+          {section === "cost" && (
+            <button className="action-btn" onClick={recalcCost} title="按 pricing.json 重算成本">
+              $ 重算成本
+            </button>
+          )}
         </div>
       </div>
 
@@ -443,14 +453,14 @@ export default function OpsView({ onJumpToConversation }: Props) {
       )}
       {recalcMsg && <div className="recalc-msg">{recalcMsg}</div>}
 
-      {/* 页面即刻完整渲染：每块数据独立 skeleton，不整页等待 */}
-      {overview ? (
+      {/* KPI — 概览 */}
+      {section === "overview" && overview ? (
         <div className="ops-kpis">
           {kpis.map((k, i) => (
             <AnimatedKpi key={i} label={k.label} num={k.num} fmt={k.fmt} sub={k.sub} danger={k.danger} />
           ))}
         </div>
-      ) : (
+      ) : section === "overview" ? (
         <div className="ops-kpis">
           {[0, 1, 2, 3].map((i) => (
             <div key={i} className="ops-kpi skeleton">
@@ -460,9 +470,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
       {/* 图表行（数据未到时 skeleton） */}
+      {section === "overview" && (
           <div className="ops-charts">
             <div className="ops-card">
               <div className="ops-card-title">Agent 用量分布</div>
@@ -504,8 +515,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               )}
             </div>
           </div>
+      )}
 
-          {/* 模型 + 工具榜单 */}
+          {/* 模型 + 工具榜单 — 概览 */}
+          {section === "overview" && (
           <div className="ops-tables">
             <div className="ops-card">
               <div className="ops-card-title">模型明细</div>
@@ -554,9 +567,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               </div>
             </div>
           </div>
+          )}
 
-          {/* ── M7：成本洞察 ── */}
-          <div className="ops-tables">
+          {/* ── 缓存命中率 — 概览 ── */}
+          {section === "overview" && (
             <div className="ops-card">
               <div className="ops-card-title">
                 缓存命中率
@@ -578,6 +592,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
                 </div>
               ))}
             </div>
+          )}
+
+          {/* ── 按项目成本 — 成本 ── */}
+          {section === "cost" && (
             <div className="ops-card">
               <div className="ops-card-title">
                 按项目成本 Top10
@@ -601,9 +619,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
                 </table>
               )}
             </div>
-          </div>
+          )}
 
-          {/* ── M6：资产清单 ── */}
+          {/* ── M6：资产清单 — 资产 ── */}
+          {section === "assets" && (
           <div className="ops-card">
             <div className="ops-card-title">
               🧩 资产清单（{assets.length}）
@@ -625,8 +644,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               </div>
             )}
           </div>
+          )}
 
-          {/* ── M8：自动化任务 ── */}
+          {/* ── M8：自动化任务 — 资产 ── */}
+          {section === "assets" && (
           <div className="ops-card">
             <div className="ops-card-title">
               ⏱ 自动化任务（{automations.length}）
@@ -649,8 +670,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               </div>
             )}
           </div>
+          )}
 
-          {/* ── M9：异常检测 ── */}
+          {/* ── M9：异常检测 — 安全 ── */}
+          {section === "security" && (
           <div className="ops-card">
             <div className="ops-card-title">
               🚨 异常检测（{anomalies.length}）
@@ -671,8 +694,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               </div>
             )}
           </div>
+          )}
 
-          {/* ── M5：预算卡片 ── */}
+          {/* ── M5：预算卡片 — 成本 ── */}
+          {section === "cost" && (
           <div className="ops-card ops-budget">
             <div className="ops-card-title">
               月度预算
@@ -715,8 +740,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               </div>
             </div>
           </div>
+          )}
 
-          {/* ── M4：安全审计卡片 ── */}
+          {/* ── M4：安全审计卡片 — 安全 ── */}
+          {section === "security" && (
           <div className="ops-card">
             <div className="ops-card-title">
               🛡 安全审计
@@ -808,8 +835,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
               )}
             </div>
           </div>
+          )}
 
-          {/* 风险调用 */}
+          {/* 风险调用 — 安全 */}
+          {section === "security" && (
           <div className="ops-card">
             <div className="ops-card-title">
               风险调用 ({risky.length})
@@ -869,6 +898,7 @@ export default function OpsView({ onJumpToConversation }: Props) {
               {risky.length === 0 && <div className="ops-table-empty">无风险调用 🎉</div>}
             </div>
           </div>
+          )}
 
       {overview && overview.avg_duration_ms > 0 && (
         <div className="ops-footnote">

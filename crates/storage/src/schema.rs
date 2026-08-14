@@ -378,3 +378,14 @@ CREATE TABLE IF NOT EXISTS automation_records (
     UNIQUE(provider_id, name)
 );
 "#;
+/// V10：导入新鲜度状态（「已导入」判定：源更新时间 ≤ 导入时观察时间）。
+pub const SCHEMA_V10: &str = r#"
+CREATE TABLE IF NOT EXISTS import_state (
+    source_pk TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    observed_ms INTEGER,
+    imported_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_import_state_provider ON import_state(provider_id);
+"#;

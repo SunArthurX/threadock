@@ -51,6 +51,8 @@ pub struct DiscoveredSession {
     pub created_at: Option<String>,
     pub file_path: String,
     pub size_bytes: u64,
+    /// 文件修改时间（Unix 毫秒）——「已导入」新鲜度判定用。
+    pub mtime_ms: Option<i64>,
 }
 
 /// 扫描目录下所有 .jsonl（按修改时间降序）。
@@ -92,7 +94,13 @@ pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<Disc
             .get("timestamp")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let size = std::fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
+        let meta = std::fs::metadata(&f);
+        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let mtime_ms = meta
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64);
         sessions.push(DiscoveredSession {
             session_id,
             title: format!("Codex 会话 ({} KB)", size / 1024),
@@ -100,6 +108,7 @@ pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<Disc
             created_at,
             file_path: f.to_string_lossy().into_owned(),
             size_bytes: size,
+            mtime_ms,
         });
     }
     sessions.sort_by_key(|s| std::cmp::Reverse(s.size_bytes));

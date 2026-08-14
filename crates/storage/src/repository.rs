@@ -777,6 +777,7 @@ impl Repository {
         messages: &[Message],
         events: &[Event],
         workspace_name: Option<&str>,
+        observed_updated_ms: Option<i64>,
     ) -> StorageResult<String> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
@@ -947,8 +948,89 @@ impl Repository {
             )?;
         }
 
+        // 记录导入新鲜度（「已导入」判定依据：源更新时间 ≤ observed_ms）
+        tx.execute(
+            "INSERT INTO import_state (source_pk, provider_id, source_id, observed_ms, imported_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source_pk) DO UPDATE SET observed_ms = ?4, imported_at = ?5",
+            params![
+                format!("{provider_id}:{}", conv.source_conversation_id),
+                provider_id,
+                conv.source_conversation_id,
+                observed_updated_ms,
+                timestamp::to_millis(Some(now_utc())).unwrap_or(0),
+            ],
+        )?;
+
         tx.commit()?;
         Ok(id)
+    }
+
+    /// 批量回填/刷新导入新鲜度（auto_sync 对已存在会话也记录当前源时间）。
+    pub fn record_import_states(
+        &self,
+        provider_id: &str,
+        entries: &[(String, Option<i64>)],
+    ) -> StorageResult<usize> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        let mut n = 0;
+        for (source_id, observed) in entries {
+            n += tx.execute(
+                "INSERT INTO import_state (source_pk, provider_id, source_id, observed_ms, imported_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(source_pk) DO UPDATE SET
+                    observed_ms = COALESCE(?4, observed_ms), imported_at = ?5",
+                params![
+                    format!("{provider_id}:{source_id}"),
+                    provider_id,
+                    source_id,
+                    observed,
+                    now_ms,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// 读取某 provider 的 {source_id: observed_ms} 新鲜度表。
+    pub fn import_state_map(&self, provider_id: &str) -> StorageResult<std::collections::HashMap<String, Option<i64>>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT source_id, observed_ms FROM import_state WHERE provider_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![provider_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
+        })?;
+        let mut m = std::collections::HashMap::new();
+        for r in rows {
+            let (k, v) = r?;
+            m.insert(k, v);
+        }
+        Ok(m)
+    }
+
+    /// 「已导入」判定：会话存在且源的更新时间不晚于导入时观察时间。
+    /// 源时间未知（None）时退化为存在性判断。
+    pub fn is_up_to_date(
+        state: &std::collections::HashMap<String, Option<i64>>,
+        existing: &std::collections::HashSet<(String, String)>,
+        provider_id: &str,
+        source_id: &str,
+        source_updated_ms: Option<i64>,
+    ) -> bool {
+        if !existing.contains(&(provider_id.to_string(), source_id.to_string())) {
+            return false;
+        }
+        match (source_updated_ms, state.get(source_id).cloned()) {
+            (Some(src_ms), Some(Some(obs))) => obs >= src_ms,
+            _ => true,
+        }
     }
 
     /// 修复旧数据的主子链路：当来源侧有 parent 而库内为 NULL/不一致时更新。
@@ -2740,14 +2822,36 @@ mod tests {
         r.clear_all().unwrap();
         let conv = ch_domain::Conversation::new(Provider::ZCode, "src-batch-regress");
         let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
-        let id = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode")).unwrap();
+        let id = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000)).unwrap();
         let got = r.get_conversation(&id).unwrap().unwrap();
         assert_eq!(got.source_conversation_id, "src-batch-regress");
         assert_eq!(r.list_messages(&id).unwrap().len(), 1);
         // 幂等重放
-        let id2 = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode")).unwrap();
+        let id2 = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000)).unwrap();
         assert_eq!(id, id2);
         assert_eq!(r.list_messages(&id).unwrap().len(), 1, "重放不产生重复消息");
+    }
+
+    #[test]
+    fn is_up_to_date_staleness_logic() {
+        use std::collections::{HashMap, HashSet};
+        let mut existing = HashSet::new();
+        existing.insert(("prov_zcode".to_string(), "s1".to_string()));
+        let mut st = HashMap::new();
+        st.insert("s1".to_string(), Some(1000i64));
+
+        // 源无更新（同时间/更早）→ 已导入
+        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(1000)));
+        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(900)));
+        // 源有新对话（更新时间更晚）→ 可再导入
+        assert!(!Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(1001)));
+        // 源时间未知 → 退化存在性
+        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", None));
+        // 不存在 → 未导入
+        assert!(!Repository::is_up_to_date(&st, &existing, "prov_zcode", "s2", Some(1)));
+        // 无观察记录（历史遗留）→ 存在即已导入
+        let st2: HashMap<String, Option<i64>> = HashMap::new();
+        assert!(Repository::is_up_to_date(&st2, &existing, "prov_zcode", "s1", Some(9999)));
     }
 
     #[test]

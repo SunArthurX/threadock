@@ -96,9 +96,12 @@ export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() =>
     (localStorage.getItem("ch-theme") as "dark" | "light") || "dark"
   );
-  const [view, setView] = useState<"chat" | "ops">(() =>
-    (localStorage.getItem("ch-view") as "chat" | "ops") || "chat"
-  );
+  const [view, setView] = useState<"chat" | "overview" | "cost" | "security" | "assets">(() => {
+    const v = localStorage.getItem("ch-view");
+    return v === "overview" || v === "cost" || v === "security" || v === "assets" || v === "chat"
+      ? v
+      : "chat";
+  });
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -682,20 +685,23 @@ export default function App() {
       )}
       <div className="topbar">
         <h1>Conversation Hub</h1>
-        {/* 视图切换：对话 | 治理 */}
+        {/* 视图切换：按用户意图分类的 5 个 tab */}
         <div className="view-switcher">
-          <button
-            className={`view-tab ${view === "chat" ? "active" : ""}`}
-            onClick={() => setView("chat")}
-          >
-            💬 对话
-          </button>
-          <button
-            className={`view-tab ${view === "ops" ? "active" : ""}`}
-            onClick={() => setView("ops")}
-          >
-            📊 治理
-          </button>
+          {([
+            ["chat", "💬 对话"],
+            ["overview", "📊 概览"],
+            ["cost", "💰 成本"],
+            ["security", "🛡 安全"],
+            ["assets", "🧩 资产"],
+          ] as const).map(([v, label]) => (
+            <button
+              key={v}
+              className={`view-tab ${view === v ? "active" : ""}`}
+              onClick={() => setView(v)}
+            >
+              {label}
+            </button>
+          ))}
         </div>
         {view === "chat" && (
           <>
@@ -844,8 +850,8 @@ export default function App() {
         </div>
       )}
 
-      {view === "ops" ? (
-        <OpsView onJumpToConversation={jumpFromAudit} />
+      {view !== "chat" ? (
+        <OpsView section={view} onJumpToConversation={jumpFromAudit} />
       ) : (
       <div className="main">
         {/* 中栏：搜索结果 或 会话列表 */}
