@@ -359,28 +359,41 @@ export default function OpsView({ onJumpToConversation }: Props) {
       )}
       {recalcMsg && <div className="recalc-msg">{recalcMsg}</div>}
 
-      {loading && !overview ? (
-        <div className="ops-loading">
-          <div className="spinner" />
-          <span>采集治理指标中…（首次较慢）</span>
+      {/* 页面即刻完整渲染：每块数据独立 skeleton，不整页等待 */}
+      {overview ? (
+        <div className="ops-kpis">
+          {kpis.map((k, i) => (
+            <div key={i} className={`ops-kpi ${k.danger ? "danger" : ""}`}>
+              <div className="ops-kpi-value">{k.value}</div>
+              <div className="ops-kpi-label">{k.label}</div>
+              <div className="ops-kpi-sub">{k.sub}</div>
+            </div>
+          ))}
         </div>
       ) : (
-        <>
-          {/* KPI 行 */}
-          <div className="ops-kpis">
-            {kpis.map((k, i) => (
-              <div key={i} className={`ops-kpi ${k.danger ? "danger" : ""}`}>
-                <div className="ops-kpi-value">{k.value}</div>
-                <div className="ops-kpi-label">{k.label}</div>
-                <div className="ops-kpi-sub">{k.sub}</div>
-              </div>
-            ))}
-          </div>
+        <div className="ops-kpis">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="ops-kpi skeleton">
+              <div className="sk-line sk-lg" />
+              <div className="sk-line" />
+              <div className="sk-line sk-sm" />
+            </div>
+          ))}
+        </div>
+      )}
 
-          {/* 图表行 */}
+      {/* 图表行（数据未到时 skeleton） */}
           <div className="ops-charts">
             <div className="ops-card">
               <div className="ops-card-title">Agent 用量分布</div>
+              {byProvider.length === 0 ? (
+                <div className="chart-skeleton donut">
+                  <div className="sk-circle" />
+                  <div className="sk-lines">
+                    {[0, 1, 2, 3].map((i) => <div key={i} className="sk-line" />)}
+                  </div>
+                </div>
+              ) : (
               <div className="ops-donut-wrap">
                 <DonutChart slices={donutSlices} />
                 <div className="ops-legend">
@@ -394,10 +407,21 @@ export default function OpsView({ onJumpToConversation }: Props) {
                   ))}
                 </div>
               </div>
+              )}
             </div>
             <div className="ops-card ops-card-wide">
               <div className="ops-card-title">每日 Tokens 趋势</div>
-              <BarChart data={barData} />
+              {timeseries.length === 0 ? (
+                <div className="chart-skeleton bars">
+                  <div className="sk-bars">
+                    {Array.from({ length: 14 }).map((_, i) => (
+                      <div key={i} className="sk-bar" style={{ height: `${20 + ((i * 37) % 70)}%` }} />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <BarChart data={barData} />
+              )}
             </div>
           </div>
 
@@ -423,7 +447,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
                       <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
                     </tr>
                   ))}
-                  {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">暂无数据</td></tr>}
+                  {byModel.length === 0 && loading && [0,1,2,3].map((i) => (
+                    <tr key={i}><td colSpan={5} style={{ padding: 0 }}><div className="sk-line" style={{ margin: "10px 14px" }} /></td></tr>
+                  ))}
+                  {byModel.length === 0 && !loading && <tr><td colSpan={5} className="ops-table-empty">暂无数据</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -440,7 +467,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
                     {t.destructive > 0 && <span className="badge completeness 有限">{t.destructive} 危险</span>}
                   </div>
                 ))}
-                {topTools.length === 0 && <div className="ops-table-empty">暂无数据</div>}
+                {topTools.length === 0 && loading && [0,1,2,3].map((i) => (
+                  <div key={i} className="sk-line" style={{ margin: "10px 0" }} />
+                ))}
+                {topTools.length === 0 && !loading && <div className="ops-table-empty">暂无数据</div>}
               </div>
             </div>
           </div>
@@ -606,13 +636,11 @@ export default function OpsView({ onJumpToConversation }: Props) {
             </div>
           </div>
 
-          {overview && overview.avg_duration_ms > 0 && (
-            <div className="ops-footnote">
-              平均请求耗时 {formatDuration(overview.avg_duration_ms)} · 错误 {overview.error_count} 次 ·
-              数据口径：input + output + reasoning（cache 不计费）
-            </div>
-          )}
-        </>
+      {overview && overview.avg_duration_ms > 0 && (
+        <div className="ops-footnote">
+          平均请求耗时 {formatDuration(overview.avg_duration_ms)} · 错误 {overview.error_count} 次 ·
+          数据口径：input + output + reasoning（cache 不计费）
+        </div>
       )}
     </div>
   );

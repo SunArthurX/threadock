@@ -1998,3 +1998,55 @@ button {
 .sync-cancel:hover {
   background: var(--danger-bg);
 }
+
+/* ═══ 数据骨架屏（页面即刻渲染，数据到位前占位）═══ */
+@keyframes sk-shimmer {
+  0% { opacity: 0.45; }
+  50% { opacity: 1; }
+  100% { opacity: 0.45; }
+}
+
+.sk-line {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--bg-active);
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+  margin-bottom: 8px;
+  width: 70%;
+}
+.sk-line.sk-lg { height: 24px; width: 45%; margin-bottom: 10px; }
+.sk-line.sk-sm { width: 50%; height: 8px; margin-bottom: 0; }
+
+.ops-kpi.skeleton { padding: 18px; }
+
+.chart-skeleton {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 0;
+  min-height: 160px;
+}
+.chart-skeleton.donut .sk-circle {
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 14px solid var(--bg-active);
+  flex-shrink: 0;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
+.chart-skeleton .sk-lines { flex: 1; }
+.chart-skeleton .sk-lines .sk-line { width: 85%; }
+
+.chart-skeleton.bars { display: block; height: 140px; }
+.sk-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 100%;
+}
+.sk-bar {
+  flex: 1;
+  border-radius: 2px 2px 0 0;
+  background: var(--bg-active);
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
