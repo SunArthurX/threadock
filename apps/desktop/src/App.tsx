@@ -151,7 +151,7 @@ export default function App() {
     if (!silent) setSyncing(true);
     setError(null);
     try {
-      const result = await invoke<Record<string, number>>("auto_sync", { limit: 50 });
+      const result = await invoke<Record<string, number>>("auto_sync", {});
       const parts: string[] = [];
       const sources: [string, string][] = [
         ["zcode", "ZCode"],

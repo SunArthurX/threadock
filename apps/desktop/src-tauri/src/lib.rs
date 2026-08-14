@@ -554,9 +554,18 @@ fn import_from_codex(
 
 // ── CodeAgentOps：指标采集与聚合查询（plan codeagent-ops M2）──────────
 
+/// ops_sync 上次完成时间（毫秒）：5 分钟内不重复全量扫描（卡顿根因之一）。
+static LAST_OPS_SYNC_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 /// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
+/// force=false 时 5 分钟节流（进入治理页不再每次全量扫描 32MB+ JSONL）。
 #[tauri::command]
-fn ops_sync(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+    let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    let last = LAST_OPS_SYNC_MS.load(std::sync::atomic::Ordering::SeqCst);
+    if !force.unwrap_or(false) && last > 0 && now_ms - last < 5 * 60 * 1000 {
+        return Ok(serde_json::json!({ "usage_written": 0, "tools_written": 0, "throttled": true }));
+    }
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return Err("同步中，请稍候…".into());
     }
@@ -596,6 +605,9 @@ fn ops_sync(state: tauri::State<DaemonState>) -> Result<serde_json::Value, Strin
         }
         Ok(())
     })();
+    if result.is_ok() {
+        LAST_OPS_SYNC_MS.store(now_ms, std::sync::atomic::Ordering::SeqCst);
+    }
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
     result?;
     Ok(serde_json::json!({
@@ -820,7 +832,21 @@ fn auto_sync(
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return Err("同步中，请稍候…".into());
     }
-    let lim = limit.unwrap_or(50);
+    let result = auto_sync_inner(&state, limit);
+    IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+    result
+}
+
+/// auto_sync 实现：拉取 5 个来源的最新会话。
+/// 性能要点：
+/// - 幂等检查用一次性加载的 HashSet（旧版每会话全表扫描 → 卡顿根因之一）
+/// - 已导入但缺主子链路的旧数据，用 repair_conversation_parent 补上
+/// - limit 默认 500（覆盖全部会话；旧版 50 导致 MiniMax/ZCode 大量子任务丢失）
+fn auto_sync_inner(
+    state: &DaemonState,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let lim = limit.unwrap_or(500);
     let mut zcode_ok = 0u32;
     let mut zcode_skip = 0u32;
     let mut cc_ok = 0u32;
@@ -828,11 +854,20 @@ fn auto_sync(
     let mut cursor_ok = 0u32;
     let mut cursor_skip = 0u32;
     let mut mm_ok = 0u32;
+    let mut mm_skip = 0u32;
     let mut codex_ok = 0u32;
     let mut codex_skip = 0u32;
-    let mut mm_skip = 0u32;
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+
+    // 一次性加载已导入 (provider_id, source_id) 集合：幂等快速检查
+    let existing: std::collections::HashSet<(String, String)> = {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        repo.list_conversation_sources()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .collect()
+    };
 
     // ZCode：discover_all 返回主任务 + 子任务（子任务带 source_parent_id）
     let zcode_db = format!("{home}/.zcode/cli/db/db.sqlite");
@@ -840,21 +875,19 @@ fn auto_sync(
         match ch_adapter_zcode::discover_all_sessions(&zcode_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
-                    // 跳过已导入的（幂等检查）
-                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                    let exists = repo
-                        .list_conversations(None)
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::ZCode);
-                    drop(repo);
-                    if exists {
+                    let key = ("prov_zcode".to_string(), s.session_id.clone());
+                    if existing.contains(&key) {
+                        // 修复旧数据主子链路（子任务早期导入时无 parent 字段）
+                        if let Some(parent) = &s.parent_id {
+                            let repo = state.repo.lock().map_err(|e| e.to_string())?;
+                            let _ = repo.repair_conversation_parent("prov_zcode", &s.session_id, Some(parent));
+                        }
                         zcode_skip += 1;
                         continue;
                     }
                     match ch_adapter_zcode::parse_session(&zcode_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(&state, raw, Some("ZCode")).is_ok() {
+                            if import_raw_to_state(state, raw, Some("ZCode")).is_ok() {
                                 zcode_ok += 1;
                             }
                         }
@@ -872,20 +905,14 @@ fn auto_sync(
         match ch_adapter_claude_code::discover_sessions(&claude_home) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
-                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                    let exists = repo
-                        .list_conversations(None)
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::ClaudeCode);
-                    drop(repo);
-                    if exists {
+                    let key = ("prov_claude-code".to_string(), s.session_id.clone());
+                    if existing.contains(&key) {
                         cc_skip += 1;
                         continue;
                     }
                     match ch_adapter_claude_code::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if import_raw_to_state(&state, raw, Some("Claude Code")).is_ok() {
+                            if import_raw_to_state(state, raw, Some("Claude Code")).is_ok() {
                                 cc_ok += 1;
                             }
                         }
@@ -903,20 +930,14 @@ fn auto_sync(
         match ch_adapter_cursor::discover_sessions(&cursor_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
-                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                    let exists = repo
-                        .list_conversations(None)
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::Cursor);
-                    drop(repo);
-                    if exists {
+                    let key = ("prov_cursor".to_string(), s.session_id.clone());
+                    if existing.contains(&key) {
                         cursor_skip += 1;
                         continue;
                     }
                     match ch_adapter_cursor::parse_session(&cursor_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(&state, raw, Some("Cursor")).is_ok() {
+                            if import_raw_to_state(state, raw, Some("Cursor")).is_ok() {
                                 cursor_ok += 1;
                             }
                         }
@@ -928,26 +949,25 @@ fn auto_sync(
         }
     }
 
-    // MiniMax：discover_all 返回主任务 + 子任务（子任务带 source_parent_id）
+    // MiniMax：discover_all 返回主任务 + 子任务（过滤隐藏/归档内部残留）
     let mm_db = format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite");
     if std::path::Path::new(&mm_db).exists() {
         match ch_adapter_minimax::discover_all_sessions(&mm_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
-                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                    let exists = repo
-                        .list_conversations(None)
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::MinimaxCode);
-                    drop(repo);
-                    if exists {
+                    let key = ("prov_minimax-code".to_string(), s.session_id.clone());
+                    if existing.contains(&key) {
+                        // 修复旧数据主子链路
+                        if let Some(parent) = &s.parent_session_id {
+                            let repo = state.repo.lock().map_err(|e| e.to_string())?;
+                            let _ = repo.repair_conversation_parent("prov_minimax-code", &s.session_id, Some(parent));
+                        }
                         mm_skip += 1;
                         continue;
                     }
                     match ch_adapter_minimax::parse_session(&mm_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(&state, raw, Some("MiniMax Code")).is_ok() {
+                            if import_raw_to_state(state, raw, Some("MiniMax Code")).is_ok() {
                                 mm_ok += 1;
                             }
                         }
@@ -965,20 +985,14 @@ fn auto_sync(
         match ch_adapter_codex::discover_sessions(format!("{home}/.codex")) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
-                    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                    let exists = repo
-                        .list_conversations(None)
-                        .map_err(|e| e.to_string())?
-                        .into_iter()
-                        .any(|c| c.source_conversation_id == s.session_id && c.provider == ch_domain::Provider::Codex);
-                    drop(repo);
-                    if exists {
+                    let key = ("prov_codex".to_string(), s.session_id.clone());
+                    if existing.contains(&key) {
                         codex_skip += 1;
                         continue;
                     }
                     match ch_adapter_codex::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if import_raw_to_state(&state, raw, Some("Codex")).is_ok() {
+                            if import_raw_to_state(state, raw, Some("Codex")).is_ok() {
                                 codex_ok += 1;
                             }
                         }
@@ -990,7 +1004,6 @@ fn auto_sync(
         }
     }
 
-    IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
     Ok(serde_json::json!({
         "zcode_imported": zcode_ok,
         "zcode_skipped": zcode_skip,
@@ -1003,7 +1016,6 @@ fn auto_sync(
         "codex_imported": codex_ok,
         "codex_skipped": codex_skip,
     }))
-}
 
 /// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
 fn import_raw_to_state(

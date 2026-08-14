@@ -61,6 +61,8 @@ pub struct DiscoveredSession {
     pub updated_at_ms: i64,
     /// 子任务数量（主任务的派生分支数）。
     pub child_count: i64,
+    /// 来源侧父会话 ID（修复旧数据主子链路用）。
+    pub parent_session_id: Option<String>,
 }
 
 /// 只读打开 MiniMax runtime-state.sqlite（plan §10.1：只读快照）。
@@ -79,7 +81,7 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
 /// updated_at 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
 pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
-    // 只选 parentSessionId 为 null 的主任务
+    // 只选 parentSessionId 为 null 的主任务；过滤 runtime 内部隐藏/归档残留
     let mut stmt = conn.prepare(
         "SELECT s.session_id, s.record_json, s.updated_at_ms,
                 (SELECT count(*) FROM local_runtime_message_rows m WHERE m.session_id = s.session_id) AS msg_count,
@@ -89,6 +91,8 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
                  WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id) AS max_child_updated
          FROM local_runtime_sessions s
          WHERE json_extract(s.record_json, '$.parentSessionId') IS NULL
+           AND json_extract(s.record_json, '$.visibility') IS NOT 'hidden'
+           AND json_extract(s.record_json, '$.archived') IS NOT 1
          ORDER BY max_child_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -129,6 +133,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
             created_at_ms,
             updated_at_ms,
             child_count,
+            parent_session_id: None, // discover_sessions 只返回主任务
         })
     })?;
     let mut v = Vec::new();
@@ -140,6 +145,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
 
 /// 列出 MiniMax **所有**会话（主任务 + 子任务），按更新时间降序。
 /// 用于 auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID）。
+/// 过滤 runtime 内部隐藏/归档残留（visibility=hidden / archived=1 的无标题空会话）。
 pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn.prepare(
@@ -149,8 +155,11 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                     (SELECT count(*) FROM local_runtime_sessions c
                      WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id), 0
                 ) AS child_count,
-                s.updated_at_ms AS effective_updated
+                s.updated_at_ms AS effective_updated,
+                json_extract(s.record_json, '$.parentSessionId') AS parent
          FROM local_runtime_sessions s
+         WHERE json_extract(s.record_json, '$.visibility') IS NOT 'hidden'
+           AND json_extract(s.record_json, '$.archived') IS NOT 1
          ORDER BY effective_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -160,6 +169,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
         let msg_count: i64 = r.get(3)?;
         let child_count: i64 = r.get(4)?;
         let updated_at_ms: i64 = r.get(5).unwrap_or(self_updated_at_ms);
+        let parent: Option<String> = r.get(6)?;
         let obj: serde_json::Value = serde_json::from_str(&record_json).unwrap_or_default();
         let title = obj
             .get("title")
@@ -189,6 +199,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
             created_at_ms,
             updated_at_ms,
             child_count,
+            parent_session_id: parent.filter(|s| !s.is_empty()),
         })
     })?;
     let mut v = Vec::new();

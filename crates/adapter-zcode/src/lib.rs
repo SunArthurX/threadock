@@ -52,6 +52,8 @@ pub struct DiscoveredSession {
     pub time_updated: i64,
     /// 子任务数量（主任务的派生分支数）。
     pub child_count: i64,
+    /// 来源侧父会话 ID（修复旧数据主子链路用）。
+    pub parent_id: Option<String>,
 }
 
 /// 只读打开 ZCode 数据库（plan §10.1：只读快照原则）。
@@ -91,6 +93,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
             time_updated: time_updated.max(max_child),
             message_count: r.get(5)?,
             child_count: r.get(6)?,
+            parent_id: None, // discover_sessions 只返回主任务
         })
     })?;
     let mut v = Vec::new();
@@ -108,7 +111,8 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
         "SELECT s.id, s.title, s.directory, s.time_created, s.time_updated,
                 (SELECT count(*) FROM message m WHERE m.session_id = s.id) as msg_count,
                 COALESCE((SELECT count(*) FROM session c WHERE c.parent_id = s.id), 0) AS child_count,
-                s.time_updated AS effective_updated
+                s.time_updated AS effective_updated,
+                NULLIF(s.parent_id, '') AS parent
          FROM session s
          ORDER BY effective_updated DESC",
     )?;
@@ -121,6 +125,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
             time_updated: r.get(4)?,
             message_count: r.get(5)?,
             child_count: r.get(6)?,
+            parent_id: r.get(8)?,
         })
     })?;
     let mut v = Vec::new();

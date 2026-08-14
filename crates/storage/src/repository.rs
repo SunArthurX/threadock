@@ -756,6 +756,37 @@ impl Repository {
         Ok(v)
     }
 
+    /// 修复旧数据的主子链路：当来源侧有 parent 而库内为 NULL/不一致时更新。
+    /// 返回是否实际更新。用于 auto_sync 对已存在会话补 source_parent_id。
+    pub fn repair_conversation_parent(
+        &self,
+        provider_id: &str,
+        source_conversation_id: &str,
+        parent: Option<&str>,
+    ) -> StorageResult<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE conversations SET source_parent_id = ?1
+             WHERE provider_id = ?2 AND source_conversation_id = ?3
+               AND source_parent_id IS NOT ?1",
+            params![parent, provider_id, source_conversation_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// 已导入会话的 (provider_id, source_id) 全集（auto_sync 幂等快速检查用）。
+    pub fn list_conversation_sources(&self) -> StorageResult<Vec<(String, String)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT provider_id, source_conversation_id FROM conversations")?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
     /// 按 provider_id + source_conversation_id 精确查会话（审计跳转用）。
     pub fn find_conversation_by_source(
         &self,

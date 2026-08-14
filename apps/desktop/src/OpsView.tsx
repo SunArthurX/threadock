@@ -190,17 +190,20 @@ export default function OpsView({ onJumpToConversation }: Props) {
     }
   };
 
-  // 首次进入：同步指标 → 加载全部
+  // 首次进入：立即加载已有数据（不阻塞），后台节流同步指标，完成后刷新
   useEffect(() => {
     (async () => {
+      // 先展示库里已有的指标
+      await Promise.all([loadAll(), loadBudget(), loadPolicies()]);
+      // 后台同步（5 分钟节流；若正忙静默跳过），完成后刷新数据
       setSyncing(true);
       try {
-        await invoke("ops_sync");
+        await invoke("ops_sync", { force: false });
+        await Promise.all([loadAll(), loadBudget()]);
       } catch {
         /* 正在同步中时静默跳过 */
       }
       setSyncing(false);
-      await Promise.all([loadAll(), loadBudget(), loadPolicies()]);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -339,7 +342,7 @@ export default function OpsView({ onJumpToConversation }: Props) {
           ))}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="action-btn" disabled={syncing} onClick={async () => { setSyncing(true); try { await invoke("ops_sync"); } catch {} setSyncing(false); loadAll(); loadBudget(); }}>
+          <button className="action-btn" disabled={syncing} onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadAll(); loadBudget(); }}>
             {syncing ? "同步指标中…" : "↻ 同步指标"}
           </button>
           <button className="action-btn" onClick={recalcCost} title="按 pricing.json 重算成本">
