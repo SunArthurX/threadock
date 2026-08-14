@@ -130,6 +130,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [resetArmed, setResetArmed] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -195,10 +196,11 @@ export default function App() {
     localStorage.setItem("ch-view", view);
   }, [view]);
 
-  // 首次加载：界面立即可用，各面板独立加载，同步完全后台
+  // 首次加载：首屏零争锁（先渲染面板数据），稍后再后台同步
   useEffect(() => {
     loadWorkspaces();
-    autoSync();
+    const t = setTimeout(() => autoSync(), 600);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -444,16 +446,18 @@ export default function App() {
   };
 
   // 重置所有数据
+  // 重置：两步内联确认（替代阻塞式 native confirm）；
+  // wipe 完成立即恢复可点击，重载完全后台（不 await）
   const resetData = async () => {
     if (resetting) {
       setError("正在重置中，请稍候…");
       return;
     }
-    if (!confirm("确定要删除所有数据并重新加载吗？此操作不可撤销。")) return;
     setResetting(true);
     setError(null);
     try {
       await invoke("reset_all_data");
+      // 清空 UI，页面立即可用
       setWorkspaces([]);
       setConversations([]);
       setSelectedConv(null);
@@ -461,9 +465,10 @@ export default function App() {
       setEvents([]);
       setKnowledge(null);
       setSelectedWs(null);
+      setProviderFilter(null);
       setChildConvs({});
       setExpandedParents(new Set());
-      await autoSync();
+      setSyncResult("已重置，后台重新加载中…");
     } catch (e) {
       const msg = typeof e === "string" ? e : (e as { message?: string }).message ?? String(e);
       if (msg.includes("重置中") || msg.includes("同步中")) {
@@ -473,6 +478,9 @@ export default function App() {
       }
     }
     setResetting(false);
+    setResetArmed(false);
+    // 后台全量重载（不阻塞页面）
+    autoSync();
   };
 
   // 折叠/展开单条消息
@@ -761,12 +769,20 @@ export default function App() {
           </>
         )}
         <button
-          className="reset-btn"
+          className={`reset-btn ${resetArmed ? "armed" : ""}`}
           disabled={resetting}
-          onClick={resetData}
-          title="删除所有数据并重新加载"
+          onClick={() => {
+            if (resetArmed) {
+              resetData();
+            } else {
+              setResetArmed(true);
+              // 3 秒未确认自动解除
+              setTimeout(() => setResetArmed(false), 3000);
+            }
+          }}
+          title="删除所有数据并重新加载（点两次确认）"
         >
-          {resetting ? "重置中…" : "↻ 重置"}
+          {resetting ? "重置中…" : resetArmed ? "确认重置？" : "↻ 重置"}
         </button>
         <button
           className="theme-toggle"

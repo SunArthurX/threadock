@@ -1888,3 +1888,10 @@ button {
   border-width: 2px;
   flex-shrink: 0;
 }
+
+/* 两步确认重置按钮 */
+.reset-btn.armed {
+  background: var(--danger) !important;
+  border-color: var(--danger) !important;
+  color: #fff !important;
+}

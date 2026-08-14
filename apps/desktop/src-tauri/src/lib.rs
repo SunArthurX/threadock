@@ -731,7 +731,7 @@ fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value
     // 本月 1 号 00:00 UTC 的毫秒
     let month_start = time::Date::from_calendar_date(
         now.year(),
-        time::Month::try_from(u8::try_from(now.month() as u8).unwrap_or(1)).unwrap_or(time::Month::January),
+        time::Month::try_from(now.month() as u8).unwrap_or(time::Month::January),
         1,
     )
     .map_err(|e| e.to_string())?
@@ -860,6 +860,9 @@ fn auto_sync_inner(
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
 
+    // 全部导入完成后一次性提交索引（单 writer 单 commit，性能关键路径）
+    let mut pending_index: Vec<ch_search::index::IndexableMessage> = Vec::new();
+
     // 一次性加载已导入 (provider_id, source_id) 集合：幂等快速检查
     let existing: std::collections::HashSet<(String, String)> = {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
@@ -887,7 +890,8 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_zcode::parse_session(&zcode_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(state, raw, Some("ZCode")).is_ok() {
+                            if let Ok(o) = import_raw_inner(state, raw, Some("ZCode")) {
+                                pending_index.extend(o.indexable);
                                 zcode_ok += 1;
                             }
                         }
@@ -912,7 +916,8 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_claude_code::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if import_raw_to_state(state, raw, Some("Claude Code")).is_ok() {
+                            if let Ok(o) = import_raw_inner(state, raw, Some("Claude Code")) {
+                                pending_index.extend(o.indexable);
                                 cc_ok += 1;
                             }
                         }
@@ -937,7 +942,8 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_cursor::parse_session(&cursor_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(state, raw, Some("Cursor")).is_ok() {
+                            if let Ok(o) = import_raw_inner(state, raw, Some("Cursor")) {
+                                pending_index.extend(o.indexable);
                                 cursor_ok += 1;
                             }
                         }
@@ -967,7 +973,8 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_minimax::parse_session(&mm_db, &s.session_id) {
                         Ok(raw) => {
-                            if import_raw_to_state(state, raw, Some("MiniMax Code")).is_ok() {
+                            if let Ok(o) = import_raw_inner(state, raw, Some("MiniMax Code")) {
+                                pending_index.extend(o.indexable);
                                 mm_ok += 1;
                             }
                         }
@@ -992,7 +999,8 @@ fn auto_sync_inner(
                     }
                     match ch_adapter_codex::parse_session(&s.file_path) {
                         Ok(raw) => {
-                            if import_raw_to_state(state, raw, Some("Codex")).is_ok() {
+                            if let Ok(o) = import_raw_inner(state, raw, Some("Codex")) {
+                                pending_index.extend(o.indexable);
                                 codex_ok += 1;
                             }
                         }
@@ -1003,6 +1011,9 @@ fn auto_sync_inner(
             Err(e) => tracing::warn!(error = %e, "codex discover failed"),
         }
     }
+
+    // 索引统一提交：整轮同步只有 1 次 tantivy commit
+    commit_index(state, &pending_index)?;
 
     Ok(serde_json::json!({
         "zcode_imported": zcode_ok,
@@ -1018,13 +1029,19 @@ fn auto_sync_inner(
     }))
 }
 
-/// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
+/// 导入产出：DTO + 待索引消息（索引延后统一提交）。
+struct ImportOutcome {
+    dto: ImportResultDto,
+    indexable: Vec<ch_search::index::IndexableMessage>,
+}
+
+/// 通用导入（不含索引）：RawConversation → DaemonState。
 /// 性能：单事务批量写入（每会话一次 fsync），大幅降低主锁占用 → UI 不卡。
-fn import_raw_to_state(
+fn import_raw_inner(
     state: &DaemonState,
     raw: RawConversation,
     workspace_name: Option<&str>,
-) -> Result<ImportResultDto, String> {
+) -> Result<ImportOutcome, String> {
     let provider = raw.provider;
     let raw_bytes = serde_json::to_vec(&raw).map_err(|e| e.to_string())?;
     let raw_store = state.raw_store.lock().map_err(|e| e.to_string())?;
@@ -1050,11 +1067,10 @@ fn import_raw_to_state(
     let conv_title = conv.effective_title().to_string();
     drop(repo);
 
-    // Tantivy 索引（锁外执行）
-    let idx = state.search_index.lock().map_err(|e| e.to_string())?;
-    let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
-    for m in &messages {
-        let im = ch_search::index::IndexableMessage {
+    // 构建待索引消息（调用方决定何时提交：单条立即，批量最后一次性）
+    let indexable = messages
+        .iter()
+        .map(|m| ch_search::index::IndexableMessage {
             message_id: m.id.clone(),
             conversation_id: conversation_id.clone(),
             provider,
@@ -1062,18 +1078,48 @@ fn import_raw_to_state(
             role: m.role,
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
-        };
-        idx.index_message(&mut writer, &im).map_err(|e| e.to_string())?;
+        })
+        .collect();
+
+    Ok(ImportOutcome {
+        dto: ImportResultDto {
+            conversation_id,
+            workspace_id,
+            messages: normalized.messages.len(),
+            events: normalized.events.len(),
+            completeness: normalized.completeness.label().to_string(),
+        },
+        indexable,
+    })
+}
+
+/// 统一提交索引：一个 writer 一次 commit（批量同步的关键性能路径，
+/// 旧路径每会话一次 commit，500 会话 = 500 次 segment 落盘）。
+fn commit_index(
+    state: &DaemonState,
+    docs: &[ch_search::index::IndexableMessage],
+) -> Result<(), String> {
+    if docs.is_empty() {
+        return Ok(());
+    }
+    let idx = state.search_index.lock().map_err(|e| e.to_string())?;
+    let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
+    for im in docs {
+        idx.index_message(&mut writer, im).map_err(|e| e.to_string())?;
     }
     idx.commit(writer).map_err(|e| e.to_string())?;
+    Ok(())
+}
 
-    Ok(ImportResultDto {
-        conversation_id,
-        workspace_id,
-        messages: normalized.messages.len(),
-        events: normalized.events.len(),
-        completeness: normalized.completeness.label().to_string(),
-    })
+/// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
+fn import_raw_to_state(
+    state: &DaemonState,
+    raw: RawConversation,
+    workspace_name: Option<&str>,
+) -> Result<ImportResultDto, String> {
+    let outcome = import_raw_inner(state, raw, workspace_name)?;
+    commit_index(state, &outcome.indexable)?;
+    Ok(outcome.dto)
 }
 
 /// 导出单条会话为 Markdown 或 JSON 字符串（plan §6.6）。
