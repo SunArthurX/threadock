@@ -147,6 +147,16 @@ fn list_child_conversations(
 /// 全局防重入标志：避免重置/同步并发执行导致 UI 卡顿或数据竞争。
 static IS_BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// 取消同步标志：前端「取消更新」按钮设置，同步循环内定期检查提前退出。
+static CANCEL_SYNC: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 请求取消当前正在进行的同步（对话/指标），无进行中的同步也无副作用。
+#[tauri::command]
+fn cancel_sync() -> Result<(), String> {
+    CANCEL_SYNC.store(true, std::sync::atomic::Ordering::SeqCst);
+    Ok(())
+}
+
 /// 重置所有数据（清空 conversations/workspaces + 索引 + raw blobs）。
 /// 保留 schema 和用户自定义脱敏规则。
 /// 若已有重置/同步在进行中，返回错误提示前端。
@@ -359,18 +369,31 @@ struct SourceSessionDto {
     title: String,
     detail: String,
     message_count: Option<i64>,
+    /// 已导入标记（一次 HashSet 查询批量判定，非逐条）。
+    imported: bool,
+}
+
+/// 一次性加载 (provider_id, source_id) 已导入集合（来源面板批量标记用）。
+fn imported_set(state: &DaemonState) -> std::collections::HashSet<(String, String)> {
+    state
+        .repo
+        .lock()
+        .map(|r| r.list_conversation_sources().unwrap_or_default().into_iter().collect())
+        .unwrap_or_default()
 }
 
 /// 列出 ZCode 会话。
 #[tauri::command]
-fn list_zcode_sessions() -> Result<Vec<SourceSessionDto>, String> {
+fn list_zcode_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
     let sessions = ch_adapter_zcode::discover_sessions(&db_path)
         .map_err(|e| format!("discover zcode: {e}"))?;
+    let imported = imported_set(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
+            imported: imported.contains(&("prov_zcode".to_string(), s.session_id.clone())),
             session_id: s.session_id,
             title: s.title,
             detail: s.directory,
@@ -394,14 +417,16 @@ fn import_from_zcode(
 
 /// 列出 Claude Code 会话。
 #[tauri::command]
-fn list_claude_code_sessions() -> Result<Vec<SourceSessionDto>, String> {
+fn list_claude_code_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
     let claude_home = format!("{home}/.claude");
     let sessions = ch_adapter_claude_code::discover_sessions(&claude_home)
         .map_err(|e| format!("discover claude code: {e}"))?;
+    let imported = imported_set(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
+            imported: imported.contains(&("prov_claude-code".to_string(), s.session_id.clone())),
             session_id: s.session_id,
             title: s.project_dir.clone(),
             detail: format!("{} KB", s.size_bytes / 1024),
@@ -445,13 +470,15 @@ fn minimax_db_path() -> Result<String, String> {
 
 /// 列出 Cursor 会话。
 #[tauri::command]
-fn list_cursor_sessions() -> Result<Vec<SourceSessionDto>, String> {
+fn list_cursor_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let db = cursor_db_path()?;
     let sessions = ch_adapter_cursor::discover_sessions(&db)
         .map_err(|e| format!("discover cursor: {e}"))?;
+    let imported = imported_set(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
+            imported: imported.contains(&("prov_cursor".to_string(), s.session_id.clone())),
             session_id: s.session_id,
             title: s.title,
             detail: format!("{} 条消息", s.message_count),
@@ -474,10 +501,11 @@ fn import_from_cursor(
 
 /// 列出 MiniMax 会话。
 #[tauri::command]
-fn list_minimax_sessions() -> Result<Vec<SourceSessionDto>, String> {
+fn list_minimax_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let db = minimax_db_path()?;
     let sessions = ch_adapter_minimax::discover_sessions(&db)
         .map_err(|e| format!("discover minimax: {e}"))?;
+    let imported = imported_set(&state);
     Ok(sessions
         .into_iter()
         .map(|s| {
@@ -486,6 +514,7 @@ fn list_minimax_sessions() -> Result<Vec<SourceSessionDto>, String> {
                 detail = format!("{} · {detail}", s.agent_name);
             }
             SourceSessionDto {
+                imported: imported.contains(&("prov_minimax-code".to_string(), s.session_id.clone())),
                 session_id: s.session_id,
                 title: s.title,
                 detail: if s.child_count > 0 {
@@ -521,13 +550,15 @@ fn codex_home() -> Result<String, String> {
 
 /// 列出 Codex 会话。
 #[tauri::command]
-fn list_codex_sessions() -> Result<Vec<SourceSessionDto>, String> {
+fn list_codex_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = codex_home()?;
     let sessions = ch_adapter_codex::discover_sessions(&home)
         .map_err(|e| format!("discover codex: {e}"))?;
+    let imported = imported_set(&state);
     Ok(sessions
         .into_iter()
         .map(|s| SourceSessionDto {
+            imported: imported.contains(&("prov_codex".to_string(), s.session_id.clone())),
             session_id: s.session_id,
             title: s.title,
             detail: format!("{} KB", s.size_bytes / 1024),
@@ -556,18 +587,30 @@ fn import_from_codex(
 
 // ── CodeAgentOps：指标采集与聚合查询（plan codeagent-ops M2）──────────
 
-/// ops_sync 上次完成时间（毫秒）：5 分钟内不重复全量扫描（卡顿根因之一）。
+/// ops_sync 上次完成时间（毫秒，进程内存缓存；真源为 app_settings.last_ops_sync_ms）。
 static LAST_OPS_SYNC_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// ops 同步节流窗口：30 分钟内不重复全量扫描（跨进程持久，重启后仍生效）。
+const OPS_SYNC_THROTTLE_MS: i64 = 30 * 60 * 1000;
 
 /// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
 /// force=false 时 5 分钟节流（进入治理页不再每次全量扫描 32MB+ JSONL）。
 #[tauri::command]
 fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
-    let last = LAST_OPS_SYNC_MS.load(std::sync::atomic::Ordering::SeqCst);
-    if !force.unwrap_or(false) && last > 0 && now_ms - last < 5 * 60 * 1000 {
+    // 持久节流：优先读库内时间戳（跨进程），内存值兜底
+    let mut last = LAST_OPS_SYNC_MS.load(std::sync::atomic::Ordering::SeqCst);
+    if last == 0 {
+        if let Ok(repo) = state.repo.lock() {
+            if let Ok(Some(v)) = repo.get_setting("last_ops_sync_ms") {
+                last = v.parse().unwrap_or(0);
+            }
+        }
+    }
+    if !force.unwrap_or(false) && last > 0 && now_ms - last < OPS_SYNC_THROTTLE_MS {
         return Ok(serde_json::json!({ "usage_written": 0, "tools_written": 0, "throttled": true }));
     }
+    CANCEL_SYNC.store(false, std::sync::atomic::Ordering::SeqCst);
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return Err("同步中，请稍候…".into());
     }
@@ -614,6 +657,9 @@ fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<ser
     })();
     if result.is_ok() {
         LAST_OPS_SYNC_MS.store(now_ms, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(repo) = state.repo.lock() {
+            let _ = repo.set_setting("last_ops_sync_ms", &now_ms.to_string());
+        }
     }
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
     result?;
@@ -903,6 +949,8 @@ fn auto_sync_inner(
     state: &DaemonState,
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
+    CANCEL_SYNC.store(false, std::sync::atomic::Ordering::SeqCst);
+    let mut cancelled = false;
     let lim = limit.unwrap_or(500);
     let mut zcode_ok = 0u32;
     let mut zcode_skip = 0u32;
@@ -935,6 +983,10 @@ fn auto_sync_inner(
         match ch_adapter_zcode::discover_all_sessions(&zcode_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
+                    if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
                     let key = ("prov_zcode".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
                         // 修复旧数据主子链路（子任务早期导入时无 parent 字段）
@@ -969,6 +1021,10 @@ fn auto_sync_inner(
         match ch_adapter_claude_code::discover_sessions(&claude_home) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
+                    if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
                     let key = ("prov_claude-code".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
                         cc_skip += 1;
@@ -998,6 +1054,10 @@ fn auto_sync_inner(
         match ch_adapter_cursor::discover_sessions(&cursor_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
+                    if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
                     let key = ("prov_cursor".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
                         cursor_skip += 1;
@@ -1027,6 +1087,10 @@ fn auto_sync_inner(
         match ch_adapter_minimax::discover_all_sessions(&mm_db) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
+                    if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
                     let key = ("prov_minimax-code".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
                         // 修复旧数据主子链路
@@ -1061,6 +1125,10 @@ fn auto_sync_inner(
         match ch_adapter_codex::discover_sessions(format!("{home}/.codex")) {
             Ok(sessions) => {
                 for s in sessions.into_iter().take(lim) {
+                    if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
+                        cancelled = true;
+                        break;
+                    }
                     let key = ("prov_codex".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
                         codex_skip += 1;
@@ -1087,7 +1155,14 @@ fn auto_sync_inner(
     // 索引统一提交：整轮同步只有 1 次 tantivy commit
     commit_index(state, &pending_index)?;
 
+    // 记录同步时间戳（持久化，供节流与展示）
+    if let Ok(repo) = state.repo.lock() {
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds();
+        let _ = repo.set_setting("last_conv_sync_ms", &now_ms.to_string());
+    }
+
     Ok(serde_json::json!({
+        "cancelled": cancelled,
         "zcode_imported": zcode_ok,
         "zcode_skipped": zcode_skip,
         "claude_code_imported": cc_ok,
@@ -1454,6 +1529,7 @@ pub fn run() {
             ops_cost_recalc,
             auto_sync,
             reset_all_data,
+            cancel_sync,
             export_conversation,
             save_text_file,
             set_favorite,

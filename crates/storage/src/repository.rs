@@ -1101,6 +1101,29 @@ impl Repository {
         Ok(n)
     }
 
+    /// 读取通用设置（不存在返回 None）。
+    pub fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT value FROM app_settings WHERE key = ?1",
+            params![key],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// 写入通用设置（upsert）。
+    pub fn set_setting(&self, key: &str, value: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     // ── 审计：策略规则 + 预算设置 + 消息扫描流（plan codeagent-ops M4/M5）──
 
     /// 列出策略规则。

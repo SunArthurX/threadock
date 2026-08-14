@@ -304,7 +304,7 @@ button {
 
 .main {
   display: grid;
-  grid-template-columns: 208px 330px 1fr;
+  grid-template-columns: 340px 1fr;
   flex: 1;
   overflow: hidden;
 }
@@ -1894,4 +1894,107 @@ button {
   background: var(--danger) !important;
   border-color: var(--danger) !important;
   color: #fff !important;
+}
+
+/* ═══ 企业级优化：导入下拉 / 已导入徽章 / 同步取消 ═══ */
+
+/* 顶栏导入下拉 */
+.import-dropdown {
+  position: relative;
+}
+
+.import-trigger {
+  padding: 6px 14px !important;
+  background: var(--accent-bg) !important;
+  border: 1px solid var(--accent-border) !important;
+  color: var(--accent-hover) !important;
+  font-weight: 600 !important;
+}
+
+.import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+}
+
+.import-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 240px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
+  z-index: 901;
+  animation: panel-in 140ms ease-out;
+}
+
+.import-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  transition: all var(--transition);
+}
+
+.import-menu button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.import-menu-sep {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 5px 8px;
+}
+
+/* 来源面板：已导入 */
+.source-item.imported {
+  opacity: 0.65;
+}
+
+.source-item.imported:hover {
+  background: transparent;
+  cursor: default;
+}
+
+.imported-badge {
+  float: right;
+  font-size: 10px;
+  font-weight: 640;
+  color: var(--c-codex);
+  background: rgba(61, 219, 160, 0.12);
+  border-radius: 99px;
+  padding: 1px 8px;
+}
+
+/* 同步中取消按钮 */
+.syncing-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-hover) !important;
+  border-color: var(--accent-border) !important;
+  background: var(--accent-bg) !important;
+}
+
+.sync-cancel {
+  font-size: 10.5px;
+  color: var(--danger);
+  background: none;
+  padding: 0 6px;
+  border: 1px solid rgba(240, 112, 112, 0.4);
+  border-radius: 99px;
+  transition: all var(--transition);
+}
+
+.sync-cancel:hover {
+  background: var(--danger-bg);
 }

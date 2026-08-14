@@ -5,15 +5,6 @@ import OpsView from "./OpsView";
 
 // ── 后端返回类型（与 Rust serde 对应）──────────────────────────────────
 
-interface Workspace {
-  id: string;
-  display_name: string;
-  user_title: string | null;
-  status: string;
-  created_at_ms: number | null;
-  updated_at_ms: number | null;
-}
-
 interface Conversation {
   id: string;
   provider: string;
@@ -60,6 +51,7 @@ interface SourceSession {
   title: string;
   detail: string;
   message_count: number | null;
+  imported: boolean;
 }
 
 interface EventDto {
@@ -99,7 +91,6 @@ const COLLAPSE_THRESHOLD = 600;
 
 export default function App() {
   // 面板级加载态：不阻塞整个应用，各区域独立显示加载中
-  const [wsLoading, setWsLoading] = useState(true);
   const [convsLoading, setConvsLoading] = useState(false);
   const [msgsLoading, setMsgsLoading] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">(() =>
@@ -108,7 +99,6 @@ export default function App() {
   const [view, setView] = useState<"chat" | "ops">(() =>
     (localStorage.getItem("ch-view") as "chat" | "ops") || "chat"
   );
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -131,6 +121,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetArmed, setResetArmed] = useState(false);
+  const [importMenu, setImportMenu] = useState<"root" | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
 
@@ -140,17 +131,7 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
-  // 加载 workspace 列表
-  const loadWorkspaces = async () => {
-    setWsLoading(true);
-    try {
-      const ws = await invoke<Workspace[]>("list_workspaces");
-      setWorkspaces(ws);
-    } catch (e) {
-      showError(e);
-    }
-    setWsLoading(false);
-  };
+
 
   // 自动同步（silent=true 时不阻塞，后台定时同步用）
   const autoSync = async (silent = false) => {
@@ -174,7 +155,7 @@ export default function App() {
         }
       }
       setSyncResult(parts.length > 0 ? parts.join(" | ") : "无新数据");
-      await loadWorkspaces();
+      await loadConversations();
     } catch (e) {
       const msg = typeof e === "string" ? e : (e as { message?: string }).message ?? String(e);
       // 防重入冲突时静默跳过（后台同步或重置进行中）
@@ -198,26 +179,27 @@ export default function App() {
 
   // 首次加载：首屏零争锁（先渲染面板数据），稍后再后台同步
   useEffect(() => {
-    loadWorkspaces();
+    loadConversations();
     const t = setTimeout(() => autoSync(), 600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 每 10 分钟增量同步一次
+  // 每 30 分钟全量数据更新（对话 + 治理指标），后台执行不打扰页面
   useEffect(() => {
     const interval = setInterval(() => {
-      autoSync(true);
-    }, 10 * 60 * 1000);
+      (async () => {
+        await autoSync(true);
+        try { await invoke("ops_sync", { force: false }); } catch { /* 节流/互斥时静默 */ }
+      })();
+    }, 30 * 60 * 1000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // provider 筛选变化时重新加载当前 workspace 的会话
+  // provider 筛选变化时重新加载会话
   useEffect(() => {
-    if (selectedWs) {
-      selectWorkspace(selectedWs);
-    }
+    loadConversations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providerFilter]);
 
@@ -239,16 +221,16 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourcePanel, searchResults]);
 
-  // 选择 workspace → 加载会话
-  const selectWorkspace = async (id: string) => {
-    setSelectedWs(id);
+  // 加载全部会话（按来源筛选）
+  const loadConversations = async () => {
+    setSelectedWs(null);
     setSearchResults(null);
     setExpandedParents(new Set());
     setChildConvs({});
     setConvsLoading(true);
     try {
       const convs = await invoke<Conversation[]>("list_conversations", {
-        workspaceId: id,
+        workspaceId: null,
         provider: providerFilter,
       });
       const sorted = [...convs].sort((a, b) => {
@@ -358,9 +340,6 @@ export default function App() {
         conversationId: r.conversation_id,
       });
       const conv = detail.conversation;
-      if (conv.workspace_id && conv.workspace_id !== selectedWs) {
-        await selectWorkspace(conv.workspace_id);
-      }
       setSelectedConv(conv);
       setMessages(detail.messages);
       setEvents(detail.events);
@@ -392,9 +371,6 @@ export default function App() {
         setError("未找到对应会话（可能已被重置，先同步数据）");
         return;
       }
-      if (conv.workspace_id && conv.workspace_id !== selectedWs) {
-        await selectWorkspace(conv.workspace_id);
-      }
       await selectConversation(conv, messageId ?? undefined);
     } catch (e) {
       showError(e);
@@ -413,7 +389,7 @@ export default function App() {
         path: selected,
         workspaceName: null,
       });
-      await loadWorkspaces();
+      await loadConversations();
       setError(null);
       alert(`导入成功：${result.messages} 条消息，完整度 ${result.completeness}`);
     } catch (e) {
@@ -458,7 +434,6 @@ export default function App() {
     try {
       await invoke("reset_all_data");
       // 清空 UI，页面立即可用
-      setWorkspaces([]);
       setConversations([]);
       setSelectedConv(null);
       setMessages([]);
@@ -506,28 +481,7 @@ export default function App() {
     return `${Y}-${M}-${D} ${h}:${m}:${s}`;
   };
 
-  // 仅日期：YYYY-MM-DD（左侧列表用）
-  const formatDate = (ms: number | null): string => {
-    if (!ms) return "";
-    const d = new Date(ms);
-    const Y = d.getFullYear();
-    const M = String(d.getMonth() + 1).padStart(2, "0");
-    const D = String(d.getDate()).padStart(2, "0");
-    return `${Y}-${M}-${D}`;
-  };
 
-  // workspace 显示名 → provider 字符串（用于左侧来源标签）
-  const wsNameToProvider = (name: string): string => {
-    const map: Record<string, string> = {
-      "ZCode": "zcode",
-      "Claude Code": "claude-code",
-      "Cursor": "cursor",
-      "MiniMax Code": "minimax-code",
-      "Codex": "codex",
-      "OpenCode": "opencode",
-    };
-    return map[name] ?? "generic";
-  };
 
   // 来源标签
   const sourceLabel = (p: string): string => {
@@ -571,8 +525,10 @@ export default function App() {
     }
   };
 
-  // 从来源导入一条会话
+  // 从来源导入一条会话（已导入的直接跳过）
   const importFromSource = async (sessionId: string) => {
+    const target = sourceSessions.find((s) => s.session_id === sessionId);
+    if (target?.imported) return;
     setImporting(true);
     setError(null);
     try {
@@ -584,7 +540,7 @@ export default function App() {
         "codex": "import_from_codex",
       }[sourcePanel!]!;
       const result = await invoke<ImportResultDto>(cmd, { sessionId });
-      await loadWorkspaces();
+      await loadConversations();
       setImporting(false);
       setSourcePanel(null);
       alert(
@@ -609,11 +565,12 @@ export default function App() {
       "minimax": "import_from_minimax",
       "codex": "import_from_codex",
     }[sourcePanel]!;
+    const pending = sourceSessions.filter((s) => !s.imported);
     let ok = 0;
     let fail = 0;
-    for (let i = 0; i < sourceSessions.length; i++) {
-      const s = sourceSessions[i];
-      setBatchProgress({ done: i, total: sourceSessions.length });
+    for (let i = 0; i < pending.length; i++) {
+      const s = pending[i];
+      setBatchProgress({ done: i, total: pending.length });
       try {
         await invoke<ImportResultDto>(cmd, { sessionId: s.session_id });
         ok += 1;
@@ -621,8 +578,8 @@ export default function App() {
         fail += 1;
       }
     }
-    setBatchProgress({ done: sourceSessions.length, total: sourceSessions.length });
-    await loadWorkspaces();
+    setBatchProgress({ done: pending.length, total: pending.length });
+    await loadConversations();
     setImporting(false);
     setBatchProgress(null);
     setSourcePanel(null);
@@ -742,8 +699,13 @@ export default function App() {
         </div>
         {view === "chat" && (
           <>
-            {syncing && <span className="sync-status">⟳ 同步中…</span>}
-            {!syncing && syncResult && (
+            {syncing ? (
+              <span className="sync-status syncing-chip">
+                ⟳ 数据更新中…
+                <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => {})}>取消</button>
+              </span>
+            ) : syncResult ? null : null}
+            {view === "chat" && !syncing && syncResult && (
               <span className="sync-status done" title={syncResult}>
                 ✓ {syncResult}
               </span>
@@ -760,12 +722,39 @@ export default function App() {
               <button onClick={doSearch}>搜索</button>
               {searchResults && <button onClick={clearSearch}>清除</button>}
             </div>
-            <button onClick={importHandler} title="导入 Markdown/JSONL 文件">＋ 文件</button>
-            <button onClick={() => loadSourceSessions("zcode")}>ZCode</button>
-            <button onClick={() => loadSourceSessions("claude-code")}>Claude Code</button>
-            <button onClick={() => loadSourceSessions("cursor")}>Cursor</button>
-            <button onClick={() => loadSourceSessions("minimax")}>MiniMax</button>
-            <button onClick={() => loadSourceSessions("codex")}>Codex</button>
+            {/* 导入来源：聚合下拉菜单 */}
+            <div className="import-dropdown">
+              <button
+                className="import-trigger"
+                onClick={() => setImportMenu(importMenu === null ? "root" : null)}
+              >
+                📥 导入 ▾
+              </button>
+              {importMenu === "root" && (
+                <>
+                  <div className="import-backdrop" onClick={() => setImportMenu(null)} />
+                  <div className="import-menu">
+                    <button onClick={() => { setImportMenu(null); importHandler(); }}>📄 从文件导入（Markdown/JSONL）</button>
+                    <div className="import-menu-sep" />
+                    <button onClick={() => { setImportMenu(null); loadSourceSessions("zcode"); }}>
+                      <span className="badge source zcode">ZCode</span> 从 ZCode 导入
+                    </button>
+                    <button onClick={() => { setImportMenu(null); loadSourceSessions("claude-code"); }}>
+                      <span className="badge source claude-code">Claude Code</span> 从 Claude Code 导入
+                    </button>
+                    <button onClick={() => { setImportMenu(null); loadSourceSessions("cursor"); }}>
+                      <span className="badge source cursor">Cursor</span> 从 Cursor 导入
+                    </button>
+                    <button onClick={() => { setImportMenu(null); loadSourceSessions("minimax"); }}>
+                      <span className="badge source minimax-code">MiniMax</span> 从 MiniMax 导入
+                    </button>
+                    <button onClick={() => { setImportMenu(null); loadSourceSessions("codex"); }}>
+                      <span className="badge source codex">Codex</span> 从 Codex 导入
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </>
         )}
         <button
@@ -834,10 +823,13 @@ export default function App() {
               {sourceSessions.map((s) => (
                 <div
                   key={s.session_id}
-                  className="source-item"
-                  onClick={() => !importing && importFromSource(s.session_id)}
+                  className={`source-item ${s.imported ? "imported" : ""}`}
+                  onClick={() => !importing && !s.imported && importFromSource(s.session_id)}
                 >
-                  <div className="source-title">{s.title || "(无标题)"}</div>
+                  <div className="source-title">
+                    {s.title || "(无标题)"}
+                    {s.imported && <span className="imported-badge">✓ 已导入</span>}
+                  </div>
                   <div className="source-meta">
                     {s.message_count != null && `${s.message_count} 消息 · `}
                     {s.detail}
@@ -856,37 +848,6 @@ export default function App() {
         <OpsView onJumpToConversation={jumpFromAudit} />
       ) : (
       <div className="main">
-        {/* 左栏：Workspaces（按来源归组）*/}
-        <div className="panel">
-          <div className="panel-header">来源 ({workspaces.length})</div>
-          {wsLoading && (
-            <div className="panel-loading">
-              <div className="spinner spinner-sm" />
-              <span>加载来源…</span>
-            </div>
-          )}
-          {!wsLoading && workspaces.map((ws) => {
-            const name = ws.user_title ?? ws.display_name;
-            const provider = wsNameToProvider(name);
-            return (
-              <div
-                key={ws.id}
-                className={`list-item ${selectedWs === ws.id ? "active" : ""}`}
-                onClick={() => selectWorkspace(ws.id)}
-              >
-                <div className="title">
-                  <span className={`ws-dot ${provider}`} />
-                  {sourceLabel(provider)}
-                </div>
-                <div className="meta">
-                  <span className="ws-time">{formatDate(ws.updated_at_ms)}</span>
-                </div>
-              </div>
-            );
-          })}
-          {!wsLoading && workspaces.length === 0 && <div className="empty">暂无来源</div>}
-        </div>
-
         {/* 中栏：搜索结果 或 会话列表 */}
         <div className="panel">
           {searchResults ? (

@@ -340,3 +340,10 @@ CREATE TABLE IF NOT EXISTS budget_settings (
     updated_at INTEGER NOT NULL
 );
 "#;
+/// V8：通用键值设置（同步节流时间戳等跨进程持久状态）。
+pub const SCHEMA_V8: &str = r#"
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"#;
