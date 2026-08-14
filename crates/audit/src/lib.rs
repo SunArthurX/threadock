@@ -141,17 +141,25 @@ impl AuditScanner {
     /// 扫描一批消息 → 敏感信息发现（片段脱敏）。
     pub fn scan_message(&self, row: &AuditMessageRow) -> Vec<AuditFinding> {
         let mut out = Vec::new();
+        let text = &row.content_text;
         for (name, re, sev) in &self.sensitive_rules {
             // 同一规则同一消息只报首次命中，避免刷屏
-            if let Some(m) = re.find(&row.content_text) {
-                // 命中上下文（前后各 40 字符），敏感部分用占位符
-                let start = m.start().saturating_sub(40);
-                let end = (m.end() + 40).min(row.content_text.len());
+            if let Some(m) = re.find(text) {
+                // 命中上下文（前后各 ~40 字节），字节偏移必须回退到 UTF-8 字符边界，
+                // 否则切片 panic（中文多字节场景，2026-08-14 真实崩溃事故）
+                let mut start = m.start().saturating_sub(40);
+                while !text.is_char_boundary(start) {
+                    start -= 1;
+                }
+                let mut end = (m.end() + 40).min(text.len());
+                while !text.is_char_boundary(end) {
+                    end -= 1;
+                }
                 let ctx: String = format!(
                     "{}[REDACTED:{}]{}",
-                    &row.content_text[start..m.start()],
+                    &text[start..m.start()],
                     name,
-                    &row.content_text[m.end()..end]
+                    &text[m.end()..end]
                 );
                 out.push(AuditFinding {
                     kind: "sensitive".into(),
@@ -359,6 +367,27 @@ mod tests {
         let gh = f.iter().find(|x| x.rule == "github_token").unwrap();
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
         assert!(!gh.snippet.contains("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890"));
+    }
+
+    #[test]
+    fn scan_message_multibyte_no_panic() {
+        // 回归：命中点前后 ±40 字节落在中文多字节字符中间时，
+        // 旧实现按字节切片直接 panic（2026-08-14 崩溃事故）
+        let sc = scanner();
+        let zh = "中".repeat(60); // 每字 3 字节，任意 ±40 偏移必落字符内
+        let row = AuditMessageRow {
+            message_id: "m1".into(),
+            provider: "zcode".into(),
+            source_conversation_id: "s1".into(),
+            conversation_title: None,
+            content_text: format!("{zh}ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890{zh}"),
+        };
+        let findings = sc.scan_message(&row); // 修复前此处 panic
+        assert!(findings.iter().any(|f| f.rule == "github_token"));
+        let gh = findings.iter().find(|f| f.rule == "github_token").unwrap();
+        assert!(gh.snippet.contains("[REDACTED:github_token]"));
+        // 片段不应包含损坏的 UTF-8（已是 String，天然安全）
+        assert!(gh.snippet.chars().count() > 0);
     }
 
     #[test]

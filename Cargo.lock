@@ -393,6 +393,7 @@ version = "0.1.0"
 dependencies = [
  "ch-adapter-jsonl",
  "ch-adapter-markdown",
+ "ch-audit",
  "ch-domain",
  "ch-identity-resolver",
  "ch-knowledge",

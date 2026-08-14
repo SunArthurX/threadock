@@ -144,24 +144,22 @@ export default function OpsView({ onJumpToConversation }: Props) {
 
   const loadAll = async () => {
     setLoading(true);
-    try {
-      const [ov, bp, bm, ts, tt, rc] = await Promise.all([
-        invoke<OpsOverview>("ops_overview", { days: range }),
-        invoke<ProviderUsage[]>("ops_by_provider", { days: range }),
-        invoke<ModelUsage[]>("ops_by_model", { days: range }),
-        invoke<DailyUsage[]>("ops_timeseries", { days: range }),
-        invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }),
-        invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }),
-      ]);
-      setOverview(ov);
-      setByProvider(bp);
-      setByModel(bm);
-      setTimeseries(ts);
-      setTopTools(tt);
-      setRisky(rc);
-    } catch (e) {
-      console.error("ops load failed", e);
-    }
+    // allSettled：单个接口失败只影响对应卡片，不再拖空整页数据
+    const [ov, bp, bm, ts, tt, rc] = await Promise.allSettled([
+      invoke<OpsOverview>("ops_overview", { days: range }),
+      invoke<ProviderUsage[]>("ops_by_provider", { days: range }),
+      invoke<ModelUsage[]>("ops_by_model", { days: range }),
+      invoke<DailyUsage[]>("ops_timeseries", { days: range }),
+      invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }),
+      invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }),
+    ]);
+    if (ov.status === "fulfilled") setOverview(ov.value);
+    else console.error("ops_overview failed", ov.reason);
+    if (bp.status === "fulfilled") setByProvider(bp.value);
+    if (bm.status === "fulfilled") setByModel(bm.value);
+    if (ts.status === "fulfilled") setTimeseries(ts.value);
+    if (tt.status === "fulfilled") setTopTools(tt.value);
+    if (rc.status === "fulfilled") setRisky(rc.value);
     setLoading(false);
   };
 

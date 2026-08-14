@@ -677,17 +677,26 @@ fn get_conversation_by_source(
 // ── M4：安全审计 ───────────────────────────────────────────────────────
 
 /// 全库审计扫描：敏感信息 + 危险命令（plan codeagent-ops M4）。
+/// catch_unwind 兜底：扫描内部任何 panic 转为错误返回，绝不带崩整个应用。
 #[tauri::command]
 fn audit_scan(state: tauri::State<DaemonState>) -> Result<ch_audit::AuditReport, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    ch_audit::run_audit(&repo).map_err(|e| e.to_string())
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ch_audit::run_audit(&repo)
+    }))
+    .map_err(|_| "扫描内部错误，请查看日志".to_string())?
+    .map_err(|e| e.to_string())
 }
 
-/// 渲染 HTML 审计报告（前端保存对话框落盘）。
+/// 渲染 HTML 审计报告（前端保存对话框落盘）。同样带 panic 兜底。
 #[tauri::command]
 fn audit_export_html(state: tauri::State<DaemonState>) -> Result<String, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    let report = ch_audit::run_audit(&repo).map_err(|e| e.to_string())?;
+    let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        ch_audit::run_audit(&repo)
+    }))
+    .map_err(|_| "扫描内部错误，请查看日志".to_string())?
+    .map_err(|e| e.to_string())?;
     Ok(ch_audit::render_html(&report))
 }
 

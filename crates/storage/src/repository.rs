@@ -554,42 +554,41 @@ impl Repository {
         }
     }
 
-    /// 治理总览 KPI。
+    /// 治理总览 KPI（单参数：全部子查询共用 ?1，cutoff=0 即全量）。
     pub fn ops_overview(&self, days: Option<i64>) -> StorageResult<OpsOverview> {
         let conn = self.conn.lock().unwrap();
-        let (clause, cutoff) = Self::range_clause(days);
-        let sql = format!(
+        let cutoff = match days {
+            Some(d) => timestamp::to_millis(Some(now_utc())).unwrap_or(0) - d * 86_400_000,
+            None => 0,
+        };
+        conn.query_row(
             "SELECT
-                (SELECT COUNT(*) FROM usage_records WHERE {clause_u}),
-                COALESCE((SELECT SUM(input_tokens + output_tokens + reasoning_tokens) FROM usage_records WHERE {clause_u}), 0),
-                COALESCE((SELECT SUM(input_tokens) FROM usage_records WHERE {clause_u}), 0),
-                COALESCE((SELECT SUM(output_tokens) FROM usage_records WHERE {clause_u}), 0),
-                COALESCE((SELECT SUM(cost_usd) FROM usage_records WHERE cost_usd IS NOT NULL AND {clause_u}), 0),
-                COALESCE((SELECT AVG(duration_ms) FROM usage_records WHERE duration_ms IS NOT NULL AND {clause_u}), 0),
-                (SELECT COUNT(*) FROM usage_records WHERE status = 'error' AND {clause_u}),
-                (SELECT COUNT(DISTINCT source_session_id) FROM usage_records WHERE {clause_u}),
-                COALESCE((SELECT COUNT(*) FROM tool_call_records WHERE destructive = 1 AND {clause_t}), 0),
-                (SELECT COUNT(*) FROM tool_call_records WHERE {clause_t})",
-            clause_u = clause, clause_t = clause,
-        );
-        let args: Vec<SqlValue> = [cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff, cutoff]
-            .iter()
-            .filter_map(|c| c.map(|v| v.into()))
-            .collect();
-        conn.query_row(&sql, params_from_iter(args.iter()), |r| {
-            Ok(OpsOverview {
-                total_requests: r.get(0)?,
-                total_tokens: r.get(1)?,
-                input_tokens: r.get(2)?,
-                output_tokens: r.get(3)?,
-                cost_usd: r.get(4)?,
-                avg_duration_ms: r.get(5)?,
-                error_count: r.get(6)?,
-                session_count: r.get(7)?,
-                destructive_calls: r.get(8)?,
-                total_tool_calls: r.get(9)?,
-            })
-        })
+                (SELECT COUNT(*) FROM usage_records WHERE ts >= ?1),
+                COALESCE((SELECT SUM(input_tokens + output_tokens + reasoning_tokens) FROM usage_records WHERE ts >= ?1), 0),
+                COALESCE((SELECT SUM(input_tokens) FROM usage_records WHERE ts >= ?1), 0),
+                COALESCE((SELECT SUM(output_tokens) FROM usage_records WHERE ts >= ?1), 0),
+                COALESCE((SELECT SUM(cost_usd) FROM usage_records WHERE cost_usd IS NOT NULL AND ts >= ?1), 0),
+                COALESCE((SELECT AVG(duration_ms) FROM usage_records WHERE duration_ms IS NOT NULL AND ts >= ?1), 0),
+                (SELECT COUNT(*) FROM usage_records WHERE status = 'error' AND ts >= ?1),
+                (SELECT COUNT(DISTINCT source_session_id) FROM usage_records WHERE ts >= ?1),
+                COALESCE((SELECT COUNT(*) FROM tool_call_records WHERE destructive = 1 AND ts >= ?1), 0),
+                (SELECT COUNT(*) FROM tool_call_records WHERE ts >= ?1)",
+            params![cutoff],
+            |r| {
+                Ok(OpsOverview {
+                    total_requests: r.get(0)?,
+                    total_tokens: r.get(1)?,
+                    input_tokens: r.get(2)?,
+                    output_tokens: r.get(3)?,
+                    cost_usd: r.get(4)?,
+                    avg_duration_ms: r.get(5)?,
+                    error_count: r.get(6)?,
+                    session_count: r.get(7)?,
+                    destructive_calls: r.get(8)?,
+                    total_tool_calls: r.get(9)?,
+                })
+            },
+        )
         .map_err(Into::into)
     }
 
@@ -695,13 +694,14 @@ impl Repository {
                     SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
                     COALESCE(AVG(duration_ms), 0)
              FROM tool_call_records WHERE {clause}
-             GROUP BY tool_name ORDER BY 2 DESC LIMIT ?2",
+             GROUP BY tool_name ORDER BY 2 DESC LIMIT ?",
             clause = clause,
         );
-        let args: Vec<SqlValue> = [cutoff.map(|v| v.into()), Some(n.into())]
-            .into_iter()
-            .flatten()
-            .collect();
+        let mut args: Vec<SqlValue> = Vec::new();
+        if let Some(c) = cutoff {
+            args.push(c.into());
+        }
+        args.push(n.into());
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok(ToolUsageRow {
@@ -724,18 +724,19 @@ impl Repository {
         let conn = self.conn.lock().unwrap();
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
-            "SELECT id, p.name, source_session_id, tool_name, ts, read_only,
+            "SELECT t.id, p.name, source_session_id, tool_name, ts, read_only,
                     destructive, approval_status, exit_code, duration_ms, status, command_text
              FROM tool_call_records t JOIN providers p ON p.id = t.provider_id
              WHERE (destructive = 1 OR status = 'error' OR (exit_code IS NOT NULL AND exit_code != 0))
                AND {clause}
-             ORDER BY ts DESC LIMIT ?2",
+             ORDER BY ts DESC LIMIT ?",
             clause = clause,
         );
-        let args: Vec<SqlValue> = [cutoff.map(|v| v.into()), Some(n.into())]
-            .into_iter()
-            .flatten()
-            .collect();
+        let mut args: Vec<SqlValue> = Vec::new();
+        if let Some(c) = cutoff {
+            args.push(c.into());
+        }
+        args.push(n.into());
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok(ch_domain::ToolCallRecord {
@@ -1220,7 +1221,7 @@ impl Repository {
     pub fn list_tool_calls_for_audit(&self) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, p.name, source_session_id, tool_name, ts, read_only,
+            "SELECT t.id, p.name, source_session_id, tool_name, ts, read_only,
                     destructive, approval_status, exit_code, duration_ms, status, command_text
              FROM tool_call_records t JOIN providers p ON p.id = t.provider_id
              WHERE command_text IS NOT NULL AND length(command_text) > 0
