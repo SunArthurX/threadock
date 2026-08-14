@@ -756,6 +756,222 @@ impl Repository {
         Ok(v)
     }
 
+    /// 按 provider_id + source_conversation_id 精确查会话（审计跳转用）。
+    pub fn find_conversation_by_source(
+        &self,
+        provider_id: &str,
+        source_conversation_id: &str,
+    ) -> StorageResult<Option<Conversation>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
+                    c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
+                    c.completed_at, c.source_status, c.source_url, c.completeness_score,
+                    c.content_hash, c.raw_payload_id, c.source_parent_id
+             FROM conversations c JOIN providers p ON p.id = c.provider_id
+             WHERE c.provider_id = ?1 AND c.source_conversation_id = ?2",
+            params![provider_id, source_conversation_id],
+            row_to_conversation,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// 本月（自 cutoff 毫秒起）用量：返回 (tokens, cost_usd)。
+    pub fn ops_month_usage_since(&self, cutoff_ms: i64) -> StorageResult<(i64, f64)> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0)
+             FROM usage_records WHERE ts >= ?1",
+            params![cutoff_ms],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(Into::into)
+    }
+
+    /// 模型 → (input_tokens, output_tokens) 汇总（成本重算用）。
+    pub fn ops_model_token_totals(&self) -> StorageResult<Vec<(String, i64, i64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(model, '(unknown)') AS m,
+                    SUM(input_tokens), SUM(output_tokens)
+             FROM usage_records GROUP BY m",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            ))
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 按模型名更新全部 cost_usd（重算用）。
+    pub fn update_model_cost(&self, model: &str, cost: f64) -> StorageResult<usize> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE usage_records SET cost_usd = ?1 WHERE COALESCE(model, '(unknown)') = ?2",
+            params![cost, model],
+        )?;
+        Ok(n)
+    }
+
+    // ── 审计：策略规则 + 预算设置 + 消息扫描流（plan codeagent-ops M4/M5）──
+
+    /// 列出策略规则。
+    pub fn list_policy_rules(&self) -> StorageResult<Vec<PolicyRuleRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, pattern, kind, severity, enabled FROM policy_rules
+             ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(PolicyRuleRecord {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                pattern: r.get(2)?,
+                kind: r.get(3)?,
+                severity: r.get(4)?,
+                enabled: r.get::<_, i64>(5)? != 0,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 新增/更新策略规则（按 name 幂等）。
+    pub fn upsert_policy_rule(&self, rule: &PolicyRuleRecord) -> StorageResult<String> {
+        let conn = self.conn.lock().unwrap();
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        conn.execute(
+            "INSERT INTO policy_rules (id, name, pattern, kind, severity, enabled, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+             ON CONFLICT(name) DO UPDATE SET
+                pattern = ?3, kind = ?4, severity = ?5, enabled = ?6, updated_at = ?7",
+            params![rule.id, rule.name, rule.pattern, rule.kind, rule.severity, rule.enabled as i64, now_ms],
+        )?;
+        Ok(rule.id.clone())
+    }
+
+    /// 删除策略规则。
+    pub fn delete_policy_rule(&self, name: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM policy_rules WHERE name = ?1", params![name])?;
+        Ok(())
+    }
+
+    /// 读取预算设置（无行返回默认值）。
+    pub fn get_budget_settings(&self) -> StorageResult<BudgetSettings> {
+        let conn = self.conn.lock().unwrap();
+        let row = conn
+            .query_row(
+                "SELECT monthly_token_limit, monthly_cost_limit, notify_on_exceed FROM budget_settings WHERE id = 1",
+                [],
+                |r| {
+                    Ok(BudgetSettings {
+                        monthly_token_limit: r.get(0)?,
+                        monthly_cost_limit: r.get(1)?,
+                        notify_on_exceed: r.get::<_, i64>(2)? != 0,
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row.unwrap_or(BudgetSettings {
+            monthly_token_limit: None,
+            monthly_cost_limit: None,
+            notify_on_exceed: true,
+        }))
+    }
+
+    /// 保存预算设置（单行 upsert）。
+    pub fn set_budget_settings(&self, s: &BudgetSettings) -> StorageResult<()> {
+        let conn = self.conn.lock().unwrap();
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        conn.execute(
+            "INSERT INTO budget_settings (id, monthly_token_limit, monthly_cost_limit, notify_on_exceed, updated_at)
+             VALUES (1, ?1, ?2, ?3, ?4)
+             ON CONFLICT(id) DO UPDATE SET
+                monthly_token_limit = ?1, monthly_cost_limit = ?2, notify_on_exceed = ?3, updated_at = ?4",
+            params![s.monthly_token_limit, s.monthly_cost_limit, s.notify_on_exceed as i64, now_ms],
+        )?;
+        Ok(())
+    }
+
+    /// 审计扫描用：分页遍历消息（带会话来源信息）。
+    pub fn list_messages_for_audit(
+        &self,
+        offset: i64,
+        limit: i64,
+    ) -> StorageResult<Vec<AuditMessageRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT m.id, p.name, c.source_conversation_id, c.title, m.content_text
+             FROM messages m
+             JOIN conversations c ON c.id = m.conversation_id
+             JOIN providers p ON p.id = c.provider_id
+             WHERE m.content_text IS NOT NULL AND length(m.content_text) > 0
+             ORDER BY m.id
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let rows = stmt.query_map(params![limit, offset], |r| {
+            Ok(AuditMessageRow {
+                message_id: r.get(0)?,
+                provider: r.get(1)?,
+                source_conversation_id: r.get(2)?,
+                conversation_title: r.get(3)?,
+                content_text: r.get(4)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 审计扫描用：所有含命令文本的工具调用记录。
+    pub fn list_tool_calls_for_audit(&self) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, p.name, source_session_id, tool_name, ts, read_only,
+                    destructive, approval_status, exit_code, duration_ms, status, command_text
+             FROM tool_call_records t JOIN providers p ON p.id = t.provider_id
+             WHERE command_text IS NOT NULL AND length(command_text) > 0
+             ORDER BY ts DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ch_domain::ToolCallRecord {
+                id: r.get(0)?,
+                provider: ch_domain::Provider::from_str(&r.get::<_, String>(1)?)
+                    .unwrap_or(ch_domain::Provider::Unknown),
+                source_session_id: r.get(2)?,
+                tool_name: r.get(3)?,
+                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?)).unwrap_or_else(ch_domain::now_utc),
+                read_only: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
+                destructive: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
+                approval_status: r.get(7)?,
+                exit_code: r.get(8)?,
+                duration_ms: r.get(9)?,
+                status: ch_domain::UsageStatus::parse(&r.get::<_, String>(10)?),
+                command_text: r.get(11)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
     // ── Message（幂等：按 content_hash + sequence 去重） ──────────────────
 
     /// 写入 message。幂等键：(conversation_id, sequence_number)。
@@ -1373,6 +1589,35 @@ pub struct ToolUsageRow {
     pub destructive: i64,
     pub errors: i64,
     pub avg_duration_ms: f64,
+}
+
+/// 审计策略规则（M4）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PolicyRuleRecord {
+    pub id: String,
+    pub name: String,
+    pub pattern: String,
+    pub kind: String,
+    pub severity: String,
+    pub enabled: bool,
+}
+
+/// 预算设置（M5）。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BudgetSettings {
+    pub monthly_token_limit: Option<i64>,
+    pub monthly_cost_limit: Option<f64>,
+    pub notify_on_exceed: bool,
+}
+
+/// 审计扫描用消息行。
+#[derive(Debug, Clone)]
+pub struct AuditMessageRow {
+    pub message_id: String,
+    pub provider: String,
+    pub source_conversation_id: String,
+    pub conversation_title: Option<String>,
+    pub content_text: String,
 }
 
 fn parse_status(s: &str) -> Status {

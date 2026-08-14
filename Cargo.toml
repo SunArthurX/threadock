@@ -21,6 +21,7 @@ members = [
     "crates/adapter-minimax",
     "crates/adapter-codex",
     "crates/ops-metrics",
+    "crates/audit",
     "crates/adapter-jsonl",
     "crates/cli",
 ]

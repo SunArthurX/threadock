@@ -372,6 +372,27 @@ export default function App() {
     }
   };
 
+  // 审计命中 → 跳回对话视图定位会话（M4 治理动作，只读跳转）
+  const jumpFromAudit = async (provider: string, sourceConvId: string, messageId: string | null) => {
+    setView("chat");
+    try {
+      const conv = await invoke<Conversation | null>("get_conversation_by_source", {
+        provider,
+        sourceConversationId: sourceConvId,
+      });
+      if (!conv) {
+        setError("未找到对应会话（可能已被重置，先同步数据）");
+        return;
+      }
+      if (conv.workspace_id && conv.workspace_id !== selectedWs) {
+        await selectWorkspace(conv.workspace_id);
+      }
+      await selectConversation(conv, messageId ?? undefined);
+    } catch (e) {
+      showError(e);
+    }
+  };
+
   // 导入文件
   const importHandler = async () => {
     try {
@@ -817,7 +838,7 @@ export default function App() {
       )}
 
       {view === "ops" ? (
-        <OpsView />
+        <OpsView onJumpToConversation={jumpFromAudit} />
       ) : (
       <div className="main">
         {/* 左栏：Workspaces（按来源归组）*/}

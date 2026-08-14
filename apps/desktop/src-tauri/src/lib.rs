@@ -640,6 +640,175 @@ fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Optio
     repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())
 }
 
+/// 按 provider + source_conversation_id 精确查会话（审计命中跳转用，含子任务）。
+#[tauri::command]
+fn get_conversation_by_source(
+    state: tauri::State<DaemonState>,
+    provider: String,
+    source_conversation_id: String,
+) -> Result<Option<ConversationDto>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let provider_id = format!("prov_{provider}");
+    let conn_row = repo
+        .find_conversation_by_source(&provider_id, &source_conversation_id)
+        .map_err(|e| e.to_string())?;
+    Ok(conn_row.map(|c| conversation_dto(c, 0)))
+}
+
+// ── M4：安全审计 ───────────────────────────────────────────────────────
+
+/// 全库审计扫描：敏感信息 + 危险命令（plan codeagent-ops M4）。
+#[tauri::command]
+fn audit_scan(state: tauri::State<DaemonState>) -> Result<ch_audit::AuditReport, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    ch_audit::run_audit(&repo).map_err(|e| e.to_string())
+}
+
+/// 渲染 HTML 审计报告（前端保存对话框落盘）。
+#[tauri::command]
+fn audit_export_html(state: tauri::State<DaemonState>) -> Result<String, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let report = ch_audit::run_audit(&repo).map_err(|e| e.to_string())?;
+    Ok(ch_audit::render_html(&report))
+}
+
+/// 策略规则 CRUD（M4/M5：命令黑名单 + 自定义敏感规则）。
+#[tauri::command]
+fn policy_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::PolicyRuleRecord>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.list_policy_rules().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn policy_upsert(
+    state: tauri::State<DaemonState>,
+    rule: ch_storage::PolicyRuleRecord,
+) -> Result<(), String> {
+    // 校验正则合法
+    regex::Regex::new(&rule.pattern).map_err(|e| format!("正则无效: {e}"))?;
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.upsert_policy_rule(&rule).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn policy_delete(state: tauri::State<DaemonState>, name: String) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.delete_policy_rule(&name).map_err(|e| e.to_string())
+}
+
+// ── M5：预算设置 ───────────────────────────────────────────────────────
+
+#[tauri::command]
+fn budget_get(state: tauri::State<DaemonState>) -> Result<ch_storage::BudgetSettings, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.get_budget_settings().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn budget_set(state: tauri::State<DaemonState>, settings: ch_storage::BudgetSettings) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.set_budget_settings(&settings).map_err(|e| e.to_string())
+}
+
+/// 本月（自然月）用量：预算告警用。
+#[tauri::command]
+fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let now = ch_domain::now_utc();
+    // 本月 1 号 00:00 UTC 的毫秒
+    let month_start = time::Date::from_calendar_date(
+        now.year(),
+        time::Month::try_from(u8::try_from(now.month() as u8).unwrap_or(1)).unwrap_or(time::Month::January),
+        1,
+    )
+    .map_err(|e| e.to_string())?
+    .with_time(time::Time::MIDNIGHT)
+    .assume_utc();
+    let cutoff = (month_start - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    let row = repo
+        .ops_month_usage_since(cutoff)
+        .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({
+        "tokens": row.0,
+        "cost_usd": row.1,
+    }))
+}
+
+// ── M5：定价模型 ───────────────────────────────────────────────────────
+
+/// 默认定价（$/M tokens，可被 app_data/pricing.json 覆盖）。
+const DEFAULT_PRICING: &str = r#"{
+  "GLM-5.2": {"input_per_mtok": 0.5, "output_per_mtok": 2.0},
+  "GLM-5.3": {"input_per_mtok": 0.5, "output_per_mtok": 2.0},
+  "MiniMax-M3": {"input_per_mtok": 0.3, "output_per_mtok": 1.2},
+  "codex": {"input_per_mtok": 2.0, "output_per_mtok": 8.0},
+  "gpt-5": {"input_per_mtok": 1.25, "output_per_mtok": 10.0},
+  "claude": {"input_per_mtok": 3.0, "output_per_mtok": 15.0}
+}"#;
+
+fn pricing_path(state: &tauri::State<DaemonState>) -> std::path::PathBuf {
+    state.data_dir.join("pricing.json")
+}
+
+/// 读取定价表（不存在时写入默认值）。返回 {model: {input_per_mtok, output_per_mtok}}。
+#[tauri::command]
+fn ops_pricing_get(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    let path = pricing_path(&state);
+    if !path.exists() {
+        std::fs::write(&path, DEFAULT_PRICING).map_err(|e| e.to_string())?;
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&content).map_err(|e| e.to_string())
+}
+
+/// 保存定价表（前端编辑后写回）。
+#[tauri::command]
+fn ops_pricing_set(state: tauri::State<DaemonState>, pricing: serde_json::Value) -> Result<(), String> {
+    let path = pricing_path(&state);
+    let content = serde_json::to_string_pretty(&pricing).map_err(|e| e.to_string())?;
+    std::fs::write(&path, content).map_err(|e| e.to_string())
+}
+
+/// 按定价重算 cost_usd（模型名前缀匹配；改 pricing.json 后调用立即生效）。
+#[tauri::command]
+fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+    let pricing = ops_pricing_get(state.clone())?;
+    // 展开为 Vec<(小写模型名, in 价, out 价)>
+    let mut table: Vec<(String, f64, f64)> = Vec::new();
+    if let Some(map) = pricing.as_object() {
+        for (model, v) in map {
+            let pin = v.get("input_per_mtok").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            let pout = v.get("output_per_mtok").and_then(|x| x.as_f64()).unwrap_or(0.0);
+            table.push((model.to_lowercase(), pin, pout));
+        }
+    }
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    // 模型 → 累计 in/out
+    let models = repo
+        .ops_model_token_totals()
+        .map_err(|e| e.to_string())?;
+    let mut updated = 0i64;
+    let mut total_cost = 0f64;
+    for (model, in_tok, out_tok) in models {
+        // 前缀匹配（双向：定价键是模型名前缀，或模型名包含定价键）
+        let hit = table.iter().find(|(k, _, _)| {
+            let m = model.to_lowercase();
+            m.starts_with(k.as_str()) || k.starts_with(m.as_str()) || m.contains(k.as_str())
+        });
+        if let Some((_, pin, pout)) = hit {
+            let cost = (in_tok as f64 / 1e6) * pin + (out_tok as f64 / 1e6) * pout;
+            repo.update_model_cost(&model, cost).map_err(|e| e.to_string())?;
+            updated += 1;
+            total_cost += cost;
+        }
+    }
+    Ok(serde_json::json!({
+        "models_updated": updated,
+        "total_cost_usd": total_cost,
+    }))
+}
+
 /// 启动时自动拉取 ZCode / Claude Code / Cursor / MiniMax 最新会话（plan §6.1 自动发现/同步）。
 /// 返回导入统计。最多各导入 limit 个最新会话。
 /// 若已有重置/同步在进行中，返回「同步中」标记（不阻塞 UI）。
@@ -1145,6 +1314,18 @@ pub fn run() {
             ops_timeseries,
             ops_tool_toplist,
             ops_risky_calls,
+            get_conversation_by_source,
+            audit_scan,
+            audit_export_html,
+            policy_list,
+            policy_upsert,
+            policy_delete,
+            budget_get,
+            budget_set,
+            ops_month_usage,
+            ops_pricing_get,
+            ops_pricing_set,
+            ops_cost_recalc,
             auto_sync,
             reset_all_data,
             export_conversation,

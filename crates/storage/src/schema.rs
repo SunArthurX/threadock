@@ -318,3 +318,25 @@ CREATE TABLE IF NOT EXISTS tool_call_records (
 CREATE INDEX IF NOT EXISTS idx_tool_ts ON tool_call_records(ts);
 CREATE INDEX IF NOT EXISTS idx_tool_destructive ON tool_call_records(destructive) WHERE destructive = 1;
 "#;
+
+/// V7：审计策略规则 + 预算设置（plan codeagent-ops M4/M5）。
+pub const SCHEMA_V7: &str = r#"
+CREATE TABLE IF NOT EXISTS policy_rules (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    pattern TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('dangerous_command', 'sensitive')),
+    severity TEXT NOT NULL DEFAULT 'medium' CHECK(severity IN ('low', 'medium', 'high')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS budget_settings (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    monthly_token_limit INTEGER,
+    monthly_cost_limit REAL,
+    notify_on_exceed INTEGER NOT NULL DEFAULT 1,
+    updated_at INTEGER NOT NULL
+);
+"#;

@@ -318,6 +318,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-audit"
+version = "0.1.0"
+dependencies = [
+ "ch-domain",
+ "ch-export",
+ "ch-storage",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "time",
+ "tracing",
+]
+
+[[package]]
 name = "ch-backup"
 version = "0.1.0"
 dependencies = [
