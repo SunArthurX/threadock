@@ -966,6 +966,31 @@ impl Repository {
         Ok(n > 0)
     }
 
+    /// 批量修复主子链路：单事务执行整批 UPDATE（替代逐条锁循环，
+    /// 消除启动同步时 800+ 次密集锁循环导致的 UI 查询饿死）。
+    pub fn repair_parents_batch(
+        &self,
+        provider_id: &str,
+        pairs: &[(String, String)],
+    ) -> StorageResult<usize> {
+        if pairs.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for (source_id, parent) in pairs {
+            n += tx.execute(
+                "UPDATE conversations SET source_parent_id = ?1
+                 WHERE provider_id = ?2 AND source_conversation_id = ?3
+                   AND source_parent_id IS NOT ?1",
+                params![parent, provider_id, source_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     /// 已导入会话的 (provider_id, source_id) 全集（auto_sync 幂等快速检查用）。
     pub fn list_conversation_sources(&self) -> StorageResult<Vec<(String, String)>> {
         let conn = self.conn.lock().unwrap();

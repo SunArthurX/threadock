@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
-import { BarChart, DonutChart, formatCost, formatDuration, formatTokens } from "./charts";
+import { BarChart, DonutChart, formatCost, formatDuration, formatTokens, useCountUp } from "./charts";
 
 interface OpsOverview {
   total_requests: number;
@@ -56,11 +56,13 @@ interface RiskyCall {
   provider: string;
   source_session_id: string;
   tool_name: string;
-  ts: number;
+  ts_ms: number;
+  read_only: boolean | null;
   destructive: boolean | null;
   approval_status: string | null;
   exit_code: number | null;
   duration_ms: number | null;
+  status: string;
   command_text: string | null;
 }
 
@@ -118,6 +120,26 @@ interface Props {
   onJumpToConversation?: (provider: string, sourceConversationId: string, messageId: string | null) => void;
 }
 
+/** KPI 数字滚动动画：0 → 目标（easeOut 800ms） */
+function AnimatedKpi({
+  label, num, fmt, sub, danger,
+}: {
+  label: string;
+  num: number;
+  fmt: (v: number) => string;
+  sub: string;
+  danger?: boolean;
+}) {
+  const v = useCountUp(num);
+  return (
+    <div className={`ops-kpi ${danger ? "danger" : ""}`}>
+      <div className="ops-kpi-value">{fmt(v)}</div>
+      <div className="ops-kpi-label">{label}</div>
+      <div className="ops-kpi-sub">{sub}</div>
+    </div>
+  );
+}
+
 export default function OpsView({ onJumpToConversation }: Props) {
   const [range, setRange] = useState<number | null>(30);
   const [overview, setOverview] = useState<OpsOverview | null>(null);
@@ -126,6 +148,7 @@ export default function OpsView({ onJumpToConversation }: Props) {
   const [timeseries, setTimeseries] = useState<DailyUsage[]>([]);
   const [topTools, setTopTools] = useState<ToolUsageRow[]>([]);
   const [risky, setRisky] = useState<RiskyCall[]>([]);
+  const [expandedRisk, setExpandedRisk] = useState<Set<string>>(new Set());
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -301,10 +324,10 @@ export default function OpsView({ onJumpToConversation }: Props) {
 
   const kpis = overview
     ? [
-        { label: "模型请求", value: overview.total_requests.toLocaleString(), sub: `${overview.session_count} 会话` },
-        { label: "总 Tokens", value: formatTokens(overview.total_tokens), sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}` },
-        { label: "估算成本", value: formatCost(overview.cost_usd), sub: "按 pricing.json 定价" },
-        { label: "危险操作", value: String(overview.destructive_calls), sub: `${overview.total_tool_calls.toLocaleString()} 次工具调用`, danger: overview.destructive_calls > 0 },
+        { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话` },
+        { label: "总 Tokens", num: overview.total_tokens, fmt: (v: number) => formatTokens(v), sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}` },
+        { label: "估算成本", num: overview.cost_usd, fmt: (v: number) => formatCost(v), sub: "按 pricing.json 定价" },
+        { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 次工具调用`, danger: overview.destructive_calls > 0 },
       ]
     : [];
 
@@ -363,11 +386,7 @@ export default function OpsView({ onJumpToConversation }: Props) {
       {overview ? (
         <div className="ops-kpis">
           {kpis.map((k, i) => (
-            <div key={i} className={`ops-kpi ${k.danger ? "danger" : ""}`}>
-              <div className="ops-kpi-value">{k.value}</div>
-              <div className="ops-kpi-label">{k.label}</div>
-              <div className="ops-kpi-sub">{k.sub}</div>
-            </div>
+            <AnimatedKpi key={i} label={k.label} num={k.num} fmt={k.fmt} sub={k.sub} danger={k.danger} />
           ))}
         </div>
       ) : (
@@ -619,19 +638,56 @@ export default function OpsView({ onJumpToConversation }: Props) {
               <span className="ops-card-sub">破坏性 / 出错 / 非零退出码</span>
             </div>
             <div className="ops-risky">
-              {risky.slice(0, 20).map((r) => (
-                <div key={r.id} className="ops-risky-row">
-                  <span className={`badge source ${r.provider}`}>{meta(r.provider).label}</span>
-                  <span className="mono ops-risky-tool">{r.tool_name}</span>
-                  {r.destructive && <span className="risk-flag high">危险</span>}
-                  {r.exit_code != null && r.exit_code !== 0 && <span className="risk-flag medium">exit {r.exit_code}</span>}
-                  {r.approval_status && r.approval_status !== "none" && <span className="risk-flag approval">{r.approval_status}</span>}
-                  <span className="ops-risky-cmd mono" title={r.command_text ?? ""}>
-                    {r.command_text ?? r.source_session_id.slice(0, 18)}
-                  </span>
-                  <span className="ops-risky-time">{new Date(r.ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
-                </div>
-              ))}
+              {risky.slice(0, 20).map((r) => {
+                const open = expandedRisk.has(r.id);
+                return (
+                  <div key={r.id} className={`ops-risky-item ${open ? "open" : ""}`}>
+                    <div
+                      className="ops-risky-row"
+                      onClick={() =>
+                        setExpandedRisk((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(r.id)) next.delete(r.id);
+                          else next.add(r.id);
+                          return next;
+                        })
+                      }
+                    >
+                      <span className="risk-caret">{open ? "▾" : "▸"}</span>
+                      <span className={`badge source ${r.provider}`}>{meta(r.provider).label}</span>
+                      <span className="mono ops-risky-tool">{r.tool_name}</span>
+                      {r.destructive && <span className="risk-flag high">危险</span>}
+                      {r.exit_code != null && r.exit_code !== 0 && <span className="risk-flag medium">exit {r.exit_code}</span>}
+                      {r.approval_status && r.approval_status !== "none" && <span className="risk-flag approval">{r.approval_status}</span>}
+                      <span className="ops-risky-cmd mono" title={r.command_text ?? ""}>
+                        {r.command_text ?? r.source_session_id.slice(0, 18)}
+                      </span>
+                      <span className="ops-risky-time">
+                        {new Date(r.ts_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    {open && (
+                      <div className="ops-risky-detail">
+                        <div className="risk-detail-grid">
+                          <div><b>时间：</b>{new Date(r.ts_ms).toLocaleString("zh-CN")}</div>
+                          <div><b>状态：</b>{r.status}</div>
+                          <div><b>退出码：</b>{r.exit_code ?? "—"}</div>
+                          <div><b>耗时：</b>{r.duration_ms != null ? formatDuration(r.duration_ms) : "—"}</div>
+                          <div><b>只读：</b>{r.read_only == null ? "—" : r.read_only ? "是" : "否"}</div>
+                          <div><b>审批：</b>{r.approval_status ?? "—"}</div>
+                        </div>
+                        {r.command_text && <pre className="risk-detail-cmd mono">{r.command_text}</pre>}
+                        <button
+                          className="action-btn"
+                          onClick={() => onJumpToConversation?.(r.provider, r.source_session_id, null)}
+                        >
+                          → 跳转到对应会话
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
               {risky.length === 0 && <div className="ops-table-empty">无风险调用 🎉</div>}
             </div>
           </div>

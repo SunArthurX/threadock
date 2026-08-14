@@ -2050,3 +2050,54 @@ button {
   background: var(--bg-active);
   animation: sk-shimmer 1.2s ease-in-out infinite;
 }
+
+/* ═══ 风险调用详情 + 图表动画补充 ═══ */
+.ops-risky-item {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.ops-risky-item:last-child {
+  border-bottom: none;
+}
+.ops-risky-item .ops-risky-row {
+  cursor: pointer;
+}
+.ops-risky-item.open .ops-risky-row {
+  background: var(--bg-hover);
+}
+.risk-caret {
+  color: var(--text-faint);
+  font-size: 10px;
+  width: 12px;
+  flex-shrink: 0;
+}
+.ops-risky-detail {
+  padding: 10px 16px 14px 38px;
+  background: var(--bg-hover);
+  animation: fade-in 160ms ease-out;
+}
+.risk-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 6px 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+}
+.risk-detail-grid b {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.risk-detail-cmd {
+  background: var(--bg-input);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}

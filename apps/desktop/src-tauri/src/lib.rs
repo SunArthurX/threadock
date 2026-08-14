@@ -699,10 +699,45 @@ fn ops_tool_toplist(state: tauri::State<DaemonState>, days: Option<i64>, n: Opti
     repo.ops_tool_toplist(days, n.unwrap_or(10)).map_err(|e| e.to_string())
 }
 
+/// 风险调用 DTO：ts 转毫秒数（此前直接序列化 OffsetDateTime → 前端 Invalid Date）。
+#[derive(serde::Serialize)]
+struct RiskyCallDto {
+    id: String,
+    provider: String,
+    source_session_id: String,
+    tool_name: String,
+    /// Unix 毫秒
+    ts_ms: i64,
+    read_only: Option<bool>,
+    destructive: Option<bool>,
+    approval_status: Option<String>,
+    exit_code: Option<i64>,
+    duration_ms: Option<i64>,
+    status: String,
+    command_text: Option<String>,
+}
+
 #[tauri::command]
-fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_domain::ToolCallRecord>, String> {
+fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<RiskyCallDto>, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())
+    let rows = repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())?;
+    Ok(rows
+        .into_iter()
+        .map(|r| RiskyCallDto {
+            ts_ms: (r.ts - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64,
+            id: r.id,
+            provider: r.provider.to_string(),
+            source_session_id: r.source_session_id,
+            tool_name: r.tool_name,
+            read_only: r.read_only,
+            destructive: r.destructive,
+            approval_status: r.approval_status,
+            exit_code: r.exit_code,
+            duration_ms: r.duration_ms,
+            status: r.status.as_str().to_string(),
+            command_text: r.command_text,
+        })
+        .collect())
 }
 
 /// 按 provider + source_conversation_id 精确查会话（审计命中跳转用，含子任务）。
@@ -978,10 +1013,14 @@ fn auto_sync_inner(
     };
 
     // ZCode：discover_all 返回主任务 + 子任务（子任务带 source_parent_id）
+    // 性能：已导入的 repair 收集后单事务批量执行（不再逐条锁）；
+    // 新导入每 5 个让出 1ms，给 UI 查询抢锁窗口（消除锁饿死卡顿）
     let zcode_db = format!("{home}/.zcode/cli/db/db.sqlite");
     if std::path::Path::new(&zcode_db).exists() {
         match ch_adapter_zcode::discover_all_sessions(&zcode_db) {
             Ok(sessions) => {
+                let mut repairs: Vec<(String, String)> = Vec::new();
+                let mut imported_count = 0u32;
                 for s in sessions.into_iter().take(lim) {
                     if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
                         cancelled = true;
@@ -989,10 +1028,8 @@ fn auto_sync_inner(
                     }
                     let key = ("prov_zcode".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
-                        // 修复旧数据主子链路（子任务早期导入时无 parent 字段）
                         if let Some(parent) = &s.parent_id {
-                            let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                            let _ = repo.repair_conversation_parent("prov_zcode", &s.session_id, Some(parent));
+                            repairs.push((s.session_id.clone(), parent.clone()));
                         }
                         zcode_skip += 1;
                         continue;
@@ -1003,11 +1040,20 @@ fn auto_sync_inner(
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     zcode_ok += 1;
+                                    imported_count += 1;
+                                    if imported_count % 5 == 0 {
+                                        std::thread::sleep(std::time::Duration::from_millis(1));
+                                    }
                                 }
                                 Err(e) => tracing::warn!(session = %s.session_id, error = %e, "zcode import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "zcode parse failed"),
+                    }
+                }
+                if !repairs.is_empty() {
+                    if let Ok(repo) = state.repo.lock() {
+                        let _ = repo.repair_parents_batch("prov_zcode", &repairs);
                     }
                 }
             }
@@ -1086,6 +1132,8 @@ fn auto_sync_inner(
     if std::path::Path::new(&mm_db).exists() {
         match ch_adapter_minimax::discover_all_sessions(&mm_db) {
             Ok(sessions) => {
+                let mut mm_repairs: Vec<(String, String)> = Vec::new();
+                let mut mm_imported = 0u32;
                 for s in sessions.into_iter().take(lim) {
                     if CANCEL_SYNC.load(std::sync::atomic::Ordering::SeqCst) {
                         cancelled = true;
@@ -1093,10 +1141,8 @@ fn auto_sync_inner(
                     }
                     let key = ("prov_minimax-code".to_string(), s.session_id.clone());
                     if existing.contains(&key) {
-                        // 修复旧数据主子链路
                         if let Some(parent) = &s.parent_session_id {
-                            let repo = state.repo.lock().map_err(|e| e.to_string())?;
-                            let _ = repo.repair_conversation_parent("prov_minimax-code", &s.session_id, Some(parent));
+                            mm_repairs.push((s.session_id.clone(), parent.clone()));
                         }
                         mm_skip += 1;
                         continue;
@@ -1107,11 +1153,20 @@ fn auto_sync_inner(
                                 Ok(o) => {
                                     pending_index.extend(o.indexable);
                                     mm_ok += 1;
+                                    mm_imported += 1;
+                                    if mm_imported % 5 == 0 {
+                                        std::thread::sleep(std::time::Duration::from_millis(1));
+                                    }
                                 }
                                 Err(e) => tracing::warn!(session = %s.session_id, error = %e, "mm import failed"),
                             }
                         }
                         Err(e) => tracing::warn!(session = %s.session_id, error = %e, "mm parse failed"),
+                    }
+                }
+                if !mm_repairs.is_empty() {
+                    if let Ok(repo) = state.repo.lock() {
+                        let _ = repo.repair_parents_batch("prov_minimax-code", &mm_repairs);
                     }
                 }
             }
