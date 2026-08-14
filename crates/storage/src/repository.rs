@@ -478,8 +478,9 @@ impl Repository {
                 "INSERT OR IGNORE INTO usage_records
                     (id, provider_id, source_session_id, turn_id, model, ts,
                      input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
-                     cache_write_tokens, cost_usd, status, duration_ms, retry_count)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                     cache_write_tokens, cost_usd, status, duration_ms, retry_count,
+                     source_dir, context_exceeded)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                 params![
                     r.id,
                     format!("prov_{}", r.provider.as_str()),
@@ -496,6 +497,8 @@ impl Repository {
                     r.status.as_str(),
                     r.duration_ms,
                     r.retry_count,
+                    r.source_dir,
+                    r.context_exceeded,
                 ],
             )?;
             n += changed;
@@ -1082,8 +1085,9 @@ impl Repository {
                     "INSERT OR IGNORE INTO usage_records
                         (id, provider_id, source_session_id, turn_id, model, ts,
                          input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
-                         cache_write_tokens, cost_usd, status, duration_ms, retry_count)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                         cache_write_tokens, cost_usd, status, duration_ms, retry_count,
+                         source_dir, context_exceeded)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                     params![
                         r.id,
                         provider_id,
@@ -1100,6 +1104,8 @@ impl Repository {
                         r.status.as_str(),
                         r.duration_ms,
                         r.retry_count,
+                        r.source_dir,
+                        r.context_exceeded,
                     ],
                 )?;
             }
@@ -1147,6 +1153,277 @@ impl Repository {
             params![key, value],
         )?;
         Ok(())
+    }
+
+    // ── M6-M9：资产 / 自动化 / 成本归因 / 缓存 / 异常 ─────────────────────
+
+    /// 整源替换资产清单（先删后插，分块事务）。
+    pub fn replace_provider_assets(
+        &self,
+        provider_id: &str,
+        records: &[ch_domain::AssetRecord],
+    ) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let mut first = true;
+        let mut n = 0;
+        for chunk in records.chunks(2000) {
+            let tx = conn.transaction()?;
+            if first {
+                tx.execute("DELETE FROM asset_records WHERE provider_id = ?1", params![provider_id])?;
+                first = false;
+            }
+            for r in chunk {
+                n += tx.execute(
+                    "INSERT OR IGNORE INTO asset_records
+                        (id, provider_id, kind, name, version, description, risky_hits, installed_at, path)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        r.id,
+                        provider_id,
+                        r.kind,
+                        r.name,
+                        r.version,
+                        r.description,
+                        r.risky_hits,
+                        r.installed_at,
+                        r.path,
+                    ],
+                )?;
+            }
+            tx.commit()?;
+        }
+        Ok(n)
+    }
+
+    /// 列出全部资产（带 provider 名）。
+    pub fn list_assets(&self) -> StorageResult<Vec<AssetRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT p.name, a.kind, a.name, a.version, a.description, a.risky_hits, a.installed_at, a.path
+             FROM asset_records a JOIN providers p ON p.id = a.provider_id
+             ORDER BY p.name, a.kind, a.name",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AssetRow {
+                provider: r.get(0)?,
+                kind: r.get(1)?,
+                name: r.get(2)?,
+                version: r.get(3)?,
+                description: r.get(4)?,
+                risky_hits: r.get(5)?,
+                installed_at: r.get(6)?,
+                path: r.get(7)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 整源替换自动化任务。
+    pub fn replace_provider_automations(
+        &self,
+        provider_id: &str,
+        records: &[ch_domain::AutomationRecord],
+    ) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM automation_records WHERE provider_id = ?1", params![provider_id])?;
+        let mut n = 0;
+        for r in records {
+            n += tx.execute(
+                "INSERT OR IGNORE INTO automation_records
+                    (id, provider_id, name, kind, schedule, status, detail)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![r.id, provider_id, r.name, r.kind, r.schedule, r.status, r.detail],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// 列出全部自动化任务。
+    pub fn list_automations(&self) -> StorageResult<Vec<AutomationRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT p.name, a.name, a.kind, a.schedule, a.status, a.detail
+             FROM automation_records a JOIN providers p ON p.id = a.provider_id
+             ORDER BY p.name, a.name",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AutomationRow {
+                provider: r.get(0)?,
+                name: r.get(1)?,
+                kind: r.get(2)?,
+                schedule: r.get(3)?,
+                status: r.get(4)?,
+                detail: r.get(5)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// M7：按来源目录归因成本/用量（Top N）。
+    pub fn ops_cost_by_dir(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<DirCost>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT COALESCE(source_dir, '(未记录目录)') AS d,
+                    SUM(input_tokens + output_tokens + reasoning_tokens),
+                    SUM(COALESCE(cost_usd, 0)),
+                    COUNT(*)
+             FROM usage_records WHERE {clause}
+             GROUP BY d ORDER BY 2 DESC LIMIT ?",
+            clause = clause,
+        );
+        let mut args: Vec<SqlValue> = Vec::new();
+        if let Some(c) = cutoff {
+            args.push(c.into());
+        }
+        args.push(n.into());
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(DirCost {
+                dir: r.get(0)?,
+                tokens: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                cost_usd: r.get::<_, Option<f64>>(2)?.unwrap_or(0.0),
+                requests: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// M7：缓存命中率（cache_read / (input + cache_read)）按 provider。
+    pub fn ops_cache_stats(&self, days: Option<i64>) -> StorageResult<Vec<CacheStat>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name,
+                    SUM(u.input_tokens),
+                    SUM(u.cache_read_tokens)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE {clause}
+             GROUP BY p.name ORDER BY 2 DESC",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            let input: i64 = r.get::<_, Option<i64>>(1)?.unwrap_or(0);
+            let cached: i64 = r.get::<_, Option<i64>>(2)?.unwrap_or(0);
+            let total = input + cached;
+            Ok(CacheStat {
+                provider: r.get(0)?,
+                input_tokens: input,
+                cache_read_tokens: cached,
+                hit_rate: if total > 0 { cached as f64 / total as f64 } else { 0.0 },
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// M9：异常检测（错误尖峰 / 重试风暴 / context 超限），全部基于已有数据。
+    pub fn ops_anomalies(&self, days: Option<i64>) -> StorageResult<Vec<AnomalyRow>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let mut out = Vec::new();
+
+        // 1) 错误尖峰：日错误数 > 3× 平均
+        let sql = format!(
+            "SELECT date(ts/1000,'unixepoch','localtime') AS d, COUNT(*)
+             FROM usage_records WHERE status = 'error' AND {clause}
+             GROUP BY d ORDER BY d",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let daily: Vec<(String, i64)> = {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })?;
+            let mut v = Vec::new();
+            for r in rows {
+                v.push(r?);
+            }
+            v
+        };
+        if !daily.is_empty() {
+            let avg: f64 = daily.iter().map(|(_, c)| *c as f64).sum::<f64>() / daily.len() as f64;
+            for (day, cnt) in daily {
+                if avg > 0.0 && cnt as f64 > avg * 3.0 && cnt >= 3 {
+                    out.push(AnomalyRow {
+                        kind: "error_spike".into(),
+                        agent: "*".into(),
+                        detail: format!("{day} 错误 {cnt} 次（均值 {avg:.1} 的 {:.1} 倍）", cnt as f64 / avg),
+                        severity: "high".into(),
+                    });
+                }
+            }
+        }
+
+        // 2) 重试风暴：session 级 retry 总和 Top（≥5 次即风暴）
+        let sql = format!(
+            "SELECT source_session_id, SUM(retry_count) AS rc, COUNT(*) AS n
+             FROM usage_records WHERE retry_count IS NOT NULL AND retry_count > 0 AND {clause}
+             GROUP BY source_session_id HAVING rc >= 5 ORDER BY rc DESC LIMIT 5",
+            clause = clause,
+        );
+        {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, i64>(2)?))
+            })?;
+            for r in rows {
+                let (sid, rc, n) = r?;
+                out.push(AnomalyRow {
+                    kind: "retry_storm".into(),
+                    agent: "*".into(),
+                    detail: format!("会话 {sid:.18}… 共重试 {rc} 次 / {n} 请求"),
+                    severity: if rc >= 20 { "high".into() } else { "medium".into() },
+                });
+            }
+        }
+
+        // 3) context 超限：按 provider 汇总（ZCode 原生字段）
+        let sql = format!(
+            "SELECT p.name, SUM(context_exceeded), COUNT(*)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE context_exceeded > 0 AND {clause}
+             GROUP BY p.name ORDER BY 2 DESC",
+            clause = clause,
+        );
+        {
+            let mut stmt = conn.prepare(&sql)?;
+            let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, i64>(2)?))
+            })?;
+            for r in rows {
+                let (name, cx, n) = r?;
+                if cx > 0 {
+                    out.push(AnomalyRow {
+                        kind: "context_exceeded".into(),
+                        agent: name,
+                        detail: format!("{cx} 次 context 超限 / {n} 请求"),
+                        severity: "medium".into(),
+                    });
+                }
+            }
+        }
+        Ok(out)
     }
 
     // ── 审计：策略规则 + 预算设置 + 消息扫描流（plan codeagent-ops M4/M5）──
@@ -1945,6 +2222,57 @@ pub struct AuditMessageRow {
     pub source_conversation_id: String,
     pub conversation_title: Option<String>,
     pub content_text: String,
+}
+
+/// 资产行（M6）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AssetRow {
+    pub provider: String,
+    pub kind: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    pub risky_hits: i64,
+    pub installed_at: Option<String>,
+    pub path: Option<String>,
+}
+
+/// 自动化行（M8）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AutomationRow {
+    pub provider: String,
+    pub name: String,
+    pub kind: String,
+    pub schedule: Option<String>,
+    pub status: Option<String>,
+    pub detail: Option<String>,
+}
+
+/// 按目录成本（M7）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirCost {
+    pub dir: String,
+    pub tokens: i64,
+    pub cost_usd: f64,
+    pub requests: i64,
+}
+
+/// 缓存统计（M7）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CacheStat {
+    pub provider: String,
+    pub input_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub hit_rate: f64,
+}
+
+/// 异常行（M9）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AnomalyRow {
+    pub kind: String,
+    pub agent: String,
+    pub detail: String,
+    pub severity: String,
 }
 
 fn parse_status(s: &str) -> Status {

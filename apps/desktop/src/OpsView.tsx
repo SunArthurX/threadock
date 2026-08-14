@@ -66,6 +66,47 @@ interface RiskyCall {
   command_text: string | null;
 }
 
+interface AssetRow {
+  provider: string;
+  kind: string;
+  name: string;
+  version: string | null;
+  description: string | null;
+  risky_hits: number;
+  installed_at: string | null;
+  path: string | null;
+}
+
+interface AutomationRow {
+  provider: string;
+  name: string;
+  kind: string;
+  schedule: string | null;
+  status: string | null;
+  detail: string | null;
+}
+
+interface DirCost {
+  dir: string;
+  tokens: number;
+  cost_usd: number;
+  requests: number;
+}
+
+interface CacheStat {
+  provider: string;
+  input_tokens: number;
+  cache_read_tokens: number;
+  hit_rate: number;
+}
+
+interface AnomalyRow {
+  kind: string;
+  agent: string;
+  detail: string;
+  severity: string;
+}
+
 interface AuditFinding {
   kind: string;
   severity: "low" | "medium" | "high";
@@ -149,6 +190,12 @@ export default function OpsView({ onJumpToConversation }: Props) {
   const [topTools, setTopTools] = useState<ToolUsageRow[]>([]);
   const [risky, setRisky] = useState<RiskyCall[]>([]);
   const [expandedRisk, setExpandedRisk] = useState<Set<string>>(new Set());
+  // M6-M9
+  const [assets, setAssets] = useState<AssetRow[]>([]);
+  const [automations, setAutomations] = useState<AutomationRow[]>([]);
+  const [dirCosts, setDirCosts] = useState<DirCost[]>([]);
+  const [cacheStats, setCacheStats] = useState<CacheStat[]>([]);
+  const [anomalies, setAnomalies] = useState<AnomalyRow[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -168,13 +215,16 @@ export default function OpsView({ onJumpToConversation }: Props) {
   const loadAll = async () => {
     setLoading(true);
     // allSettled：单个接口失败只影响对应卡片，不再拖空整页数据
-    const [ov, bp, bm, ts, tt, rc] = await Promise.allSettled([
+    const [ov, bp, bm, ts, tt, rc, dc, cs, an] = await Promise.allSettled([
       invoke<OpsOverview>("ops_overview", { days: range }),
       invoke<ProviderUsage[]>("ops_by_provider", { days: range }),
       invoke<ModelUsage[]>("ops_by_model", { days: range }),
       invoke<DailyUsage[]>("ops_timeseries", { days: range }),
       invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }),
       invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }),
+      invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }),
+      invoke<CacheStat[]>("ops_cache_stats", { days: range }),
+      invoke<AnomalyRow[]>("ops_anomalies", { days: range }),
     ]);
     if (ov.status === "fulfilled") setOverview(ov.value);
     else console.error("ops_overview failed", ov.reason);
@@ -183,6 +233,9 @@ export default function OpsView({ onJumpToConversation }: Props) {
     if (ts.status === "fulfilled") setTimeseries(ts.value);
     if (tt.status === "fulfilled") setTopTools(tt.value);
     if (rc.status === "fulfilled") setRisky(rc.value);
+    if (dc.status === "fulfilled") setDirCosts(dc.value);
+    if (cs.status === "fulfilled") setCacheStats(cs.value);
+    if (an.status === "fulfilled") setAnomalies(an.value);
     setLoading(false);
   };
 
@@ -214,12 +267,20 @@ export default function OpsView({ onJumpToConversation }: Props) {
   // 首次进入：立即加载已有数据（不阻塞），后台节流同步指标，完成后刷新
   useEffect(() => {
     (async () => {
-      // 先展示库里已有的指标
+      // 先展示库里已有的指标 + 资产/自动化
+      invoke<AssetRow[]>("assets_list").then(setAssets).catch(() => {});
+      invoke<AutomationRow[]>("automations_list").then(setAutomations).catch(() => {});
       await Promise.all([loadAll(), loadBudget(), loadPolicies()]);
-      // 后台同步（5 分钟节流；若正忙静默跳过），完成后刷新数据
+      // 后台同步（均 30 分钟节流；若正忙静默跳过），完成后刷新数据
       setSyncing(true);
       try {
         await invoke("ops_sync", { force: false });
+        await Promise.all([
+          invoke("assets_sync", { force: false }).catch(() => {}),
+          invoke("automations_sync", { force: false }).catch(() => {}),
+        ]);
+        invoke<AssetRow[]>("assets_list").then(setAssets).catch(() => {});
+        invoke<AutomationRow[]>("automations_list").then(setAutomations).catch(() => {});
         await Promise.all([loadAll(), loadBudget()]);
       } catch {
         /* 正在同步中时静默跳过 */
@@ -492,6 +553,123 @@ export default function OpsView({ onJumpToConversation }: Props) {
                 {topTools.length === 0 && !loading && <div className="ops-table-empty">暂无数据</div>}
               </div>
             </div>
+          </div>
+
+          {/* ── M7：成本洞察 ── */}
+          <div className="ops-tables">
+            <div className="ops-card">
+              <div className="ops-card-title">
+                缓存命中率
+                <span className="ops-card-sub">cache_read / (input + cache_read)</span>
+              </div>
+              {cacheStats.length === 0 ? (
+                loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+              ) : cacheStats.map((c) => (
+                <div key={c.provider} className="ops-tool-row">
+                  <span className="ops-tool-name">{meta(c.provider).label}</span>
+                  <div className="ops-tool-bar-bg">
+                    <div
+                      className="ops-tool-bar"
+                      style={{ width: `${(c.hit_rate * 100).toFixed(1)}%`, background: meta(c.provider).color }}
+                    />
+                  </div>
+                  <span className="ops-tool-calls">{(c.hit_rate * 100).toFixed(1)}%</span>
+                  <span className="legend-req">{formatTokens(c.cache_read_tokens)} 缓存</span>
+                </div>
+              ))}
+            </div>
+            <div className="ops-card">
+              <div className="ops-card-title">
+                按项目成本 Top10
+                <span className="ops-card-sub">来源侧工作目录归因</span>
+              </div>
+              {dirCosts.length === 0 ? (
+                loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+              ) : (
+                <table className="ops-table">
+                  <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th></tr></thead>
+                  <tbody>
+                    {dirCosts.map((d, i) => (
+                      <tr key={i}>
+                        <td className="mono" title={d.dir}>{d.dir.split("/").slice(-2).join("/")}</td>
+                        <td>{formatTokens(d.tokens)}</td>
+                        <td>{formatCost(d.cost_usd)}</td>
+                        <td>{d.requests.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+
+          {/* ── M6：资产清单 ── */}
+          <div className="ops-card">
+            <div className="ops-card-title">
+              🧩 资产清单（{assets.length}）
+              <span className="ops-card-sub">skills / plugins / 内置技能 · 红框含危险模式</span>
+            </div>
+            {assets.length === 0 ? (
+              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据（首次进入后台同步中）</div>
+            ) : (
+              <div className="assets-grid">
+                {assets.map((a, i) => (
+                  <div key={i} className={`asset-item ${a.risky_hits > 0 ? "risky" : ""}`}>
+                    <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
+                    <span className="asset-kind">{a.kind === "builtin_skill" ? "内置" : a.kind}</span>
+                    <span className="asset-name mono" title={a.path ?? ""}>{a.name}</span>
+                    {a.version && <span className="asset-ver mono">v{a.version}</span>}
+                    {a.risky_hits > 0 && <span className="risk-flag high">⚠ {a.risky_hits}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── M8：自动化任务 ── */}
+          <div className="ops-card">
+            <div className="ops-card-title">
+              ⏱ 自动化任务（{automations.length}）
+              <span className="ops-card-sub">cron / workflow / 后台任务</span>
+            </div>
+            {automations.length === 0 ? (
+              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+            ) : (
+              <div className="ops-risky">
+                {automations.map((a, i) => (
+                  <div key={i} className="ops-risky-row">
+                    <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
+                    <span className="asset-name mono">{a.name}</span>
+                    <span className="policy-kind">{a.kind}</span>
+                    {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
+                    {a.status && <span className={`risk-flag ${a.status.includes("completed") || a.status.includes("trusted") || a.status.includes("configured") ? "low" : "medium"}`}>{a.status}</span>}
+                    <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── M9：异常检测 ── */}
+          <div className="ops-card">
+            <div className="ops-card-title">
+              🚨 异常检测（{anomalies.length}）
+              <span className="ops-card-sub">错误尖峰 / 重试风暴 / context 超限</span>
+            </div>
+            {anomalies.length === 0 ? (
+              loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">未检测到异常 🎉</div>
+            ) : (
+              <div className="ops-risky">
+                {anomalies.map((a, i) => (
+                  <div key={i} className="ops-risky-row">
+                    <span className={`risk-flag ${a.severity}`}>
+                      {a.kind === "error_spike" ? "错误尖峰" : a.kind === "retry_storm" ? "重试风暴" : "context超限"}
+                    </span>
+                    <span className="mono" style={{ fontSize: 11.5 }}>{a.detail}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* ── M5：预算卡片 ── */}

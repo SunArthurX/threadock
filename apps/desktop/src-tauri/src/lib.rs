@@ -637,16 +637,16 @@ fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<ser
         }
         // MiniMax: token_usage
         if let Ok(u) = ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite")) {
-            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_minimax-code", &u).map_err(|e| e.to_string())?;
         }
         // Claude Code: JSONL usage + tool_use
         if let Ok((u, t)) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")) {
-            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_claude-code", &u).map_err(|e| e.to_string())?;
             tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
         }
         // Codex: token_count 快照 + function_call
         if let Ok((u, t)) = ch_ops_metrics::collect_codex(format!("{home}/.codex")) {
-            usage_written += repo.upsert_usage_batch(&u).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_codex", &u).map_err(|e| e.to_string())?;
             tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
         }
         // 自动成本重算：同步后立即按定价出数（此前需手动点重算，成本恒为 0）
@@ -842,6 +842,122 @@ fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value
         "tokens": row.0,
         "cost_usd": row.1,
     }))
+}
+
+// ── M6-M9：资产 / 自动化 / 成本归因 / 缓存 / 异常 ─────────────────────
+
+/// 同步资产清单（30 分钟节流，force 可强制）。
+#[tauri::command]
+fn assets_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+    let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        if !force.unwrap_or(false) {
+            if let Ok(Some(v)) = repo.get_setting("last_assets_sync_ms") {
+                if let Ok(last) = v.parse::<i64>() {
+                    if now_ms - last < 30 * 60 * 1000 {
+                        return Ok(serde_json::json!({ "written": 0, "throttled": true }));
+                    }
+                }
+            }
+        }
+    }
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    let assets = ch_ops_metrics::collect_assets(&home).map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    for p in [
+        ch_domain::Provider::ZCode,
+        ch_domain::Provider::Codex,
+        ch_domain::Provider::ClaudeCode,
+        ch_domain::Provider::MinimaxCode,
+    ] {
+        repo.upsert_provider(p).map_err(|e| e.to_string())?;
+    }
+    let mut written = 0;
+    for p in [
+        ch_domain::Provider::ZCode,
+        ch_domain::Provider::Codex,
+        ch_domain::Provider::ClaudeCode,
+        ch_domain::Provider::MinimaxCode,
+    ] {
+        let subset: Vec<_> = assets.iter().filter(|a| a.provider == p).cloned().collect();
+        written += repo
+            .replace_provider_assets(&format!("prov_{}", p.as_str()), &subset)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = repo.set_setting("last_assets_sync_ms", &now_ms.to_string());
+    Ok(serde_json::json!({ "written": written }))
+}
+
+#[tauri::command]
+fn assets_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::AssetRow>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.list_assets().map_err(|e| e.to_string())
+}
+
+/// 同步自动化任务（30 分钟节流）。
+#[tauri::command]
+fn automations_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+    let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    {
+        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        if !force.unwrap_or(false) {
+            if let Ok(Some(v)) = repo.get_setting("last_automations_sync_ms") {
+                if let Ok(last) = v.parse::<i64>() {
+                    if now_ms - last < 30 * 60 * 1000 {
+                        return Ok(serde_json::json!({ "written": 0, "throttled": true }));
+                    }
+                }
+            }
+        }
+    }
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    let recs = ch_ops_metrics::collect_automations(&home).map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    for p in [
+        ch_domain::Provider::ZCode,
+        ch_domain::Provider::Codex,
+        ch_domain::Provider::MinimaxCode,
+    ] {
+        repo.upsert_provider(p).map_err(|e| e.to_string())?;
+    }
+    let mut written = 0;
+    for p in [
+        ch_domain::Provider::ZCode,
+        ch_domain::Provider::Codex,
+        ch_domain::Provider::MinimaxCode,
+    ] {
+        let subset: Vec<_> = recs.iter().filter(|a| a.provider == p).cloned().collect();
+        written += repo
+            .replace_provider_automations(&format!("prov_{}", p.as_str()), &subset)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = repo.set_setting("last_automations_sync_ms", &now_ms.to_string());
+    Ok(serde_json::json!({ "written": written }))
+}
+
+#[tauri::command]
+fn automations_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::AutomationRow>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.list_automations().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_cost_by_dir(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::DirCost>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_cost_by_dir(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_cache_stats(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::CacheStat>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_cache_stats(days).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ops_anomalies(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AnomalyRow>, String> {
+    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    repo.ops_anomalies(days).map_err(|e| e.to_string())
 }
 
 // ── M5：定价模型 ───────────────────────────────────────────────────────
@@ -1570,6 +1686,13 @@ pub fn run() {
             ops_timeseries,
             ops_tool_toplist,
             ops_risky_calls,
+            assets_sync,
+            assets_list,
+            automations_sync,
+            automations_list,
+            ops_cost_by_dir,
+            ops_cache_stats,
+            ops_anomalies,
             get_conversation_by_source,
             audit_scan,
             audit_export_html,

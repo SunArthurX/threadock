@@ -18,6 +18,11 @@ pub fn collect_claude_code_session(
     let mut usage = Vec::new();
     let mut tools = Vec::new();
     let mut seq: i64 = 0;
+    // 项目目录（claude 将路径编码为目录名，作为归因标签）
+    let source_dir: Option<String> = path
+        .parent()
+        .and_then(|p| p.file_name())
+        .map(|n| n.to_string_lossy().into_owned());
 
     // 限行流式读取：跳过单行 >2MB 的负载（防内存尖峰）
     let mut reader = std::io::BufReader::new(file);
@@ -83,6 +88,8 @@ pub fn collect_claude_code_session(
                         status: UsageStatus::Completed,
                         duration_ms: None,
                         retry_count: None,
+                        source_dir: source_dir.clone(),
+                        context_exceeded: 0,
                     });
                 }
             }

@@ -347,3 +347,34 @@ CREATE TABLE IF NOT EXISTS app_settings (
     value TEXT NOT NULL
 );
 "#;
+
+
+/// V9：CodeAgentOps M6-M9 —— 资产清单、自动化任务、用量归因扩展。
+pub const SCHEMA_V9: &str = r#"
+ALTER TABLE usage_records ADD COLUMN source_dir TEXT;
+ALTER TABLE usage_records ADD COLUMN context_exceeded INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS asset_records (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL,
+    version TEXT,
+    description TEXT,
+    risky_hits INTEGER NOT NULL DEFAULT 0,
+    installed_at TEXT,
+    path TEXT,
+    UNIQUE(provider_id, kind, name, version)
+);
+
+CREATE TABLE IF NOT EXISTS automation_records (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'cron',
+    schedule TEXT,
+    status TEXT,
+    detail TEXT,
+    UNIQUE(provider_id, name)
+);
+"#;

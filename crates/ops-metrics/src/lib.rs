@@ -84,11 +84,15 @@ pub fn read_line_capped<R: std::io::BufRead>(
     }
 }
 
+pub mod assets;
+pub mod automations;
 pub mod claude_code;
 pub mod codex;
 pub mod minimax;
 pub mod zcode;
 
+pub use assets::collect_assets;
+pub use automations::collect_automations;
 pub use claude_code::collect_claude_code;
 pub use codex::collect_codex;
 pub use minimax::collect_minimax;
@@ -202,6 +206,8 @@ mod tests {
             status: UsageStatus::Completed,
             duration_ms: None,
             retry_count: None,
+            source_dir: None,
+            context_exceeded: 0,
         };
         assert_eq!(u.billable_tokens(), 160, "cache 不计费");
     }

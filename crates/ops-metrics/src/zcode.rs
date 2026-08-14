@@ -23,10 +23,11 @@ pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, 
     let mut usage = Vec::new();
     {
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, turn_id, model_id, started_at, status, duration_ms,
-                    retry_count, input_tokens, output_tokens, reasoning_tokens,
-                    cache_read_input_tokens, cache_creation_input_tokens
-             FROM model_usage",
+            "SELECT m.id, m.session_id, m.turn_id, m.model_id, m.started_at, m.status, m.duration_ms,
+                    m.retry_count, m.input_tokens, m.output_tokens, m.reasoning_tokens,
+                    m.cache_read_input_tokens, m.cache_creation_input_tokens,
+                    s.directory, COALESCE(m.context_exceeded, 0)
+             FROM model_usage m LEFT JOIN session s ON s.id = m.session_id",
         )?;
         let rows = stmt.query_map([], |r| {
             let status: String = r.get(5)?;
@@ -46,6 +47,8 @@ pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, 
                 status: UsageStatus::parse(&status),
                 duration_ms: r.get(6)?,
                 retry_count: r.get(7)?,
+                source_dir: r.get(13)?,
+                context_exceeded: r.get(14)?,
             })
         })?;
         for row in rows {
@@ -105,14 +108,21 @@ mod tests {
             "CREATE TABLE model_usage (id TEXT, session_id TEXT, turn_id TEXT, model_id TEXT,
                 started_at INTEGER, status TEXT, duration_ms INTEGER, retry_count INTEGER,
                 input_tokens INTEGER, output_tokens INTEGER, reasoning_tokens INTEGER,
-                cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER);
+                cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER,
+                context_exceeded INTEGER);
+             CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT);
              CREATE TABLE tool_usage (session_id TEXT, tool_name TEXT, started_at INTEGER,
                 read_only INTEGER, destructive INTEGER, approval_status TEXT,
                 exit_code INTEGER, duration_ms INTEGER, status TEXT);",
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO model_usage VALUES ('mu1','s1','t1','GLM-5.2',1000000,'completed',5000,0,100,50,10,200,0)",
+            "INSERT INTO model_usage VALUES ('mu1','s1','t1','GLM-5.2',1000000,'completed',5000,0,100,50,10,200,0,0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session VALUES ('s1','/tmp/proj')",
             [],
         )
         .unwrap();

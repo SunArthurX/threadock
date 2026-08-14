@@ -522,6 +522,10 @@ pub struct UsageRecord {
     pub status: UsageStatus,
     pub duration_ms: Option<i64>,
     pub retry_count: Option<i64>,
+    /// 来源侧工作目录（成本按项目归因，M7）。
+    pub source_dir: Option<String>,
+    /// context 超限次数（ZCode 原生，M9）。
+    pub context_exceeded: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -569,6 +573,34 @@ pub struct ToolCallRecord {
     pub status: UsageStatus,
     /// Bash 类工具保留命令文本（审计用）。
     pub command_text: Option<String>,
+}
+
+/// 一个 Agent 资产（skill/plugin/mcp），M6 资产清单。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssetRecord {
+    pub id: String,
+    pub provider: Provider,
+    /// skill / plugin / mcp / builtin_skill
+    pub kind: String,
+    pub name: String,
+    pub version: Option<String>,
+    pub description: Option<String>,
+    /// 描述/正文命中危险模式的次数（安全扫描）。
+    pub risky_hits: i64,
+    pub installed_at: Option<String>,
+    pub path: Option<String>,
+}
+
+/// 一个自动化/定时任务，M8 治理。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutomationRecord {
+    pub id: String,
+    pub provider: Provider,
+    pub name: String,
+    pub kind: String,
+    pub schedule: Option<String>,
+    pub status: Option<String>,
+    pub detail: Option<String>,
 }
 
 impl UsageRecord {

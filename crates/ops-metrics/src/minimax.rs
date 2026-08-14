@@ -10,9 +10,11 @@ pub fn collect_minimax(db_path: impl AsRef<Path>) -> OpsResult<Vec<UsageRecord>>
     }
     let conn = open_ro(db_path)?;
     let mut stmt = conn.prepare(
-        "SELECT session_id, turn_id, model, ts, input_tokens, output_tokens,
-                reasoning_tokens, cache_read_tokens, cache_write_tokens, cost_usd
-         FROM local_runtime_token_usage",
+        "SELECT u.session_id, u.turn_id, u.model, u.ts, u.input_tokens, u.output_tokens,
+                u.reasoning_tokens, u.cache_read_tokens, u.cache_write_tokens, u.cost_usd,
+                json_extract(s.record_json, '$.workspaceDir')
+         FROM local_runtime_token_usage u
+         LEFT JOIN local_runtime_sessions s ON s.session_id = u.session_id",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok(UsageRecord {
@@ -31,6 +33,8 @@ pub fn collect_minimax(db_path: impl AsRef<Path>) -> OpsResult<Vec<UsageRecord>>
             status: UsageStatus::Completed,
             duration_ms: None,
             retry_count: None,
+            source_dir: r.get(10)?,
+            context_exceeded: 0,
         })
     })?;
     let mut v = Vec::new();
@@ -53,11 +57,17 @@ mod tests {
             "CREATE TABLE local_runtime_token_usage (
                 session_id TEXT, turn_id TEXT, model TEXT, ts INTEGER,
                 input_tokens INTEGER, output_tokens INTEGER, reasoning_tokens INTEGER,
-                cache_read_tokens INTEGER, cache_write_tokens INTEGER, cost_usd REAL);",
+                cache_read_tokens INTEGER, cache_write_tokens INTEGER, cost_usd REAL);
+             CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT, updated_at_ms INTEGER);",
         )
         .unwrap();
         conn.execute(
             "INSERT INTO local_runtime_token_usage VALUES ('mvs_1','turn_1','MiniMax-M3',1784560908997,16705,370,0,242,0,0.02)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO local_runtime_sessions VALUES ('mvs_1','{\"workspaceDir\":\"/tmp/mmproj\"}',0)",
             [],
         )
         .unwrap();
@@ -67,6 +77,7 @@ mod tests {
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].input_tokens, 16705);
         assert_eq!(usage[0].cost_usd, Some(0.02));
+        assert_eq!(usage[0].source_dir.as_deref(), Some("/tmp/mmproj"));
         assert_eq!(usage[0].model.as_deref(), Some("MiniMax-M3"));
     }
 

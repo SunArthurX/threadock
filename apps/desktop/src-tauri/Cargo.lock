@@ -729,6 +729,7 @@ name = "ch-ops-metrics"
 version = "0.1.0"
 dependencies = [
  "ch-domain",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

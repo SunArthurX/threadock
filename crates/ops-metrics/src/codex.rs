@@ -19,6 +19,7 @@ pub fn collect_codex_session(
     let mut tools = Vec::new();
     // token_count 是累计值：记最后一条快照（时间 + 数值）
     let mut last_snapshot: Option<(time::OffsetDateTime, i64, i64, i64, i64)> = None;
+    let mut source_dir: Option<String> = None;
     let mut seq: i64 = 0;
 
     // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死）
@@ -47,6 +48,15 @@ pub fn collect_codex_session(
                 time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
             });
 
+        // session_meta.cwd（归因）
+        if rec.get("type").and_then(|v| v.as_str()) == Some("session_meta")
+            && source_dir.is_none()
+        {
+            source_dir = rec
+                .pointer("/payload/cwd")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+        }
         if rec.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
             let p_type = rec.pointer("/payload/type").and_then(|v| v.as_str());
             if p_type == Some("token_count") {
@@ -113,6 +123,8 @@ pub fn collect_codex_session(
                 status: UsageStatus::Completed,
                 duration_ms: None,
                 retry_count: None,
+                source_dir: source_dir.clone(),
+                context_exceeded: 0,
             });
         }
     }
