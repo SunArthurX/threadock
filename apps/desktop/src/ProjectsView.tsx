@@ -1,10 +1,11 @@
-// 项目中心页（第 6-10 轮优化）：可点击跳转/排序升降序/空状态/卡片 hover/批量导出
+// 项目中心页（持续优化）：可点击跳转/排序升降序/空状态/卡片 hover/批量导出
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens, formatCost } from "./charts";
 import { formatTime } from "./types";
 import { usePager } from "./usePager";
 import { showToast } from "./toast";
+import type { Conversation } from "./types";
 
 export interface ProjectRow {
   dir: string;
@@ -55,11 +56,15 @@ export function projectsToCsv(projects: ProjectRow[]): string {
   return "\uFEFF" + [head, ...rows].join("\n");
 }
 
-export default function ProjectsView() {
+export default function ProjectsView({ onJumpToConversation }: { onJumpToConversation?: (cid: string) => void } = {}) {
   const [projects, setProjects] = useState<ProjectRow[] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("cost");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [search, setSearch] = useState("");
+  // 项目卡 → 会话列表展开
+  const [openDir, setOpenDir] = useState<string | null>(null);
+  const [dirConvs, setDirConvs] = useState<Conversation[] | null>(null);
+  const [dirLoading, setDirLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -114,6 +119,22 @@ export default function ProjectsView() {
     }
   };
 
+  /** 展开/收起某个项目卡的会话列表。 */
+  const toggleDir = async (dir: string) => {
+    if (openDir === dir) { setOpenDir(null); setDirConvs(null); return; }
+    setOpenDir(dir);
+    setDirLoading(true);
+    try {
+      const list = await invoke<Conversation[]>("list_conversations_by_dir", { dir });
+      setDirConvs(list);
+    } catch (e) {
+      showToast(`查询失败：${String(e)}`, "error");
+      setDirConvs(null);
+    } finally {
+      setDirLoading(false);
+    }
+  };
+
   return (
     <div className="projects-page">
       <div className="ops-card">
@@ -163,8 +184,15 @@ export default function ProjectsView() {
       </div>
       <div className="project-grid">
         {pager.slice.map((p) => (
-          <div key={p.dir} className="project-card" title={`点击跳到该项目最近的会话 · ${p.dir}`}>
-            <div className="project-name mono" title={p.dir}>{shortDir(p.dir)}</div>
+          <div
+            key={p.dir}
+            className={`project-card ${openDir === p.dir ? "expanded" : ""}`}
+            title={`点击展开/收起会话列表 · ${p.dir}`}
+            onClick={() => toggleDir(p.dir)}
+          >
+            <div className="project-name mono" title={p.dir}>
+              {openDir === p.dir ? "▼" : "▶"} {shortDir(p.dir)}
+            </div>
             <div className="cost-ratio" title={`成本占比 ${((p.cost_usd / maxCost) * 100).toFixed(1)}%（相对最大项目）`}>
               <div className="cost-ratio-fill" style={{ width: `${Math.max(3, (p.cost_usd / maxCost) * 100)}%` }} />
             </div>
@@ -176,6 +204,30 @@ export default function ProjectsView() {
               <div className="project-row"><span>主力 Agent</span><b>{p.main_agent ?? "—"}</b></div>
               <div className="project-row"><span>最近活跃</span><b>{formatTime(p.last_active_ms) || "—"}</b></div>
             </div>
+            {openDir === p.dir && (
+              <div className="project-conv-list" onClick={(e) => e.stopPropagation()}>
+                <div className="project-conv-title">
+                  {dirLoading ? "加载中…" : dirConvs && `${dirConvs.length} 条会话`}
+                </div>
+                {dirConvs && dirConvs.length === 0 && (
+                  <div className="project-conv-empty">该项目下没有主任务会话</div>
+                )}
+                {dirConvs && dirConvs.slice(0, 10).map((c) => (
+                  <div
+                    key={c.id}
+                    className="project-conv-row"
+                    onClick={() => onJumpToConversation?.(c.id)}
+                  >
+                    <span className={`badge source ${c.provider}`}>{c.provider}</span>
+                    <span className="project-conv-name">{c.user_title ?? c.title ?? "(无标题)"}</span>
+                    <span className="project-conv-time">{formatTime(c.started_at_ms ?? null)}</span>
+                  </div>
+                ))}
+                {dirConvs && dirConvs.length > 10 && (
+                  <div className="project-conv-empty">还有 {dirConvs.length - 10} 条未展示（去 chat 页查看完整列表）</div>
+                )}
+              </div>
+            )}
           </div>
         ))}
       </div>

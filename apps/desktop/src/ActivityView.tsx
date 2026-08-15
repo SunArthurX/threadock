@@ -1,12 +1,18 @@
-// 活动节律页（第 6-10 轮优化）：peak 高亮/时间范围说明/空状态引导/范围日期
+// 活动节律页（持续优化）：tool_daily/工作日-周末拆分/查看当日会话/24h 自定义 tooltip
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BarChart } from "./charts";
+import { showToast } from "./toast";
+import type { Conversation } from "./types";
+import { formatTime } from "./types";
 
 interface Stats {
   heatmap: { day: string; calls: number; sessions: number }[];
   hourly: { hour: number; calls: number }[];
+  hourly_weekday: { hour: number; calls: number }[];
+  hourly_weekend: { hour: number; calls: number }[];
   tools_trend: { month: string; tool: string; calls: number }[];
+  tool_daily: { day: string; tool: string; calls: number }[];
 }
 
 /** 把 days 转成可读的「YYYY-MM-DD ~ YYYY-MM-DD」范围文案。 */
@@ -15,6 +21,52 @@ export function daysToRange(days: number, now: number = Date.now()): string {
   const start = new Date(now - days * 86_400_000);
   const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return `${fmt(start)} ~ ${fmt(end)}`;
+}
+
+/** 活动页完整数据 → CSV（UTF-8 BOM，Excel 友好）。多块拼接用空行分隔。 */
+export function activityToCsv(s: {
+  heatmap: { day: string; calls: number; sessions: number }[];
+  hourly: { hour: number; calls: number }[];
+  hourly_weekday?: { hour: number; calls: number }[];
+  hourly_weekend?: { hour: number; calls: number }[];
+  tools_trend: { month: string; tool: string; calls: number }[];
+  tool_daily?: { day: string; tool: string; calls: number }[];
+}): string {
+  const esc = (v: unknown) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const out: string[] = [];
+  out.push("# 每日热力");
+  out.push("日期,工具调用,活跃会话");
+  s.heatmap.forEach((c) => out.push([c.day, c.calls, c.sessions].map(esc).join(",")));
+  out.push("");
+  out.push("# 24h 整体");
+  out.push("小时,调用");
+  s.hourly.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
+  if (s.hourly_weekday?.length) {
+    out.push("");
+    out.push("# 24h 工作日");
+    out.push("小时,调用");
+    s.hourly_weekday.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
+  }
+  if (s.hourly_weekend?.length) {
+    out.push("");
+    out.push("# 24h 周末");
+    out.push("小时,调用");
+    s.hourly_weekend.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
+  }
+  out.push("");
+  out.push("# 工具月度趋势");
+  out.push("月份,工具,调用");
+  s.tools_trend.forEach((t) => out.push([t.month, t.tool, t.calls].map(esc).join(",")));
+  if (s.tool_daily?.length) {
+    out.push("");
+    out.push("# 工具日级（限最近 90 天）");
+    out.push("日期,工具,调用");
+    s.tool_daily.forEach((t) => out.push([t.day, t.tool, t.calls].map(esc).join(",")));
+  }
+  return "\uFEFF" + out.join("\n");
 }
 
 /** 热力图单元格颜色（5 档 sky 渐变）。 */
@@ -162,10 +214,12 @@ export function calcStreak(cells: { day: string; calls: number }[]): number {
   return streak;
 }
 
-export default function ActivityView() {
+export default function ActivityView({ onJumpToConversation }: { onJumpToConversation?: (conversationId: string) => void } = {}) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [days, setDays] = useState(365);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [dayConvs, setDayConvs] = useState<Conversation[] | null>(null);
+  const [dayConvsLoading, setDayConvsLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -247,16 +301,58 @@ export default function ActivityView() {
 
   // 选中日详情
   const selectedCell = selectedDay ? heatmapCells.find((c) => c.day === selectedDay) ?? null : null;
-  const selectedMonthTools = useMemo(() => {
+  // 优先用 tool_daily（日级精确），fallback 到 tools_trend 按月聚合
+  const selectedDayTools = useMemo(() => {
     if (!selectedDay || !stats) return [];
+    const safeDaily = (stats.tool_daily ?? []).filter((t) => t.day === selectedDay);
+    if (safeDaily.length > 0) {
+      const total = safeDaily.reduce((s, t) => s + t.calls, 0);
+      return safeDaily
+        .sort((a, b) => b.calls - a.calls)
+        .slice(0, 5)
+        .map((t) => ({ ...t, share: total > 0 ? (t.calls / total) * 100 : 0 }));
+    }
     const month = selectedDay.slice(0, 7);
-    const safe = stats.tools_trend.filter((t) => t.month === month);
-    const total = safe.reduce((s, t) => s + t.calls, 0);
-    return safe
+    const safeMonth = stats.tools_trend.filter((t) => t.month === month);
+    const total = safeMonth.reduce((s, t) => s + t.calls, 0);
+    return safeMonth
       .sort((a, b) => b.calls - a.calls)
       .slice(0, 5)
       .map((t) => ({ ...t, share: total > 0 ? (t.calls / total) * 100 : 0 }));
   }, [selectedDay, stats]);
+
+  /** 导出活动页全量数据为 CSV（剪贴板）。 */
+  const exportCsv = async () => {
+    if (!stats) return;
+    try {
+      await navigator.clipboard.writeText(activityToCsv(stats));
+      showToast("✓ 活动数据 CSV 已复制到剪贴板", "info");
+    } catch {
+      showToast("剪贴板不可用", "error");
+    }
+  };
+
+  // 选中日点击「查看当日会话」→ 拉会话列表
+  const loadDayConvs = async () => {
+    if (!selectedDay) return;
+    setDayConvsLoading(true);
+    try {
+      const fromMs = new Date(selectedDay + "T00:00:00").getTime();
+      const toMs = fromMs + 86_400_000 - 1; // 当天 23:59:59.999
+      const list = await invoke<Conversation[]>("list_conversations_by_date", { fromMs, toMs });
+      setDayConvs(list);
+    } catch (e) {
+      showToast(`查询失败：${String(e)}`, "error");
+      setDayConvs(null);
+    } finally {
+      setDayConvsLoading(false);
+    }
+  };
+  useEffect(() => {
+    setDayConvs(null);
+    if (selectedDay) loadDayConvs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDay]);
 
   const todayKey = (() => {
     const d = new Date();
@@ -269,7 +365,13 @@ export default function ActivityView() {
         <div className="ops-card-title">
           📆 活动节律
           <span className="ops-card-sub">{rangeText}</span>
-          <div className="ops-range" style={{ marginLeft: "auto" }}>
+          {stats && (
+            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={exportCsv}
+              title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
+              ⧉ 导出 CSV
+            </button>
+          )}
+          <div className="ops-range" style={{ marginLeft: stats ? 8 : "auto" }}>
             {([90, 180, 365] as const).map((d) => (
               <button key={d} className={`filter-chip ${days === d ? "active" : ""}`} onClick={() => setDays(d)}>
                 {d === 365 ? "1 年" : `${d} 天`}
@@ -354,18 +456,27 @@ export default function ActivityView() {
                   <span className="day-detail-weekday">{weekdayCN(selectedCell.day)}</span>
                   {isWeekend(selectedCell.day) && <span className="day-detail-weekday" style={{ background: "rgba(244,114,182,0.18)", color: "#f472b6" }}>周末</span>}
                   {selectedCell.day === todayKey && <span className="day-detail-weekday" style={{ background: "rgba(96,165,250,0.18)", color: "#60a5fa" }}>今天</span>}
-                  <button className="day-detail-close" onClick={() => setSelectedDay(null)}>✕ 关闭</button>
+                  <button
+                    className="action-btn"
+                    style={{ marginLeft: "auto", fontSize: 11 }}
+                    onClick={loadDayConvs}
+                    disabled={dayConvsLoading}
+                    title={`查询 ${selectedCell.day} 的主任务会话列表`}
+                  >
+                    {dayConvsLoading ? "查询中…" : dayConvs ? "↻ 重新查询" : "💬 查看当日会话"}
+                  </button>
+                  <button className="day-detail-close" onClick={() => { setSelectedDay(null); setDayConvs(null); }}>✕ 关闭</button>
                 </div>
                 <div className="day-detail-stats">
                   <div className="day-detail-stat"><b>{selectedCell.calls.toLocaleString()}</b><span>工具调用</span></div>
                   <div className="day-detail-stat"><b>{selectedCell.sessions}</b><span>活跃会话</span></div>
                   <div className="day-detail-stat"><b>{selectedCell.sessions > 0 ? (selectedCell.calls / selectedCell.sessions).toFixed(1) : "0"}</b><span>平均每次会话</span></div>
                 </div>
-                {selectedMonthTools.length > 0 ? (
+                {selectedDayTools.length > 0 ? (
                   <>
-                    <div className="day-detail-tools-title">当月工具分布（最常调用 Top 5）</div>
+                    <div className="day-detail-tools-title">当日工具分布（最常调用 Top 5）</div>
                     <div className="day-detail-tools">
-                      {selectedMonthTools.map((t) => (
+                      {selectedDayTools.map((t) => (
                         <div key={t.tool} className="day-detail-tool-row">
                           <span className="day-detail-tool-name">{t.tool}</span>
                           <div className="day-detail-tool-bar">
@@ -378,7 +489,39 @@ export default function ActivityView() {
                   </>
                 ) : (
                   <div className="ops-table-empty" style={{ padding: "10px 0" }}>
-                    当月暂无工具分布数据（仅显示日期 + 调用次数；想看更细的日级工具分布需要后端补 SQL）
+                    当日暂无工具分布数据（点击「查看当日会话」看真实会话）
+                  </div>
+                )}
+                {dayConvs && (
+                  <div className="day-detail-convs">
+                    <div className="day-detail-tools-title">
+                      {selectedCell.day} 的主任务会话（{dayConvs.length} 条）
+                    </div>
+                    {dayConvs.length === 0 ? (
+                      <div className="ops-table-empty" style={{ padding: "10px 0" }}>
+                        当日没有主任务会话（仅子任务或无 started_at 数据）
+                      </div>
+                    ) : (
+                      <div className="day-detail-conv-list">
+                        {dayConvs.slice(0, 12).map((c) => (
+                          <div
+                            key={c.id}
+                            className="day-detail-conv-row"
+                            onClick={() => onJumpToConversation?.(c.id)}
+                            title="点击跳转到该会话"
+                          >
+                            <span className="day-detail-conv-provider">{c.provider}</span>
+                            <span className="day-detail-conv-title">{c.user_title ?? c.title ?? "(无标题)"}</span>
+                            <span className="day-detail-conv-time">{formatTime(c.started_at_ms ?? null)}</span>
+                          </div>
+                        ))}
+                        {dayConvs.length > 12 && (
+                          <div className="ops-table-empty" style={{ padding: "6px 0", fontSize: 11 }}>
+                            还有 {dayConvs.length - 12} 条未展示（去 chat 页查看完整列表）
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -404,12 +547,37 @@ export default function ActivityView() {
               ))}
             </div>
             <div className="hourly-split">
-              <div className="hourly-split-item"><span className="hourly-split-dot wd" /> 24h 整体</div>
-              <div className="hourly-split-item" style={{ opacity: 0.55 }}><span className="hourly-split-dot we" /> 工作日 / 周末（待后端拆分）</div>
+              <div className="hourly-split-item"><span className="hourly-split-dot wd" /> 工作日（周一~五）</div>
+              <div className="hourly-split-item"><span className="hourly-split-dot we" /> 周末（周六~日）</div>
+              <div className="hourly-split-item" style={{ marginLeft: "auto", opacity: 0.6 }}>悬停柱子看明细</div>
             </div>
             <BarChart
               data={hourlyChart.map((h) => ({ label: h.label, value: h.value, className: h.className }))}
               height={120}
+              axisLabel={(d) => `${d.label}:00`}
+              renderTooltip={(d, max) => {
+                const wd = stats?.hourly_weekday?.[Number(d.label)]?.calls ?? 0;
+                const we = stats?.hourly_weekend?.[Number(d.label)]?.calls ?? 0;
+                const total = Number(d.value);
+                const part = dayPart(Number(d.label));
+                return (
+                  <>
+                    <div className="tooltip-title">{d.label}:00 · {part}</div>
+                    <div className="tooltip-row">
+                      <span className="tooltip-dot" style={{ background: "var(--accent)" }} />
+                      <span>总调用 <b style={{ marginLeft: 4 }}>{total.toLocaleString()}</b>（{((total / max) * 100).toFixed(0)}% of peak）</span>
+                    </div>
+                    <div className="tooltip-row" style={{ marginTop: 2 }}>
+                      <span className="tooltip-dot" style={{ background: "#60a5fa" }} />
+                      <span>工作日 <b style={{ marginLeft: 4 }}>{wd.toLocaleString()}</b></span>
+                    </div>
+                    <div className="tooltip-row">
+                      <span className="tooltip-dot" style={{ background: "#f472b6" }} />
+                      <span>周末 <b style={{ marginLeft: 4 }}>{we.toLocaleString()}</b></span>
+                    </div>
+                  </>
+                );
+              }}
             />
           </>
         )}

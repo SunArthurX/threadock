@@ -39,7 +39,7 @@ fn main() {
         ("restore_conversation", "id", "void"),
         ("hard_delete_conversation", "id", "void"),
         ("rebuild_search_index", "-", "{messages}"),
-        ("activity_stats", "days?", "{heatmap, hourly, tools_trend}"),
+        ("activity_stats", "days?", "{heatmap, hourly, hourly_weekday, hourly_weekend, tools_trend, tool_daily}"),
         ("projects_overview", "-", "ProjectRow[]"),
         ("recent_user_prompts", "limit?", "PromptRow[]"),
         ("list_reports", "-", "ReportFile[]"),
@@ -73,6 +73,16 @@ fn main() {
         (
             "list_conversations",
             "workspaceId?, provider?",
+            "ConversationDto[]",
+        ),
+        (
+            "list_conversations_by_date",
+            "fromMs?, toMs?",
+            "ConversationDto[]",
+        ),
+        (
+            "list_conversations_by_dir",
+            "dir",
             "ConversationDto[]",
         ),
         (

@@ -1,7 +1,7 @@
 // 轻量 SVG 图表组件：零第三方依赖，配色取自设计系统 provider 专属色。
 // 全部带入场动画：数值从 0 → 目标（0 到有值再到最大）。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /** mount 后一帧置 true，触发 CSS transition 从 0 → 目标 */
 function useMounted(): boolean {
@@ -100,40 +100,71 @@ export function BarChart({
   height = 140,
   color = "var(--accent)",
   barClassName,
+  /** 自定义 hover 渲染（label/value 实时 tooltip），不传则走 title 降级。 */
+  renderTooltip,
+  /** 自定义轴 label 提取函数（默认取 label 后 5 位）。 */
+  axisLabel,
 }: {
   data: BarDatum[];
   height?: number;
   color?: string;
   /** 给所有柱子追加的 className（前缀）。 */
   barClassName?: string;
+  renderTooltip?: (d: BarDatum, max: number) => ReactNode;
+  axisLabel?: (d: BarDatum) => string;
 }) {
   const mounted = useMounted();
+  const [hover, setHover] = useState<{ i: number; x: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const items = data.slice(-30);
   if (items.length === 0) return <div className="chart-empty">无数据</div>;
   const max = Math.max(...items.map((d) => d.value), 1);
-  const gap = 3;
-  const bw = Math.max(100 / items.length - gap, 2);
+
+  const onMouseMove = (e: React.MouseEvent<HTMLDivElement>, i: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover({ i, x: e.clientX - rect.left });
+  };
+
+  const hovered = hover ? items[hover.i] : null;
+  const tooltip = hovered && renderTooltip ? renderTooltip(hovered, max) : null;
+
   return (
-    <div className="barchart" style={{ height }}>
+    <div
+      ref={containerRef}
+      className="barchart"
+      style={{ height }}
+      onMouseLeave={() => setHover(null)}
+    >
       <div className="barchart-bars">
         {items.map((d, i) => (
           <div
             key={i}
             className={`barchart-bar ${barClassName ?? ""} ${d.className ?? ""}`.trim()}
             style={{
-              width: `${bw}%`,
+              width: `${Math.max(100 / items.length - 3, 2)}%`,
               height: mounted ? `${Math.max((d.value / max) * 100, 1.5)}%` : "0%",
               background: color,
               transition: `height 600ms cubic-bezier(.2,.8,.3,1) ${Math.min(i * 25, 500)}ms`,
+              filter: hover?.i === i ? "brightness(1.25)" : undefined,
             }}
             title={d.title ?? `${d.label}: ${formatTokens(d.value)}`}
+            onMouseMove={(e) => onMouseMove(e, i)}
           />
         ))}
       </div>
       <div className="barchart-axis">
-        <span>{items[0]?.label.slice(5)}</span>
-        <span>{items[items.length - 1]?.label.slice(5)}</span>
+        <span>{axisLabel ? axisLabel(items[0]) : items[0]?.label.slice(5)}</span>
+        <span>{axisLabel ? axisLabel(items[items.length - 1]) : items[items.length - 1]?.label.slice(5)}</span>
       </div>
+      {hovered && tooltip && hover && (
+        <div
+          className="barchart-tooltip"
+          style={{ left: hover.x, bottom: height + 4 }}
+        >
+          {tooltip}
+        </div>
+      )}
     </div>
   );
 }

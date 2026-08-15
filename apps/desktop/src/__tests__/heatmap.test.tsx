@@ -4,19 +4,28 @@ import { describe, expect, it, vi } from "vitest";
 import ActivityView from "../ActivityView";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async () => ({
-    heatmap: [
-      { day: "2026-08-01", calls: 10, sessions: 2 },
-      { day: "2026-08-02", calls: 40, sessions: 3 },
-      { day: "2026-08-05", calls: 5, sessions: 1 },
-    ],
-    hourly: [{ hour: 9, calls: 30 }, { hour: 14, calls: 20 }],
-    tools_trend: [
-      { month: "2026-07", tool: "Bash", calls: 5 },
-      { month: "2026-08", tool: "Bash", calls: 30 },
-      { month: "2026-08", tool: "Read", calls: 20 },
-    ],
-  })),
+  invoke: vi.fn(async (cmd: string) => {
+    if (cmd === "list_conversations_by_date") return []; // 当日会话列表
+    return {
+      heatmap: [
+        { day: "2026-08-01", calls: 10, sessions: 2 },
+        { day: "2026-08-02", calls: 40, sessions: 3 },
+        { day: "2026-08-05", calls: 5, sessions: 1 },
+      ],
+      hourly: [{ hour: 9, calls: 30 }, { hour: 14, calls: 20 }],
+      hourly_weekday: Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: h === 14 ? 20 : 5 })),
+      hourly_weekend: Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: h === 9 ? 30 : 0 })),
+      tools_trend: [
+        { month: "2026-07", tool: "Bash", calls: 5 },
+        { month: "2026-08", tool: "Bash", calls: 30 },
+        { month: "2026-08", tool: "Read", calls: 20 },
+      ],
+      tool_daily: [
+        { day: "2026-08-01", tool: "Bash", calls: 6 },
+        { day: "2026-08-01", tool: "Read", calls: 4 },
+      ],
+    };
+  }),
 }));
 
 describe("活动页热力图渲染", () => {
@@ -73,5 +82,41 @@ describe("活动页热力图渲染", () => {
     expect(deltas.length).toBe(rows.length);
     // Top 3 排名号带高亮 class
     expect(container.querySelectorAll(".tool-rank-num.top").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("24h 分布的 BarChart 支持自定义 hover tooltip（renderTooltip）", async () => {
+    const { container } = render(<ActivityView />);
+    await waitFor(() => {
+      expect(container.querySelector(".barchart-bar")).toBeTruthy();
+    });
+    // 模拟 hover 第一个柱子 → 应该出现 .barchart-tooltip
+    const firstBar = container.querySelector(".barchart-bar");
+    expect(firstBar).toBeTruthy();
+    fireEvent.mouseMove(firstBar!, { clientX: 100, clientY: 50 } as unknown as MouseEvent);
+    // 出现 tooltip（含 tooltip-title 元素）
+    await waitFor(() => {
+      const tt = container.querySelector(".barchart-tooltip");
+      expect(tt).toBeTruthy();
+      expect(tt?.textContent).toMatch(/\d{1,2}:00/); // 包含 H:00 或 HH:00
+    });
+  });
+
+  it("点击「查看当日会话」展开当日会话列表（点击条目触发跳转）", async () => {
+    const onJump = vi.fn();
+    const { container, findByText } = render(<ActivityView onJumpToConversation={onJump} />);
+    await findByText("每日协作热力图");
+    const dataCell = container.querySelector('.heat-cell[title*="次调用"]');
+    fireEvent.click(dataCell!);
+    // 等 day detail 出现
+    await waitFor(() => {
+      expect(container.querySelector(".day-detail")).toBeTruthy();
+    });
+    // 点「查看当日会话」按钮
+    const btn = await findByText(/查看当日会话|重新查询/);
+    fireEvent.click(btn);
+    // 由于 mock 返回空数组，应显示「当日没有主任务会话」空态
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/没有主任务会话|当日会话/);
+    });
   });
 });

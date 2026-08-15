@@ -35,6 +35,8 @@ pub(crate) async fn list_conversations(
             Some(false) | None => Some(false), // 默认排除已删除
         },
         provider: None,
+        started_after_ms: None,
+        started_before_ms: None,
     };
     let convs = repo
         .list_conversations_filtered(&filter)
@@ -93,6 +95,79 @@ pub(crate) async fn list_child_conversations(
 pub(crate) fn cancel_sync() -> Result<(), String> {
     CANCEL_SYNC.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(())
+}
+
+/// 按日期范围列出主任务会话（活动页「查看当日会话」用）。
+///
+/// `from_ms` / `to_ms` 是闭区间的毫秒时间戳；任一为 None 表示该端不限。
+#[tauri::command]
+pub(crate) async fn list_conversations_by_date(
+    state: tauri::State<'_, DaemonState>,
+    from_ms: Option<i64>,
+    to_ms: Option<i64>,
+) -> Result<Vec<ConversationDto>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let mut filter = ch_storage::ConversationFilter::new().exclude_deleted();
+    if let (Some(f), Some(t)) = (from_ms, to_ms) {
+        filter = filter.with_started_range_ms(f, t);
+    } else if let Some(f) = from_ms {
+        filter.started_after_ms = Some(f);
+    } else if let Some(t) = to_ms {
+        filter.started_before_ms = Some(t);
+    }
+    let convs = repo
+        .list_conversations_filtered(&filter)
+        .map_err(|e| storage_err(e))?;
+    let child_counts = repo.child_counts_bulk().map_err(|e| storage_err(e))?;
+    let flags = repo.conversation_flags_bulk().map_err(|e| storage_err(e))?;
+    let dtos = convs
+        .into_iter()
+        .filter(|c| c.source_parent_id.is_none())
+        .map(|c| {
+            let provider_id = format!("prov_{}", c.provider.as_str());
+            let child_count = child_counts
+                .get(&(c.source_conversation_id.clone(), provider_id))
+                .copied()
+                .unwrap_or(0);
+            let f = flags.get(&c.id).copied().unwrap_or_default();
+            conversation_dto(c, child_count, f)
+        })
+        .collect();
+    Ok(dtos)
+}
+
+/// 按 source_dir 列出主任务会话（项目页卡片「查看会话」用）。
+///
+/// `dir` 精确匹配 usage_records.source_dir；空字符串 / None 视为「未知目录」回退。
+#[tauri::command]
+pub(crate) async fn list_conversations_by_dir(
+    state: tauri::State<'_, DaemonState>,
+    dir: String,
+) -> Result<Vec<ConversationDto>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    // 通过 projects_overview 拿到 dir → conv ids 反查：简化为按 dir 模糊匹配
+    // 这里直接用 SQL：conversations 自身没存 source_dir，但 raw_payload_id → usage_records
+    // 关联能拿到。为了快速落地，先用 conversations.id 在 messages/usage_records
+    // 里的最新 source_dir。
+    let convs = repo
+        .conversations_by_source_dir(&dir)
+        .map_err(|e| storage_err(e))?;
+    let child_counts = repo.child_counts_bulk().map_err(|e| storage_err(e))?;
+    let flags = repo.conversation_flags_bulk().map_err(|e| storage_err(e))?;
+    let dtos = convs
+        .into_iter()
+        .filter(|c| c.source_parent_id.is_none())
+        .map(|c| {
+            let provider_id = format!("prov_{}", c.provider.as_str());
+            let child_count = child_counts
+                .get(&(c.source_conversation_id.clone(), provider_id))
+                .copied()
+                .unwrap_or(0);
+            let f = flags.get(&c.id).copied().unwrap_or_default();
+            conversation_dto(c, child_count, f)
+        })
+        .collect();
+    Ok(dtos)
 }
 
 /// 重置所有数据（清空 conversations/workspaces + 索引 + raw blobs）。

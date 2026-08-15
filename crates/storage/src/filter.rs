@@ -15,6 +15,10 @@ pub struct ConversationFilter {
     pub archived: Option<bool>,
     /// Some(true) 只看已软删除；Some(false) 排除已软删除；None 不限。
     pub deleted: Option<bool>,
+    /// 起始时间戳（毫秒，闭区间）。None 不限。
+    pub started_after_ms: Option<i64>,
+    /// 结束时间戳（毫秒，闭区间）。None 不限。
+    pub started_before_ms: Option<i64>,
 }
 
 impl ConversationFilter {
@@ -55,6 +59,13 @@ impl ConversationFilter {
     #[must_use]
     pub fn exclude_deleted(mut self) -> Self {
         self.deleted = Some(false);
+        self
+    }
+    /** 限定 started_at 在 [from, to] 闭区间（毫秒时间戳）。 */
+    #[must_use]
+    pub fn with_started_range_ms(mut self, from: i64, to: i64) -> Self {
+        self.started_after_ms = Some(from);
+        self.started_before_ms = Some(to);
         self
     }
 }

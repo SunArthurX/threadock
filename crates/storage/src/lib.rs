@@ -15,9 +15,10 @@ pub use error::{StorageError, StorageResult};
 pub use filter::ConversationFilter;
 pub use repository::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AuditFindingState,
-    AuditMessageRow, AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyUsage, DirCost,
-    GovernanceLogRow, HeatCell, HourBucket, KnowledgeRecord, LatencyStat, ModelUsage,
-    MonthProjection, OpsOverview, PolicyRuleRecord, ProviderUsage, RedactionRuleRecord, Repository,
-    TokenWaste, ToolTrend, ToolUsageRow, UsageSummary, WeeklySummary,
+    AuditMessageRow, AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyTool,
+    DailyUsage, DirCost, GovernanceLogRow, HeatCell, HourBucket, KnowledgeRecord, LatencyStat,
+    ModelUsage, MonthProjection, OpsOverview, PolicyRuleRecord, ProviderUsage,
+    RedactionRuleRecord, Repository, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
+    WeeklySummary,
 };
 pub use search::{build_match_expr, SearchQuery, SearchResult};

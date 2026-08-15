@@ -1,6 +1,6 @@
 //! CodeAgentOps 指标域：用量/工具调用写入、聚合查询、资产与自动化记录（从 repository.rs 拆出）。
 
-use super::Repository;
+use super::{row_to_conversation, Repository};
 use crate::error::StorageResult;
 use crate::timestamp;
 use ch_domain::now_utc;
@@ -231,12 +231,23 @@ pub struct ToolTrend {
     pub calls: i64,
 }
 
-/// 活动节律聚合三件套。
+/// 活动节律：日级工具分布（按天 + 工具名，限最近 90 天）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DailyTool {
+    pub day: String,
+    pub tool: String,
+    pub calls: i64,
+}
+
+/// 活动节律聚合六件套（heatmap / hourly 全量 / 工作日 / 周末 / 月度工具趋势 / 日级工具）。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ActivityStats {
     pub heatmap: Vec<HeatCell>,
     pub hourly: Vec<HourBucket>,
+    pub hourly_weekday: Vec<HourBucket>,
+    pub hourly_weekend: Vec<HourBucket>,
     pub tools_trend: Vec<ToolTrend>,
+    pub tool_daily: Vec<DailyTool>,
 }
 
 impl Repository {
@@ -1323,7 +1334,7 @@ impl Repository {
 
     // ── 洞察页面聚合 ─────────────────────────────────────────────────
 
-    /// 活动节律：按天热力 / 24 小时分布 / 工具月度趋势（新页面，纯聚合）。
+    /// 活动节律：按天热力 / 24 小时分布 / 工具月度趋势 / 工作日-周末拆分 / 日级工具分布。
     ///
     /// 返回具名字段的对象（前端按 `{ day, calls, sessions }` 读）。
     /// 改前是 `Vec<(String, i64, i64)>`，serde 默认序列化为 `[["2026-08-10", 5, 2]]`，
@@ -1358,20 +1369,38 @@ impl Repository {
         }
 
         let mut hourly = Vec::new();
+        let mut hourly_weekday = Vec::new();
+        let mut hourly_weekend = Vec::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h, COUNT(*)
+                "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h,
+                        CAST(strftime('%w', ts/1000,'unixepoch','localtime') AS INTEGER) AS dow,
+                        COUNT(*)
                  FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
-                 GROUP BY h ORDER BY h",
+                 GROUP BY h, dow ORDER BY h",
             )?;
+            // 用 24 槽累积 weekday/weekend
+            let mut wd = vec![0i64; 24];
+            let mut we = vec![0i64; 24];
+            let mut total = vec![0i64; 24];
             let rows = stmt.query_map(params![cutoff], |r| {
-                Ok(HourBucket {
-                    hour: r.get(0)?,
-                    calls: r.get(1)?,
-                })
+                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
             })?;
             for row in rows {
-                hourly.push(row?);
+                let (h, dow, c) = row?;
+                if (0..24).contains(&h) {
+                    total[h as usize] += c;
+                    if dow == 0 || dow == 6 {
+                        we[h as usize] += c;
+                    } else {
+                        wd[h as usize] += c;
+                    }
+                }
+            }
+            for h in 0..24 {
+                hourly.push(HourBucket { hour: h as i64, calls: total[h] });
+                hourly_weekday.push(HourBucket { hour: h as i64, calls: wd[h] });
+                hourly_weekend.push(HourBucket { hour: h as i64, calls: we[h] });
             }
         }
 
@@ -1394,7 +1423,36 @@ impl Repository {
                 tools_trend.push(row?);
             }
         }
-        Ok(ActivityStats { heatmap, hourly, tools_trend })
+
+        // 日级工具分布：按天 + 工具聚合（仅最近 90 天避免数据爆炸）
+        let mut tool_daily: Vec<DailyTool> = Vec::new();
+        {
+            let day_cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0)
+                - days.min(90) * 86_400_000;
+            let mut stmt = conn.prepare(
+                "SELECT date(ts/1000,'unixepoch','localtime') AS d, tool_name, COUNT(*)
+                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+                 GROUP BY d, tool_name ORDER BY d, 3 DESC",
+            )?;
+            let rows = stmt.query_map(params![day_cutoff], |r| {
+                Ok(DailyTool {
+                    day: r.get(0)?,
+                    tool: r.get(1)?,
+                    calls: r.get(2)?,
+                })
+            })?;
+            for row in rows {
+                tool_daily.push(row?);
+            }
+        }
+        Ok(ActivityStats {
+            heatmap,
+            hourly,
+            hourly_weekday,
+            hourly_weekend,
+            tools_trend,
+            tool_daily,
+        })
     }
 
     /// 项目中心：按 source_dir 聚合（与成本页同口径）。
@@ -1431,6 +1489,37 @@ impl Repository {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    /// 按 source_dir 列出 conversations（项目页「查看会话」用）。
+    /// 路径匹配与 projects_overview 口径一致：空串视为「(未知目录)」。
+    pub fn conversations_by_source_dir(&self, dir: &str) -> StorageResult<Vec<ch_domain::Conversation>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        // projects_overview 把空/缺失归并为 (未知目录)；这里用哨兵 "__MISSING__" 走 NULL/空 匹配
+        let sentinel = if dir.is_empty() || dir == "(未知目录)" {
+            "__MISSING__"
+        } else {
+            dir
+        };
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
+                    c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
+                    c.completed_at, c.source_status, c.source_url, c.completeness_score,
+                    c.content_hash, c.raw_payload_id, c.source_parent_id
+             FROM conversations c
+             JOIN providers p ON p.id = c.provider_id
+             JOIN usage_records u ON u.source_conversation_id = c.source_conversation_id
+                                  AND u.provider_id = c.provider_id
+             WHERE (?1 = '__MISSING__' AND (u.source_dir IS NULL OR u.source_dir = ''))
+                OR (?1 != '__MISSING__' AND u.source_dir = ?1)
+             ORDER BY c.updated_at DESC NULLS LAST",
+        )?;
+        let rows = stmt.query_map(params![sentinel], row_to_conversation)?;
+        let mut v = Vec::new();
+        for row in rows {
+            v.push(row?);
+        }
+        Ok(v)
     }
 
     /// 提示词库语料：最近的用户提问（含会话定位）。

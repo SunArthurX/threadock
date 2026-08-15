@@ -1,24 +1,37 @@
 // 新页面核心逻辑测试：热力图网格 / 知识提取断言 / 提示词收藏
-import { render } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { buildHeatGrid, heatColor, dayPart, daysToRange, weekdayCN, isWeekend, calcStreak } from "../ActivityView";
+import { buildHeatGrid, heatColor, dayPart, daysToRange, weekdayCN, isWeekend, calcStreak, activityToCsv } from "../ActivityView";
 import { loadPromptFavorites, togglePromptFavorite } from "../KnowledgeView";
 import { sortProjects, projectsToCsv } from "../ProjectsView";
 
 // 为「.slice 崩溃回归」专门 mock 一次 invoke
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async () => ({
-    heatmap: [],
-    hourly: [{ hour: 14, calls: 5 }],
-    tools_trend: [
-      { month: "2026-07", tool: "Bash", calls: 10 },
-      { month: undefined, tool: "Read", calls: 1 },
-      { month: null, tool: "Read", calls: 2 },
-      { month: "", tool: "Read", calls: 3 },
-      { month: "2026-08", tool: "Bash", calls: 20 },
-      { month: "2026-08", tool: "Edit", calls: 8 },
-    ],
-  })),
+  invoke: vi.fn(async (cmd: string) => {
+    if (cmd === "list_conversations_by_date") return [];
+    if (cmd === "list_conversations_by_dir") {
+      return [
+        { id: "d1", provider: "codex", source_conversation_id: "d1", title: "Dir Conv 1", user_title: null,
+          started_at_ms: Date.now() - 3600_000, updated_at_ms: Date.now() - 3600_000,
+          child_count: 0, favorite: false, archived: false },
+      ];
+    }
+    return {
+      heatmap: [],
+      hourly: [{ hour: 14, calls: 5 }],
+      hourly_weekday: Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: h === 14 ? 5 : 0 })),
+      hourly_weekend: Array.from({ length: 24 }, () => ({ hour: 0, calls: 0 })),
+      tools_trend: [
+        { month: "2026-07", tool: "Bash", calls: 10 },
+        { month: undefined, tool: "Read", calls: 1 },
+        { month: null, tool: "Read", calls: 2 },
+        { month: "", tool: "Read", calls: 3 },
+        { month: "2026-08", tool: "Bash", calls: 20 },
+        { month: "2026-08", tool: "Edit", calls: 8 },
+      ],
+      tool_daily: [],
+    };
+  }),
 }));
 
 describe("热力图（活动节律页）", () => {
@@ -160,6 +173,31 @@ describe("项目页第 6-10 轮优化", () => {
   });
 });
 
+describe("项目页卡片可展开会话列表", () => {
+  it("点击项目卡 → 触发 list_conversations_by_dir 拉会话", async () => {
+    const { default: ProjectsView } = await import("../ProjectsView");
+    // mock projects_overview 已经在顶部 mock 兜底——但 ProjectsView 实际调的是
+    // invoke("projects_overview", {})，mock 默认返回 activity_stats 数据，触发不到
+    // projects 渲染分支。给这次测试用 vi.mocked 注入项目数据。
+    const mod = await import("@tauri-apps/api/core");
+    (vi.mocked(mod.invoke) as unknown as { mockResolvedValueOnce: (v: unknown) => void }).mockResolvedValueOnce({
+      projects: [{ dir: "/a/p1", sessions: 2, tokens: 100, cost_usd: 1, requests: 5, last_active_ms: Date.now(), main_agent: "codex" }],
+    });
+    const { container } = render(<ProjectsView />);
+    // 等项目卡渲染
+    await waitFor(() => {
+      expect(container.querySelector(".project-card")).toBeTruthy();
+    });
+    // 点项目卡
+    const card = container.querySelector(".project-card")!;
+    fireEvent.click(card);
+    // 展开后出现 Dir Conv 1（来自 list_conversations_by_dir mock）
+    await waitFor(() => {
+      expect(container.textContent).toMatch(/Dir Conv 1/);
+    });
+  });
+});
+
 describe("活动页第 6-10 轮优化", () => {
   it("daysToRange 输出 YYYY-MM-DD ~ YYYY-MM-DD 格式", () => {
     // 固定 now 避免时区/时间漂移
@@ -196,6 +234,28 @@ describe("活动页第 6-10 轮优化", () => {
     expect(calcStreak([])).toBe(0);
     // 只有今天活跃 → 1
     expect(calcStreak([{ day: todayKey, calls: 1 }])).toBe(1);
+  });
+
+  it("activityToCsv 输出 5 块（heatmap/hourly/weekday/weekend/tools_trend/tool_daily）+ UTF-8 BOM", () => {
+    const csv = activityToCsv({
+      heatmap: [{ day: "2026-08-15", calls: 5, sessions: 2 }],
+      hourly: Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: h })),
+      hourly_weekday: Array.from({ length: 24 }, (_, h) => ({ hour: h, calls: h })),
+      hourly_weekend: Array.from({ length: 24 }, () => ({ hour: 0, calls: 0 })),
+      tools_trend: [{ month: "2026-08", tool: "Bash", calls: 10 }],
+      tool_daily: [{ day: "2026-08-15", tool: "Bash", calls: 3 }],
+    });
+    // UTF-8 BOM
+    expect(csv.charCodeAt(0)).toBe(0xFEFF);
+    // 5 个块标题
+    expect(csv).toContain("# 每日热力");
+    expect(csv).toContain("# 24h 整体");
+    expect(csv).toContain("# 24h 工作日");
+    expect(csv).toContain("# 24h 周末");
+    expect(csv).toContain("# 工具月度趋势");
+    expect(csv).toContain("# 工具日级");
+    // 至少 24 + 1 = 25 行（24h 桶 + 表头）
+    expect(csv.split("\n").length).toBeGreaterThan(25);
   });
 });
 

@@ -18,12 +18,13 @@ import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
 import { Toasts } from "./Toasts";
 import ErrorBoundary from "./ErrorBoundary";
+import { CommandPalette, type Page } from "./CommandPalette";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
 
-type View = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
+type View = Page;
 type SourceKey = "zcode" | "claude-code" | "cursor" | "minimax" | "codex";
 
 const NAV_ITEMS = [
@@ -37,6 +38,8 @@ export default function App() {
     const v = localStorage.getItem("ch-view");
     return (["overview","cost","security","assets","knowledge","activity","projects","chat"] as const).includes(v as View) ? v as View : "chat";
   });
+  // Command Palette（⌘K 全局搜索 + 跳转）
+  const [cmdOpen, setCmdOpen] = useState(false);
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
 
@@ -185,8 +188,28 @@ export default function App() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); searchInputRef.current?.focus(); searchInputRef.current?.select(); }
-      if (e.key === "Escape") { if (sourcePanel) setSourcePanel(null); else if (searchResults) { setSearchResults(null); setSearchQuery(""); } }
+      // ⌘K / Ctrl+K 唤起 Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+        return;
+      }
+      // ⌘1..8 直接跳页
+      if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
+        e.preventDefault();
+        const order: Page[] = ["chat", "overview", "cost", "security", "assets", "knowledge", "activity", "projects"];
+        const idx = Number(e.key) - 1;
+        if (order[idx]) {
+          setView(order[idx]);
+          localStorage.setItem("ch-view", order[idx]);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        if (cmdOpen) setCmdOpen(false);
+        else if (sourcePanel) setSourcePanel(null);
+        else if (searchResults) { setSearchResults(null); setSearchQuery(""); }
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -511,7 +534,7 @@ export default function App() {
             ) : syncResult && <span className="sync-status done">{syncResult}</span>}
 
             <div className="search-box">
-              <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
+              <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K 唤起命令面板)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doSearch()} />
               <button onClick={doSearch}>搜索</button>
@@ -538,10 +561,30 @@ export default function App() {
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
+          <button
+            className="settings-toggle"
+            title="命令面板 (⌘K)"
+            onClick={() => setCmdOpen(true)}
+            style={{ fontSize: 12 }}
+          >⌘K</button>
           <button className="settings-toggle" title="设置" onClick={() => setSettingsOpen(true)}>⚙</button>
         </div>
 
         <Toasts toasts={toastList} onDismiss={dismissToast} />
+
+        <CommandPalette
+          open={cmdOpen}
+          onClose={() => setCmdOpen(false)}
+          onJumpPage={(p) => { setView(p); localStorage.setItem("ch-view", p); }}
+          onJumpConversation={async (cid) => {
+            setView("chat");
+            try {
+              const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
+              setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+              setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
+            } catch (e) { showError(e); }
+          }}
+        />
 
         {knowledge && selectedConv && (
           <KnowledgeModal
@@ -581,9 +624,27 @@ export default function App() {
             } catch (e) { showError(e); }
           }} />
         ) : view === "activity" ? (
-          <ActivityView />
+          <ActivityView
+            onJumpToConversation={async (cid) => {
+              setView("chat");
+              try {
+                const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
+                setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+                setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
+              } catch (e) { showError(e); }
+            }}
+          />
         ) : view === "projects" ? (
-          <ProjectsView />
+          <ProjectsView
+            onJumpToConversation={async (cid) => {
+              setView("chat");
+              try {
+                const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
+                setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+                setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
+              } catch (e) { showError(e); }
+            }}
+          />
         ) : view !== "chat" ? (
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (

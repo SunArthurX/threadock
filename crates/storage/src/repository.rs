@@ -39,7 +39,7 @@ pub use audit_repo::{
 pub use knowledge_repo::KnowledgeRecord;
 pub use ops_queries::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat,
-    CacheTrendRow, DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage,
+    CacheTrendRow, DailyTool, DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage,
     MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };
@@ -419,6 +419,24 @@ impl Repository {
             } else {
                 "COALESCE(c.source_status, '') != 'deleted'".to_string()
             });
+        }
+        if let Some(after) = filter.started_after_ms {
+            push(
+                "c.started_at >= ?".to_string(),
+                after.into(),
+                &mut where_clauses,
+                &mut args,
+                &mut next_idx,
+            );
+        }
+        if let Some(before) = filter.started_before_ms {
+            push(
+                "c.started_at <= ?".to_string(),
+                before.into(),
+                &mut where_clauses,
+                &mut args,
+                &mut next_idx,
+            );
         }
 
         let mut sql = String::from(
@@ -1805,6 +1823,49 @@ mod tests {
 
     use crate::filter::ConversationFilter;
 
+    /// activity_stats 6 件套返回：heatmap / hourly 全量 / weekday / weekend / tools_trend / tool_daily。
+    /// 用「现在 + 偏移」避免时区硬编码（SQLite `localtime` 跟测试环境 TZ 耦合）。
+    #[test]
+    fn activity_stats_six_fields() {
+        let r = repo();
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
+        let now_ms = {
+            let t = ch_domain::now_utc();
+            (t - OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64
+        };
+        // 在「昨天 23:30」「今天 00:30」「今天 01:00」三处插 3 条（localtime 下覆盖跨日）
+        let day_ms = 86_400_000_i64;
+        let ts1 = now_ms - day_ms - 30 * 60_000;     // 昨天 23:30（UTC）
+        let ts2 = now_ms - 30 * 60_000;              // 今天 00:30（UTC）
+        let ts3 = now_ms;                              // 现在
+        {
+            let conn = r.conn.lock().expect("mutex");
+            conn.execute(
+                "INSERT INTO tool_call_records (id, provider_id, source_session_id, tool_name, ts, status)
+                 VALUES ('t1','prov_codex','s1','Bash',?1,'completed'),
+                        ('t2','prov_codex','s1','Bash',?2,'completed'),
+                        ('t3','prov_codex','s1','Read',?3,'completed')",
+                rusqlite::params![ts1, ts2, ts3],
+            ).expect("insert tool_call");
+        }
+        let stats = r.activity_stats(365).expect("activity");
+        // 3 条 → 至少 1 个 heatmap 桶
+        assert!(!stats.heatmap.is_empty(), "应至少有 heatmap 数据");
+        let total: i64 = stats.heatmap.iter().map(|c| c.calls).sum();
+        assert_eq!(total, 3, "3 条记录总和应为 3 次调用");
+        // hourly 全 24 槽
+        assert_eq!(stats.hourly.len(), 24);
+        // 工作日+周末拆分总数应等于 3
+        let weekend_total: i64 = stats.hourly_weekend.iter().map(|h| h.calls).sum();
+        let weekday_total: i64 = stats.hourly_weekday.iter().map(|h| h.calls).sum();
+        assert_eq!(weekend_total + weekday_total, 3, "工作日+周末 总数应等于 3 条");
+        // tools_trend 按月聚合：应至少有 1 行
+        assert!(!stats.tools_trend.is_empty());
+        // tool_daily 应含 Bash 工具
+        assert!(stats.tool_daily.iter().any(|t| t.tool == "Bash"));
+        assert!(stats.tool_daily.iter().any(|t| t.tool == "Read"));
+    }
+
     #[test]
     fn filter_by_favorite() {
         let r = repo();
@@ -1872,6 +1933,52 @@ mod tests {
             .expect("unexpected None");
         assert_eq!(in_workspace.len(), 1);
         assert_eq!(in_workspace[0].id, in_ws);
+    }
+
+    #[test]
+    fn filter_by_date_range() {
+        let r = repo();
+        // ts(N) 是 unix 秒；存储转毫秒。设三条会话分别对应 unix 100/500/900 秒。
+        let mut c1 = Conversation::new(Provider::Generic, "date-old");
+        c1.started_at = Some(ts(100));
+        r.upsert_conversation(&c1).expect("upsert failed");
+        let mut c2 = Conversation::new(Provider::Generic, "date-in");
+        c2.started_at = Some(ts(500));
+        r.upsert_conversation(&c2).expect("upsert failed");
+        let mut c3 = Conversation::new(Provider::Generic, "date-new");
+        c3.started_at = Some(ts(900));
+        r.upsert_conversation(&c3).expect("upsert failed");
+
+        // 闭区间 [300s, 700s] → 只命中 c2（毫秒 300_000..=700_000）
+        let in_range = r
+            .list_conversations_filtered(
+                &ConversationFilter::new().with_started_range_ms(300_000, 700_000),
+            )
+            .expect("unexpected None");
+        assert_eq!(in_range.len(), 1, "应只命中 started_at ∈ [300s, 700s] 的会话");
+        assert!(in_range[0].source_conversation_id.contains("date-in"));
+
+        // 只有 from ≥ 300s → c2 + c3
+        let after = r
+            .list_conversations_filtered(
+                &ConversationFilter {
+                    started_after_ms: Some(300_000),
+                    ..ConversationFilter::new()
+                },
+            )
+            .expect("unexpected None");
+        assert_eq!(after.len(), 2);
+
+        // 只有 to ≤ 700s → c1 + c2
+        let before = r
+            .list_conversations_filtered(
+                &ConversationFilter {
+                    started_before_ms: Some(700_000),
+                    ..ConversationFilter::new()
+                },
+            )
+            .expect("unexpected None");
+        assert_eq!(before.len(), 2);
     }
 
     #[test]

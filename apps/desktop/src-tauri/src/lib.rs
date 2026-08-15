@@ -54,6 +54,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_workspaces,
             list_conversations,
+            list_conversations_by_date,
+            list_conversations_by_dir,
             list_child_conversations,
             list_messages,
             list_events,

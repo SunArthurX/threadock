@@ -1468,6 +1468,34 @@ button {
   outline-offset: 1px;
 }
 
+/* BarChart 自定义 hover tooltip（跟随鼠标在容器底部） */
+.barchart { position: relative; }
+.barchart-tooltip {
+  position: absolute;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: rgba(20, 22, 30, 0.96);
+  color: #fff;
+  border: 1px solid var(--border, #444);
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.barchart-tooltip .tooltip-title { font-weight: 600; opacity: 0.95; }
+.barchart-tooltip .tooltip-sub { font-size: 10.5px; opacity: 0.7; }
+.barchart-tooltip .tooltip-row { display: flex; gap: 10px; align-items: center; }
+.barchart-tooltip .tooltip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.barchart-bar { cursor: crosshair; }
+
 .barchart-axis {
   display: flex;
   justify-content: space-between;
@@ -2611,15 +2639,15 @@ button {
 .heatmap { display: flex; gap: 3px; min-width: max-content; }
 .heatmap-col { display: flex; flex-direction: column; gap: 3px; }
 .heat-cell {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 18px; /* 14×18 竖向长方形，比 13×13 方块更有视觉重量 */
   border-radius: 3px;
   cursor: pointer;
   transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
   position: relative;
 }
 .heat-cell:hover {
-  transform: scale(1.4);
+  transform: scale(1.35);
   box-shadow: 0 0 0 1.5px var(--accent, #4f8cff), 0 2px 8px rgba(0,0,0,0.4);
   z-index: 2;
 }
@@ -2631,12 +2659,20 @@ button {
   box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.5);
 }
 .heat-legend { display: flex; align-items: center; gap: 5px; font-size: 10.5px; opacity: .6; margin-top: 8px; }
-.heat-legend-cell { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.heat-legend-cell { width: 13px; height: 17px; border-radius: 3px; display: inline-block; }
 
 /* 项目卡墙 */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.project-card { background: var(--panel-bg, #1a1e2a); border: 1px solid var(--border, #2a2e3a); border-radius: 12px; padding: 14px 16px; transition: border-color 0.15s, transform 0.12s; }
+.project-card { background: var(--panel-bg, #1a1e2a); border: 1px solid var(--border, #2a2e3a); border-radius: 12px; padding: 14px 16px; transition: border-color 0.15s, transform 0.12s; cursor: pointer; }
 .project-card:hover { border-color: var(--accent, #4f8cff); transform: translateY(-1px); }
+.project-card.expanded { border-color: var(--accent, #4f8cff); }
+.project-conv-list { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border, #2a2e3a); display: flex; flex-direction: column; gap: 4px; }
+.project-conv-title { font-size: 10.5px; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.project-conv-empty { font-size: 11px; opacity: 0.5; padding: 4px 0; }
+.project-conv-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.project-conv-row:hover { background: rgba(79, 140, 255, 0.12); }
+.project-conv-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-conv-time { font-size: 10.5px; opacity: 0.55; font-family: var(--font-mono); }
 .project-name { font-size: 13px; font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-rows { display: flex; flex-direction: column; gap: 4px; }
 .project-row { display: flex; justify-content: space-between; font-size: 12px; }
@@ -2692,13 +2728,116 @@ button {
 /* 活动优化 */
 .heatmap-scroll { overflow-x: auto; padding-bottom: 2px; }
 .heatmap-months { display: flex; gap: 3px; margin-bottom: 4px; min-width: max-content; }
-.heat-month-label { width: 13px; font-size: 9.5px; opacity: .55; white-space: nowrap; flex-shrink: 0; }
-/* Day-of-week 左侧固定列 */
+.heat-month-label { width: 14px; font-size: 9.5px; opacity: .55; white-space: nowrap; flex-shrink: 0; }
+/* Day-of-week 左侧固定列（高度对齐到 18px cell） */
 .heatmap-grid { display: flex; gap: 6px; min-width: max-content; }
 .heat-dow-col { display: flex; flex-direction: column; gap: 3px; padding-top: 0; }
-.heat-dow-label { width: 14px; height: 13px; font-size: 9px; opacity: .45; display: flex; align-items: center; justify-content: center; }
+.heat-dow-label { width: 14px; height: 18px; font-size: 9px; opacity: .45; display: flex; align-items: center; justify-content: center; }
 .heat-months-wrap { display: flex; align-items: center; margin-bottom: 2px; }
 .heat-months-wrap .heat-dow-label { opacity: 0; }
+
+/* Command Palette（⌘K 全局搜索） */
+.cmd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 12vh;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+.cmd-modal {
+  width: min(620px, calc(100vw - 48px));
+  max-height: 70vh;
+  background: var(--bg-panel, #1a1e2a);
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.cmd-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-subtle, #2a2e3a);
+}
+.cmd-input-icon {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.5;
+  padding: 2px 6px;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.cmd-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+  font-family: inherit;
+}
+.cmd-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 6px 0;
+}
+.cmd-group + .cmd-group { border-top: 1px solid var(--border-subtle, #2a2e3a); margin-top: 4px; padding-top: 4px; }
+.cmd-group-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  opacity: 0.5;
+  padding: 6px 16px 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.cmd-row.active { background: rgba(79, 140, 255, 0.15); }
+.cmd-row-icon { font-size: 15px; width: 22px; text-align: center; flex-shrink: 0; }
+.cmd-row-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmd-row-hint {
+  font-size: 11px;
+  opacity: 0.55;
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmd-empty {
+  padding: 40px 20px;
+  text-align: center;
+  opacity: 0.55;
+  font-size: 12.5px;
+}
+.cmd-footer {
+  display: flex;
+  gap: 14px;
+  padding: 7px 16px;
+  border-top: 1px solid var(--border-subtle, #2a2e3a);
+  font-size: 10.5px;
+  opacity: 0.5;
+}
 
 /* 选中日详情面板 */
 .day-detail {
@@ -2727,6 +2866,32 @@ button {
 .day-detail-tool-bar { flex: 1; height: 6px; background: var(--border, #2a2e3a); border-radius: 3px; overflow: hidden; }
 .day-detail-tool-fill { height: 100%; background: linear-gradient(90deg, #60a5fa, #3b82f6); }
 .day-detail-tool-count { font-size: 11px; opacity: .7; min-width: 56px; text-align: right; font-family: var(--font-mono); }
+
+/* 选中日会话列表（点格子后点「查看当日会话」展开） */
+.day-detail-convs { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.day-detail-conv-list { display: flex; flex-direction: column; gap: 3px; max-height: 220px; overflow-y: auto; }
+.day-detail-conv-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.day-detail-conv-row:hover { background: rgba(79, 140, 255, 0.12); }
+.day-detail-conv-provider {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--border, #2a2e3a);
+  opacity: 0.85;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.day-detail-conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.day-detail-conv-time { font-size: 11px; opacity: 0.6; font-family: var(--font-mono); }
 
 /* 工具 Top 10 列表 */
 .tool-rank-list { display: flex; flex-direction: column; gap: 6px; padding: 6px 0 0; }

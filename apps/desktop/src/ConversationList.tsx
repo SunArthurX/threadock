@@ -1,8 +1,19 @@
-// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开）
+// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开 + 日期范围筛选）
+import { useMemo, useState } from "react";
 import { Conversation, sourceLabel, formatTime } from "./types";
 
 /** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
 export type ListScope = "all" | "favorite" | "archived" | "deleted";
+
+/** 日期快筛：今日 / 近 7 天 / 近 30 天 / 全部（默认全部）。 */
+export type DateFilter = "all" | "today" | "week" | "month";
+
+const DATE_FILTERS: { key: DateFilter; label: string; days: number | null }[] = [
+  { key: "all", label: "全部", days: null },
+  { key: "today", label: "今日", days: 1 },
+  { key: "week", label: "近 7 天", days: 7 },
+  { key: "month", label: "近 30 天", days: 30 },
+];
 
 interface Props {
   conversations: Conversation[];
@@ -37,6 +48,14 @@ export default function ConversationList({
   expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onRestore,
 }: Props) {
+  const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  // 日期过滤：基于 started_at_ms（前端内存过滤，不增加后端请求）
+  const dateFiltered = useMemo(() => {
+    const cfg = DATE_FILTERS.find((d) => d.key === dateFilter);
+    if (!cfg?.days) return conversations;
+    const cutoff = Date.now() - cfg.days * 86_400_000;
+    return conversations.filter((c) => (c.started_at_ms ?? 0) >= cutoff);
+  }, [conversations, dateFilter]);
   const renderItem = (c: Conversation, isChild = false) => (
     <div key={c.id}>
       <div
@@ -93,7 +112,7 @@ export default function ConversationList({
   return (
     <>
       <div className="panel-header">
-        会话 ({conversations.length})
+        会话 ({dateFilter === "all" ? conversations.length : `${dateFiltered.length}/${conversations.length}`})
         {selectedWs && <span className="clear-ws" onClick={onClearWs}>✕</span>}
       </div>
       <div className="scope-bar">
@@ -120,14 +139,28 @@ export default function ConversationList({
             >{sourceLabel(p)}</button>
           ))}
       </div>
+      <div className="filter-bar" style={{ paddingTop: 0 }}>
+        <span style={{ fontSize: 10.5, opacity: 0.55, marginRight: 4 }}>日期</span>
+        {DATE_FILTERS.map((d) => (
+          <button
+            key={d.key}
+            className={`filter-chip ${dateFilter === d.key ? "active" : ""}`}
+            onClick={() => setDateFilter(d.key)}
+            title={d.days ? `仅显示最近 ${d.days} 天` : "全部时间"}
+          >{d.label}</button>
+        ))}
+      </div>
       {loading && (
         <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载会话…</span></div>
       )}
-      {!loading && conversations.map((c) => renderItem(c))}
+      {!loading && dateFiltered.map((c) => renderItem(c))}
       {!loading && conversations.length === 0 && (
         <div className="empty">
           {scope === "deleted" ? "回收站为空" : selectedWs ? "该项目下暂无会话" : "选择左侧项目"}
         </div>
+      )}
+      {!loading && conversations.length > 0 && dateFiltered.length === 0 && (
+        <div className="empty">当前日期范围无会话（试试「全部」）</div>
       )}
     </>
   );
