@@ -10,6 +10,7 @@ import SearchPanel from "./SearchPanel";
 import ImportMenu from "./ImportMenu";
 import SettingsView from "./SettingsView";
 import BudgetBar from "./BudgetBar";
+import KnowledgeModal from "./KnowledgeModal";
 import { Toasts } from "./Toasts";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import type { ListScope } from "./ConversationList";
@@ -518,6 +519,15 @@ export default function App() {
 
         <Toasts toasts={toastList} onDismiss={dismissToast} />
 
+        {knowledge && selectedConv && (
+          <KnowledgeModal
+            knowledge={knowledge}
+            convTitle={selectedConv.user_title ?? selectedConv.title}
+            onClose={() => setKnowledge(null)}
+            onReextract={extractKnowledge}
+          />
+        )}
+
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={setTheme}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
@@ -553,7 +563,7 @@ export default function App() {
             <div className="panel">
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}
-                    completenessLabel={completenessLabel} knowledge={knowledge}
+                    completenessLabel={completenessLabel}
                     loading={msgsLoading} exporting={exporting} timelineMode={timelineMode}
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
                     tags={detailTags}

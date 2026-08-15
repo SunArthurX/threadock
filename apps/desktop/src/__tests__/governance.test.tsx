@@ -86,7 +86,7 @@ describe("时间线归并排序（M15 修复验证）", () => {
     const { container } = render(
       <ConversationDetail
         conv={{ id: "c1", provider: "zcode", source_conversation_id: "s", title: null, user_title: null, status: null, model: null, completeness_score: null, workspace_id: null, started_at_ms: null, updated_at_ms: null, source_parent_id: null, child_count: 0 }}
-        messages={messages} events={events} completenessLabel="" knowledge={null}
+        messages={messages} events={events} completenessLabel=""
         loading={false} exporting={false} timelineMode highlightMsgId={null}
         collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}

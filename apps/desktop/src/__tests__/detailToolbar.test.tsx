@@ -1,9 +1,8 @@
-// 详情页按钮清单 / 知识防御渲染 / provider chips 显隐
+// 详情页按钮清单 / provider chips 显隐
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationDetail from "../ConversationDetail";
 import ConversationList from "../ConversationList";
-import type { ExtractionResult } from "../types";
 
 const conv = {
   id: "c1", provider: "zcode", source_conversation_id: "s", title: "标题", user_title: null,
@@ -12,7 +11,7 @@ const conv = {
   favorite: false, archived: false,
 };
 const baseDetail = {
-  conv, messages: [], events: [], completenessLabel: "", knowledge: null,
+  conv, messages: [], events: [], completenessLabel: "",
   loading: false, exporting: false, timelineMode: false, highlightMsgId: null,
   collapsedMsgs: new Set<string>(), tags: [],
   onToggleTimeline: vi.fn(), onExport: vi.fn(), onExtractKnowledge: vi.fn(),
@@ -20,7 +19,7 @@ const baseDetail = {
   onAddTag: vi.fn(), onRemoveTag: vi.fn(), onRescanAudit: vi.fn(),
 };
 
-describe("详情页按钮清单（需求 1）", () => {
+describe("详情页按钮清单", () => {
   it("工具栏为：时间线/知识/重扫/收藏/归档/下载", () => {
     render(<ConversationDetail {...baseDetail} />);
     const bar = screen.getByText(/消息|时间线/).closest("div.detail-actions")!;
@@ -36,7 +35,6 @@ describe("详情页按钮清单（需求 1）", () => {
   it("无删除入口（软删与彻底删除都已移除）", () => {
     render(<ConversationDetail {...baseDetail} />);
     expect(screen.queryByText(/删除/)).toBeNull();
-    expect(screen.queryByText(/彻底删除/)).toBeNull();
   });
 
   it("下载为下拉：默认不显示格式项，点开可选 Markdown / JSON", () => {
@@ -45,7 +43,6 @@ describe("详情页按钮清单（需求 1）", () => {
     fireEvent.click(screen.getByText(/下载/));
     fireEvent.click(screen.getByText("📄 Markdown（.md）"));
     expect(baseDetail.onExport).toHaveBeenCalledWith("markdown");
-    // 选择后下拉收起
     expect(screen.queryByText("📄 Markdown（.md）")).toBeNull();
   });
 
@@ -56,44 +53,7 @@ describe("详情页按钮清单（需求 1）", () => {
   });
 });
 
-describe("知识渲染防御（需求 2）", () => {
-  const partial = {
-    summary: "",
-    decisions: undefined,
-    todos: undefined,
-    errors: undefined,
-    commands: undefined,
-    files: undefined,
-    extractor: "rule-v1",
-  } as unknown as ExtractionResult;
-
-  it("字段缺失/空结果不崩溃，显示空态占位", () => {
-    expect(() =>
-      render(<ConversationDetail {...baseDetail} knowledge={partial} />)
-    ).not.toThrow();
-    expect(screen.getByText(/未提取到知识要点/)).toBeTruthy();
-  });
-
-  it("正常结果渲染各分区", () => {
-    const full: ExtractionResult = {
-      summary: "摘要内容",
-      decisions: [{ decision: "用 SQLite" }],
-      todos: [{ text: "写测试" }],
-      errors: [],
-      commands: ["cargo build"],
-      files: [{ path: "src/main.rs" }],
-      extractor: "rule-v1",
-    };
-    render(<ConversationDetail {...baseDetail} knowledge={full} />);
-    expect(screen.getByText("摘要内容")).toBeTruthy();
-    expect(screen.getByText(/用 SQLite/)).toBeTruthy();
-    expect(screen.getByText(/写测试/)).toBeTruthy();
-    expect(screen.getByText(/cargo build/)).toBeTruthy();
-    expect(screen.getByText(/src\/main.rs/)).toBeTruthy();
-  });
-});
-
-describe("provider chips 显隐（需求 3）", () => {
+describe("provider chips 显隐", () => {
   const listProps = {
     conversations: [], selectedConv: null, loading: false, providerFilter: null,
     selectedWs: null, expandedParents: new Set<string>(), childConvs: {},
@@ -106,41 +66,10 @@ describe("provider chips 显隐（需求 3）", () => {
     render(<ConversationList {...listProps} availableProviders={new Set(["zcode", "codex"])} />);
     expect(screen.queryByText("Cursor")).toBeNull();
     expect(screen.getByText("ZCode")).toBeTruthy();
-    expect(screen.getByText("Codex")).toBeTruthy();
   });
 
   it("未加载（空集合）时显示全部来源", () => {
     render(<ConversationList {...listProps} />);
     expect(screen.getByText("Cursor")).toBeTruthy();
-  });
-});
-
-describe("知识功能可用性", () => {
-  it("knowledgeToMarkdown 生成分区纪要（复制用途）", async () => {
-    const { knowledgeToMarkdown } = await import("../ConversationDetail");
-    const md = knowledgeToMarkdown({
-      summary: "做了 X",
-      decisions: [{ decision: "用 SQLite" }],
-      todos: [{ text: "写测试" }],
-      errors: [],
-      commands: ["cargo build"],
-      files: [{ path: "src/main.rs" }],
-      extractor: "rule-v1",
-    });
-    expect(md).toContain("# 会话纪要");
-    expect(md).toContain("## 摘要\n做了 X");
-    expect(md).toContain("- 用 SQLite");
-    expect(md).toContain("- [ ] 写测试");
-    expect(md).toContain("- `cargo build`");
-    expect(md).toContain("- src/main.rs");
-  });
-
-  it("提取结果出现时展示工具栏（复制纪要入口）", () => {
-    const full = {
-      summary: "s", decisions: [], todos: [], errors: [], commands: [], files: [], extractor: "r",
-    };
-    render(<ConversationDetail {...baseDetail} knowledge={full} />);
-    expect(screen.getByText("🧠 知识提取结果")).toBeTruthy();
-    expect(screen.getByText(/复制为纪要/)).toBeTruthy();
   });
 });

@@ -1,12 +1,11 @@
 // 会话详情组件（消息/时间线/事件/知识提取/导出）
-import { Message, EventDto, Conversation, ExtractionResult, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
+import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
 
 interface Props {
   conv: Conversation;
   messages: Message[];
   events: EventDto[];
   completenessLabel: string;
-  knowledge: ExtractionResult | null;
   loading: boolean;
   exporting: boolean;
   timelineMode: boolean;
@@ -24,10 +23,10 @@ interface Props {
   onRescanAudit: () => void;
 }
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 export default function ConversationDetail({
-  conv, messages, events, completenessLabel, knowledge, loading, exporting,
+  conv, messages, events, completenessLabel, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
   onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
   onToggleFavorite, onToggleArchive,
@@ -35,14 +34,6 @@ export default function ConversationDetail({
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
-  const knowledgeRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
-  // 提取结果出现/更新时滚动到知识面板（此前在页面底部，点了「知识」毫无视觉反馈）
-  useEffect(() => {
-    if (knowledge) {
-      knowledgeRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [knowledge]);
   const renderContent = (m: Message) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
@@ -117,7 +108,7 @@ export default function ConversationDetail({
           {timelineMode ? "💬 消息" : "🕐 时间线"}
         </button>
         <button className="action-btn" onClick={onExtractKnowledge} disabled={loading || messages.length === 0}>
-          {loading ? "提取中…" : knowledge ? "✨ 重新提取" : "✨ 知识"}
+          {loading ? "提取中…" : "✨ 知识"}
         </button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
         <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
@@ -177,108 +168,8 @@ export default function ConversationDetail({
           </div>
         ))}
       </>)}
-      <div className="knowledge-section" ref={knowledgeRef}>
-        {knowledge && (
-          <div className="knowledge-toolbar">
-            <span className="knowledge-title">🧠 知识提取结果</span>
-            <span className="knowledge-hint">本会话的纪要：摘要 / 决策 / TODO / 错误 / 命令 / 文件</span>
-            <button
-              className="action-btn"
-              onClick={async () => {
-                const md = knowledgeToMarkdown(knowledge);
-                try {
-                  await navigator.clipboard.writeText(md);
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 2000);
-                } catch { /* 剪贴板不可用时忽略 */ }
-              }}
-              title="把提取结果复制为 Markdown，可直接粘贴做会话纪要 / 交接文档"
-            >
-              {copied ? "✓ 已复制" : "⧉ 复制为纪要"}
-            </button>
-          </div>
-        )}
-        {knowledge && (
-          <div className="knowledge-result">
-            {(knowledge.summary ?? "").length === 0
-              && (knowledge.decisions ?? []).length === 0
-              && (knowledge.todos ?? []).length === 0
-              && (knowledge.errors ?? []).length === 0
-              && (knowledge.commands ?? []).length === 0
-              && (knowledge.files ?? []).length === 0 && (
-              <div className="knowledge-empty">本会话未提取到知识要点（决策/TODO/命令/文件等）——常见于短问答类会话；代码/工程类会话提取效果更明显</div>
-            )}
-            {knowledge.summary && (
-              <div className="knowledge-block summary">
-                <div className="knowledge-label">📖 摘要</div>
-                <div className="knowledge-text">{knowledge.summary}</div>
-              </div>
-            )}
-            {(knowledge.decisions ?? []).length > 0 && (
-              <div className="knowledge-block decisions">
-                <div className="knowledge-label">🎯 决策（{knowledge.decisions.length}）</div>
-                {(knowledge.decisions ?? []).map((d, i) => <div key={i} className="knowledge-item">• {d.decision}</div>)}
-              </div>
-            )}
-            {(knowledge.todos ?? []).length > 0 && (
-              <div className="knowledge-block todos">
-                <div className="knowledge-label">📋 TODO（{knowledge.todos.length}）</div>
-                {(knowledge.todos ?? []).map((t, i) => <div key={i} className="knowledge-item">• {t.text}</div>)}
-              </div>
-            )}
-            {(knowledge.errors ?? []).length > 0 && (
-              <div className="knowledge-block errors">
-                <div className="knowledge-label">❌ 错误（{knowledge.errors.length}）</div>
-                {(knowledge.errors ?? []).map((e, i) => <div key={i} className="knowledge-item">• {e.error}</div>)}
-              </div>
-            )}
-            {(knowledge.commands ?? []).length > 0 && (
-              <div className="knowledge-block commands">
-                <div className="knowledge-label">⚙️ 命令（{knowledge.commands.length}）</div>
-                {(knowledge.commands ?? []).map((c, i) => <div key={i} className="knowledge-item mono">• {c}</div>)}
-              </div>
-            )}
-            {(knowledge.files ?? []).length > 0 && (
-              <div className="knowledge-block files">
-                <div className="knowledge-label">📄 涉及文件（{knowledge.files.length}）</div>
-                {(knowledge.files ?? []).map((f, i) => <div key={i} className="knowledge-item mono">• {f.path}</div>)}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 
 
-}
-
-/** 知识提取结果 → Markdown 纪要（复制/交接用）。 */
-export function knowledgeToMarkdown(k: {
-  summary?: string;
-  decisions?: { decision: string }[];
-  todos?: { text: string }[];
-  errors?: { error: string }[];
-  commands?: string[];
-  files?: { path: string }[];
-  extractor?: string;
-}): string {
-  const lines: string[] = ["# 会话纪要", ""];
-  if (k.summary) lines.push("## 摘要", k.summary, "");
-  if ((k.decisions ?? []).length > 0) {
-    lines.push("## 决策", ...(k.decisions ?? []).map((d) => `- ${d.decision}`), "");
-  }
-  if ((k.todos ?? []).length > 0) {
-    lines.push("## TODO", ...(k.todos ?? []).map((t) => `- [ ] ${t.text}`), "");
-  }
-  if ((k.errors ?? []).length > 0) {
-    lines.push("## 错误", ...(k.errors ?? []).map((e) => `- ${e.error}`), "");
-  }
-  if ((k.commands ?? []).length > 0) {
-    lines.push("## 命令", ...(k.commands ?? []).map((c) => "- `" + c + "`"), "");
-  }
-  if ((k.files ?? []).length > 0) {
-    lines.push("## 涉及文件", ...(k.files ?? []).map((f) => `- ${f.path}`), "");
-  }
-  return lines.join("\n");
 }
