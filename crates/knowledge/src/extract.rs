@@ -60,19 +60,7 @@ impl RuleExtractor {
         if !title.is_empty() {
             parts.push(title);
         }
-        // 摘要里每段截断到 200 字符，避免过长
-        let truncate = |s: &str| -> String {
-            if s.chars().count() <= 200 {
-                s.to_string()
-            } else {
-                let cut: String = s.chars().take(200).collect();
-                format!("{cut}…")
-            }
-        };
-        if !first_user.is_empty() {
-            parts.push(""); // 分隔
-            let _ = &mut parts; // 借用检查
-        }
+        // 摘要全文输出（2026-08-15 用户反馈：弹窗中 200 字符截断的「…」丢失信息）
         let mut out = String::new();
         if !title.is_empty() {
             out.push_str("【主题】");
@@ -81,12 +69,12 @@ impl RuleExtractor {
         }
         if !first_user.is_empty() {
             out.push_str("【问题】");
-            out.push_str(&truncate(first_user));
+            out.push_str(first_user);
             out.push(' ');
         }
         if !longest_assistant.is_empty() {
             out.push_str("【要点】");
-            out.push_str(&truncate(longest_assistant));
+            out.push_str(longest_assistant);
         }
         out.trim().to_string()
     }
@@ -572,5 +560,36 @@ mod tests {
         let json = serde_json::to_string(&r).expect("unexpected None");
         let back: ExtractionResult = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(r, back);
+    }
+
+    #[test]
+    fn summarize_long_text_not_truncated() {
+        // 回归：摘要全文输出（旧实现 200 字符截断产生「…」）
+        let long: String = "长".repeat(500);
+        let input = ExtractionInput {
+            title: Some("主题".into()),
+            messages: vec![ch_domain::Message {
+                content_text: Some(long.clone()),
+                ..ch_domain::Message::new("c1", ch_domain::Role::User, 1)
+            }],
+            events: vec![],
+        };
+        let r = RuleExtractor::new().extract(&input);
+        assert!(r.summary.contains(&long), "用户消息必须全文进入摘要");
+        assert!(!r.summary.contains('…'), "不得再出现截断省略号");
+        let tail = "结尾标记".to_string();
+        let input2 = ExtractionInput {
+            title: None,
+            messages: vec![ch_domain::Message {
+                content_text: Some(format!("{long}{tail}")),
+                ..ch_domain::Message::new("c1", ch_domain::Role::User, 1)
+            }],
+            events: vec![],
+        };
+        let r2 = RuleExtractor::new().extract(&input2);
+        assert!(
+            r2.summary.contains("结尾标记"),
+            "500 字后的尾部内容必须保留"
+        );
     }
 }

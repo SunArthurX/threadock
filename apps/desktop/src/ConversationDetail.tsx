@@ -34,6 +34,8 @@ export default function ConversationDetail({
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
+  /** 只看用户消息（我的提问）：消息视图与时间线同时生效。 */
+  const [onlyUser, setOnlyUser] = useState(false);
   const renderContent = (m: Message) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
@@ -57,8 +59,9 @@ export default function ConversationDetail({
       {(() => {
         interface TI { kind: "msg" | "event"; ts: number; data: unknown }
         // 按时间归并排序（旧实现直接拼接不排序、事件无时间、截断 100）
+        const visibleMsgs = onlyUser ? messages.filter((m) => m.role === "user") : messages;
         const items: TI[] = [
-          ...messages.map((m) => ({ kind: "msg" as const, ts: m.created_at_ms ?? 0, data: m })),
+          ...visibleMsgs.map((m) => ({ kind: "msg" as const, ts: m.created_at_ms ?? 0, data: m })),
           ...events.map((e) => ({ kind: "event" as const, ts: e.created_at_ms ?? 0, data: e })),
         ].sort((a, b) => a.ts - b.ts);
         return items.slice(0, 2000).map((item, i) => {
@@ -104,6 +107,7 @@ export default function ConversationDetail({
         {conv.source_parent_id && " · 子任务"}
       </div>
       <div className="detail-actions">
+        <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
         <button className={`action-btn ${timelineMode ? "active" : ""}`} onClick={onToggleTimeline}>
           {timelineMode ? "💬 消息" : "🕐 时间线"}
         </button>
@@ -111,7 +115,13 @@ export default function ConversationDetail({
           {loading ? "提取中…" : "✨ 知识"}
         </button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
-        <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
+        <button
+          className={`action-btn ${onlyUser ? "active" : ""}`}
+          onClick={() => setOnlyUser(!onlyUser)}
+          title="开启后仅展示我自己发出的消息（消息视图与时间线同时生效）"
+        >
+          👤 仅用户消息
+        </button>
         <button className="action-btn" onClick={onToggleArchive}>{conv.archived ? "📤 取消归档" : "🗄 归档"}</button>
         <div className="download-dropdown">
           <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
@@ -149,7 +159,7 @@ export default function ConversationDetail({
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
       {timelineMode && !loading && renderTimeline()}
-      {!timelineMode && messages.map((m) => (
+      {!timelineMode && (onlyUser ? messages.filter((m) => m.role === "user") : messages).map((m) => (
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""}`}>
           <div className="role">
             <span className={`avatar ${m.role}`}>{m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}</span>

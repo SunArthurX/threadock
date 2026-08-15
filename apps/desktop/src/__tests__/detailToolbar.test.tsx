@@ -20,16 +20,36 @@ const baseDetail = {
 };
 
 describe("详情页按钮清单", () => {
-  it("工具栏为：时间线/知识/重扫/收藏/归档/下载", () => {
+  it("工具栏为：收藏/时间线/知识/重扫/仅用户消息/归档/下载（顺序一致）", () => {
     render(<ConversationDetail {...baseDetail} />);
-    const bar = screen.getByText(/消息|时间线/).closest("div.detail-actions")!;
+    const bar = screen.getByText(/时间线/).closest("div.detail-actions")!;
     expect(bar).toBeTruthy();
-    expect(bar.textContent).toContain("时间线");
-    expect(bar.textContent).toContain("知识");
-    expect(bar.textContent).toContain("重扫");
-    expect(bar.textContent).toContain("收藏");
-    expect(bar.textContent).toContain("归档");
-    expect(bar.textContent).toContain("下载");
+    const labels = ["收藏", "时间线", "知识", "重扫", "仅用户消息", "归档", "下载"];
+    let last = -1;
+    for (const label of labels) {
+      const idx = (bar.textContent ?? "").indexOf(label);
+      expect(idx).toBeGreaterThan(last);
+      last = idx;
+    }
+  });
+
+  it("用户消息筛选：开启后仅显示 user 消息，关闭恢复全部", () => {
+    const messages = [
+      { id: "m1", role: "user", content_text: "我的提问", sequence_number: 1, created_at_ms: 1000 },
+      { id: "m2", role: "assistant", content_text: "助手回答", sequence_number: 2, created_at_ms: 2000 },
+      { id: "m3", role: "user", content_text: "第二问", sequence_number: 3, created_at_ms: 3000 },
+    ];
+    const { container } = render(<ConversationDetail {...baseDetail} messages={messages} />);
+    expect(screen.getByText("我的提问")).toBeTruthy();
+    expect(screen.getByText("助手回答")).toBeTruthy();
+    fireEvent.click(screen.getByText("👤 仅用户消息"));
+    expect(screen.getByText("我的提问")).toBeTruthy();
+    expect(screen.queryByText("助手回答")).toBeNull();
+    expect(screen.getByText("第二问")).toBeTruthy();
+    expect(container.querySelectorAll(".message").length).toBe(2);
+    // 再点关闭恢复
+    fireEvent.click(screen.getByText("👤 仅用户消息"));
+    expect(screen.getByText("助手回答")).toBeTruthy();
   });
 
   it("无删除入口（软删与彻底删除都已移除）", () => {

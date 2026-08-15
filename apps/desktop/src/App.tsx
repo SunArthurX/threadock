@@ -56,7 +56,6 @@ export default function App() {
   } | null>(null);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [onlyMine, setOnlyMine] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
   const [collapsedMsgs, setCollapsedMsgs] = useState<Set<string>>(new Set());
@@ -278,13 +277,8 @@ export default function App() {
   // ── actions ──
   const doSearch = async () => {
     // 空关键词 + 勾选「仅我的提问」= 全量我的提问；两者皆空则清空结果
-    if (!searchQuery.trim() && !onlyMine) { setSearchResults(null); return; }
-    try {
-      setSearchResults(await invoke<SearchResult[]>("search", {
-        query: searchQuery,
-        role: onlyMine ? "user" : null,
-      }));
-    } catch (e) { showError(e); }
+    if (!searchQuery.trim()) { setSearchResults(null); return; }
+    try { setSearchResults(await invoke<SearchResult[]>("search", { query: searchQuery })); } catch (e) { showError(e); }
   };
 
   const jumpToSearchResult = async (r: SearchResult) => {
@@ -494,10 +488,6 @@ export default function App() {
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doSearch()} />
-              <label className="only-mine" title="只看我自己发出的提问（可留空关键词列出全部）">
-                <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
-                仅我的提问
-              </label>
               <button onClick={doSearch}>搜索</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
             </div>
