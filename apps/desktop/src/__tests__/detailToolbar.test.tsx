@@ -92,4 +92,13 @@ describe("provider chips 显隐", () => {
     render(<ConversationList {...listProps} />);
     expect(screen.getByText("Cursor")).toBeTruthy();
   });
+
+  it("scope 栏不含「已删除」（回收站入口已按要求移除）", () => {
+    const { container } = render(<ConversationList {...listProps} />);
+    const bar = container.querySelector(".scope-bar")!;
+    expect(bar.textContent).toContain("全部");
+    expect(bar.textContent).toContain("收藏");
+    expect(bar.textContent).toContain("已归档");
+    expect(bar.textContent).not.toContain("已删除");
+  });
 });

@@ -30,7 +30,6 @@ const SCOPES: [ListScope, string][] = [
   ["all", "全部"],
   ["favorite", "★ 收藏"],
   ["archived", "已归档"],
-  ["deleted", "已删除"],
 ];
 
 export default function ConversationList({
