@@ -39,6 +39,10 @@ jobs:
       - name: Test (workspace)
         run: cargo test --workspace
 
+      - name: Generate API docs
+        working-directory: apps/desktop/src-tauri
+        run: cargo run --example typegen
+
   frontend:
     name: Frontend Build
     runs-on: macos-latest

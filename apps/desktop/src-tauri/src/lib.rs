@@ -207,6 +207,7 @@ async fn list_events(
 
 /// 获取会话完整详情（消息 + 事件 + 完整度，plan §6.4）。
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "debug")]
 async fn get_conversation_detail(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
@@ -262,6 +263,7 @@ async fn extract_knowledge(
 }
 
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "debug")]
 async fn search(state: tauri::State<'_, DaemonState>, query: String) -> Result<Vec<SearchResultDto>, String> {
     // 优先走 Tantivy（plan §9.5 主检索），降级 FTS5
     let idx = state.search_index.lock().map_err(|e| internal_err(e))?;
@@ -644,6 +646,7 @@ const OPS_SYNC_THROTTLE_MS: i64 = 30 * 60 * 1000;
 /// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
 /// force=false 时 5 分钟节流（进入治理页不再每次全量扫描 32MB+ JSONL）。
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     // 持久节流：优先读库内时间戳（跨进程），内存值兜底
@@ -808,6 +811,7 @@ async fn get_conversation_by_source(
 /// 全库审计扫描：敏感信息 + 危险命令（plan codeagent-ops M4）。
 /// catch_unwind 兜底：扫描内部任何 panic 转为错误返回，绝不带崩整个应用。
 #[tauri::command]
+#[tracing::instrument(skip_all, level = "info")]
 async fn audit_scan(state: tauri::State<'_, DaemonState>) -> Result<ch_audit::AuditReport, String> {
     let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1240,6 +1244,7 @@ async fn auto_sync(
 /// - 幂等检查用一次性加载的 HashSet（旧版每会话全表扫描 → 卡顿根因之一）
 /// - 已导入但缺主子链路的旧数据，用 repair_conversation_parent 补上
 /// - limit 默认 500（覆盖全部会话；旧版 50 导致 MiniMax/ZCode 大量子任务丢失）
+#[tracing::instrument(skip_all, level = "info")]
 fn auto_sync_inner(
     state: &DaemonState,
     limit: Option<usize>,
