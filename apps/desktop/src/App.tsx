@@ -63,6 +63,12 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [importMenu, setImportMenu] = useState(false);
+  // 未导入新内容计数（导入按钮红点）：同步/导入完成后重算
+  const [newCount, setNewCount] = useState<import("./ImportMenu").NewCount | null>(null);
+  const refreshNewCount = async () => {
+    try { setNewCount(await invoke<import("./ImportMenu").NewCount>("sources_new_count", {})); }
+    catch { /* 红点检测失败静默 */ }
+  };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
@@ -122,6 +128,7 @@ export default function App() {
     // 周报自动生成（>7 天落盘一份）+ 保留策略自动执行 + 预算刷新
     const t2 = setTimeout(async () => {
       refreshBudget();
+      refreshNewCount();
       try {
         const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
         if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
@@ -141,7 +148,7 @@ export default function App() {
     if (syncIntervalMin === 0) return; // 设置为关闭
     const interval = setInterval(() => {
       autoSync(true);
-      invoke("ops_sync", {force:false}).then(() => refreshBudget()).catch(() => { /* 后台任务失败不打断 UI */ });
+      invoke("ops_sync", {force:false}).then(() => { refreshBudget(); refreshNewCount(); }).catch(() => { /* 后台任务失败不打断 UI */ });
     }, syncIntervalMin * 60 * 1000);
     return () => clearInterval(interval);
   }, [syncIntervalMin]);
@@ -183,20 +190,21 @@ export default function App() {
         const ok = result[`${key}_imported`] ?? 0;
         if (ok > 0) parts.push(`${label}: ${ok} 新`);
       }
-      setSyncResult(parts.length > 0 ? parts.join(" | ") : "无新数据");
+      // 完成态统一为「已同步」：本次有导入则附明细，没有则「全部最新」
+      setSyncResult(parts.length > 0 ? `✓ 已同步 · ${parts.join(" | ")}` : "✓ 已同步 · 全部最新");
       await loadConversations();
     } catch (e) {
       const msg = typeof e === "string" ? e : String(e);
       if (!msg.includes("同步中") && !msg.includes("重置中")) showError(e);
     }
     setSyncing(false);
+    // 同步完成：重算红点（全部消化后熄灭）；状态条 15 秒后自动清除避免残留旧统计
+    refreshNewCount();
+    window.setTimeout(() => setSyncResult((cur) => cur?.startsWith("✓") ? null : cur), 15000);
   };
 
   const runManualSync = async () => {
-    setSyncing(true);
-    try { await invoke("auto_sync", {}); } catch { /* 失败静默：后台/可选操作 */ }
-    setSyncing(false);
-    await loadConversations();
+    await autoSync();
   };
 
   const changeSyncInterval = (min: number) => {
@@ -288,6 +296,7 @@ export default function App() {
       if (typeof selected !== "string") return;
       const result = await invoke<ImportResultDto>("import_file", { path: selected, workspaceName: null });
       await loadConversations();
+      refreshNewCount();
       alert(`✓ 导入成功\n消息 ${result.messages} 条 · 完整度 ${result.completeness}`);
     } catch (e) { showError(e); }
   };
@@ -308,6 +317,9 @@ export default function App() {
       const cmd = { "zcode":"import_from_zcode","claude-code":"import_from_claude_code","cursor":"import_from_cursor","minimax":"import_from_minimax","codex":"import_from_codex" }[sourcePanel!]!;
       const result = await invoke<ImportResultDto>(cmd, { sessionId });
       await loadConversations(); setImporting(false); setSourcePanel(null);
+      setSyncResult(`✓ 已同步 · ${result.messages} 条消息已导入`);
+      refreshNewCount();
+      window.setTimeout(() => setSyncResult(null), 15000);
       alert(`✓ 导入成功\n消息 ${result.messages} 条 · 事件 ${result.events} 个 · 完整度 ${result.completeness}`);
       try {
         const prov = sourcePanel === "minimax" ? "minimax-code" : sourcePanel;
@@ -329,6 +341,9 @@ export default function App() {
     }
     await loadConversations();
     setImporting(false); setBatchProgress(null); setSourcePanel(null);
+    setSyncResult(`✓ 已同步 · 批量新增 ${ok} 条`);
+    refreshNewCount();
+    window.setTimeout(() => setSyncResult(null), 15000);
     const skipped = sourceSessions.length - pending.length;
     alert(`批量增量导入\n新增 ${ok} 条${fail > 0 ? ` · 失败 ${fail} 条` : ""}${skipped > 0 ? ` · 已最新 ${skipped} 条` : ""}`);
   };
@@ -468,7 +483,7 @@ export default function App() {
               <button onClick={doSearch}>搜索</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
             </div>
-            <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing}
+            <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
               onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
           </>)}
           {budgetInfo && (

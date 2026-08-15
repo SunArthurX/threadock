@@ -10,6 +10,120 @@
 |------|------|
 | - | `WorkspaceDto[]` |
 
+### `app_setting_get`
+
+| 参数 | 返回 |
+|------|------|
+| key | `string?` |
+
+### `app_setting_set`
+
+| 参数 | 返回 |
+|------|------|
+| key, value | `void` |
+
+### `sources_new_count`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{zcode, claude_code, cursor, minimax, codex, total}` |
+
+### `ops_month_projection`
+
+| 参数 | 返回 |
+|------|------|
+| - | `MonthProjection` |
+
+### `ops_cache_trend`
+
+| 参数 | 返回 |
+|------|------|
+| days? | `CacheTrendRow[]` |
+
+### `audit_scan_conversation`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `AuditFinding[]` |
+
+### `audit_finding_set_state`
+
+| 参数 | 返回 |
+|------|------|
+| fingerprint, status, note? | `void` |
+
+### `audit_finding_restore`
+
+| 参数 | 返回 |
+|------|------|
+| fingerprint | `void` |
+
+### `audit_finding_states`
+
+| 参数 | 返回 |
+|------|------|
+| - | `AuditFindingState[]` |
+
+### `governance_log_list`
+
+| 参数 | 返回 |
+|------|------|
+| limit? | `GovernanceLogRow[]` |
+
+### `storage_stats`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{db_bytes, raw_count, raw_bytes, index_bytes}` |
+
+### `gc_raw_store`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{scanned, deleted, freed_bytes}` |
+
+### `retention_apply`
+
+| 参数 | 返回 |
+|------|------|
+| days | `{archived}` |
+
+### `weekly_report_auto`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{generated, path}` |
+
+### `set_archived`
+
+| 参数 | 返回 |
+|------|------|
+| id, archived | `void` |
+
+### `delete_conversation`
+
+| 参数 | 返回 |
+|------|------|
+| id | `void` |
+
+### `restore_conversation`
+
+| 参数 | 返回 |
+|------|------|
+| id | `void` |
+
+### `hard_delete_conversation`
+
+| 参数 | 返回 |
+|------|------|
+| id | `void` |
+
+### `rebuild_search_index`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{messages}` |
+
 ### `list_conversations`
 
 | 参数 | 返回 |

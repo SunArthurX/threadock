@@ -2523,3 +2523,16 @@ button {
 .watch-toggle { cursor: pointer; opacity: .5; }
 .watch-toggle.on { color: #f59e0b; opacity: 1; }
 .ops-risky-row.watched { background: rgba(245,158,11,.06); }
+
+/* ── 导入红点与新菜单风格 ─────────────────────────────────── */
+.import-trigger { position: relative; }
+.import-trigger .new-dot, .import-menu .new-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: #ef4444; vertical-align: middle; margin-left: 2px;
+}
+.import-menu .new-dot { margin-left: auto; flex: 0 0 8px; }
+.import-caret { margin-left: 4px; opacity: .6; font-size: 10px; }
+.import-item-icon { width: 22px; text-align: center; flex: 0 0 22px; }
+.import-item-main { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.3; }
+.import-item-sub { font-size: 10.5px; opacity: .55; }
+.import-sync-item b { font-weight: 600; }

@@ -892,3 +892,53 @@ pub(crate) fn resolve_workspace(
         }
     }
 }
+
+/// 各来源「未导入新内容」计数（导入按钮红点数据源）。
+///
+/// 判定口径与列表页一致（imported_flag：未导入或源有更新 = 新）。
+/// discover 全量但只读不写，属于同步级别的重活 → run_blocking。
+#[tauri::command]
+pub(crate) async fn sources_new_count(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    run_blocking(move || sources_new_count_inner(&state))
+}
+
+fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
+    let ctx = import_ctx(state);
+    let mut map = serde_json::Map::new();
+    let mut total = 0u64;
+    for src in source_table(&home) {
+        let items = match (src.discover)() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(provider = src.provider_id, error = %e, "discover failed");
+                continue;
+            }
+        };
+        let n = items
+            .iter()
+            .filter(|it| !imported_flag(&ctx, src.provider_id, &it.session_id, Some(it.src_ms)))
+            .count() as u64;
+        map.insert(src.stat_key.to_string(), serde_json::json!(n));
+        total += n;
+    }
+    map.insert("total".into(), serde_json::json!(total));
+    Ok(serde_json::Value::Object(map))
+}
+
+#[cfg(test)]
+mod new_count_tests {
+    use super::*;
+
+    #[test]
+    fn sources_new_count_empty_home_is_zero() {
+        // 空环境：无来源可发现 → total = 0（红点灭）
+        let state = DaemonState::open_in_memory().expect("state open");
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        std::env::set_var("HOME", dir.path());
+        let v = sources_new_count_inner(&state).expect("count");
+        assert_eq!(v.get("total"), Some(&serde_json::json!(0)));
+    }
+}
