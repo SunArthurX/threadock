@@ -22,6 +22,9 @@ interface Props {
 export default function SourcePanel({
   panel, sessions, importing, progress, onImport, onImportAll, onClose, sourceLabel,
 }: Props) {
+  const pending = sessions.filter((s) => !s.imported);
+  // 未导入置顶（用户打开面板第一眼看到可导入的，已导入沉底）
+  const sorted = [...pending, ...sessions.filter((s) => s.imported)];
   return (
     <div className="source-overlay">
       <div className="source-panel">
@@ -33,10 +36,10 @@ export default function SourcePanel({
           <div className="source-actions">
             <button
               className="source-import-all"
-              disabled={importing || sessions.length === 0}
+              disabled={importing || pending.length === 0}
               onClick={onImportAll}
             >
-              全部导入
+              {pending.length > 0 ? `⇩ 导入全部（${pending.length} 条未导入）` : "已全部导入"}
             </button>
             <button className="source-close" onClick={() => !importing && onClose()}>✕</button>
           </div>
@@ -52,7 +55,7 @@ export default function SourcePanel({
           </div>
         )}
         <div className="source-list">
-          {sessions.map((s) => (
+          {sorted.map((s) => (
             <div
               key={s.session_id}
               className={`source-item ${s.imported ? "imported" : ""}`}

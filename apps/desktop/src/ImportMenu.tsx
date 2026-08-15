@@ -35,7 +35,7 @@ export default function ImportMenu({ open, onToggle, onSelect, onSync, syncing, 
   return (
     <div className="import-dropdown">
       <button className="import-trigger" onClick={onToggle}>
-        📥 导入 {total > 0 && <span className="new-dot" title={`${total} 条未导入`} />}
+        ⇩ 导入 {total > 0 && <span className="new-dot" title={`${total} 条未导入`} />}
         <span className="import-caret">▾</span>
       </button>
       {open && (

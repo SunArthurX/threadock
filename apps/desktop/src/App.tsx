@@ -207,7 +207,12 @@ export default function App() {
       await loadConversations();
     } catch (e) {
       const msg = typeof e === "string" ? e : String(e);
-      if (!msg.includes("同步中") && !msg.includes("重置中")) showError(e);
+      if (msg.includes("同步中") || msg.includes("重置中")) {
+        // 已有同步在进行（多为启动自动同步与手点并发）：明确告知而非静默无反应
+        if (!silent) showToast("⟳ 已有同步正在进行，完成后将自动刷新", "info");
+      } else {
+        showError(e);
+      }
     }
     setSyncing(false);
     // 同步完成：重算红点（全部消化后熄灭）与来源显隐；状态条 15 秒后自动清除

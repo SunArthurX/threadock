@@ -659,7 +659,11 @@ pub(crate) fn auto_sync_inner(
         let mut imported_count = 0u32;
         let mut repairs: Vec<(String, String)> = Vec::new();
         let mut observed: Vec<(String, Option<i64>)> = Vec::new();
-        for item in items.into_iter().take(lim) {
+        // 配额语义修复（2026-08-15 真实事故）：lim 只限「本轮新导入」条数，
+        // 已最新的跳过不占额度。旧实现 take(lim) 按更新时间降序截断——
+        // 源 641 条 / 库 506 条时，未导入的 135 条永远排在尾部轮不到，
+        // 表现为「增量同步没同步 / 红点永不灭」。
+        for item in items {
             if src.records_observed {
                 observed.push((item.session_id.clone(), Some(item.src_ms)));
             }
@@ -674,6 +678,10 @@ pub(crate) fn auto_sync_inner(
                     repairs.push((item.session_id.clone(), parent));
                 }
                 skip += 1;
+                continue;
+            }
+            // 本轮导入配额已满：剩余新会话留到下一轮（observed/repair 继续收集）
+            if imported_count >= lim as u32 {
                 continue;
             }
             match (src.parse)(&item) {
@@ -904,9 +912,15 @@ pub(crate) async fn sources_new_count(
     run_blocking(move || sources_new_count_inner(&state))
 }
 
+/// 活跃宽限：已导入且源在近 N 分钟内更新过的会话（正在使用的活跃会话）
+/// 不计为「新内容」——否则正在运行的 agent 会话会让红点永不熄灭。
+const ACTIVE_GRACE_MS: i64 = 5 * 60 * 1000;
+
 fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
     let ctx = import_ctx(state);
+    let now_ms =
+        (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     let mut map = serde_json::Map::new();
     let mut total = 0u64;
     for src in source_table(&home) {
@@ -917,9 +931,27 @@ fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, Str
                 continue;
             }
         };
+        let empty: std::collections::HashMap<String, Option<i64>> = Default::default();
+        let states = ctx.states.get(src.provider_id).unwrap_or(&empty);
         let n = items
             .iter()
-            .filter(|it| !imported_flag(&ctx, src.provider_id, &it.session_id, Some(it.src_ms)))
+            .filter(|it| {
+                if !ctx
+                    .existing
+                    .contains(&(src.provider_id.to_string(), it.session_id.clone()))
+                {
+                    return true; // 从未导入 = 真·新内容
+                }
+                // 已导入：仅当「源有更新且已冷却」才算新（活跃会话不闪红点）
+                let up_to_date = ch_storage::Repository::is_up_to_date(
+                    states,
+                    &ctx.existing,
+                    src.provider_id,
+                    &it.session_id,
+                    Some(it.src_ms),
+                );
+                !up_to_date && (now_ms - it.src_ms) > ACTIVE_GRACE_MS
+            })
             .count() as u64;
         map.insert(src.stat_key.to_string(), serde_json::json!(n));
         total += n;
@@ -940,5 +972,54 @@ mod new_count_tests {
         std::env::set_var("HOME", dir.path());
         let v = sources_new_count_inner(&state).expect("count");
         assert_eq!(v.get("total"), Some(&serde_json::json!(0)));
+    }
+}
+
+#[cfg(test)]
+mod backlog_e2e_tests {
+    use super::*;
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    /// 真实环境回归（手动跑）：拷贝真实 app 库 + 真实 HOME 源，
+    /// 验证配额修复后积压的未导入会话能被消化。
+    /// cargo test --lib backlog -- --ignored --nocapture
+    #[test]
+    #[ignore = "依赖本机真实 ~/.zcode 数据与 app 库副本，CI 不跑"]
+    fn sync_consumes_backlog_on_real_copy() {
+        let app_db = std::path::PathBuf::from(std::env::var("HOME").expect("unexpected None"))
+            .join("Library/Application Support/com.threadock.desktop/threadock.db");
+        if !app_db.exists() {
+            panic!("本机无真实 app 库，跳过语义不适用");
+        }
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        std::fs::copy(&app_db, dir.path().join("threadock.db")).expect("file I/O failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+
+        let before = sources_new_count_inner(&state).expect("count before");
+        let v = auto_sync_inner(&state, None).expect("sync");
+        let after = sources_new_count_inner(&state).expect("count after");
+        println!("before={before}");
+        println!("sync={v}");
+        println!("after={after}");
+        let before_total = before.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
+        let after_total = after.get("total").and_then(|t| t.as_u64()).unwrap_or(0);
+        let imported = v
+            .get("zcode_imported")
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        // 有积压时本轮必须消化（不再被 take(lim) 截断挡住）
+        if before_total > 0 {
+            assert!(
+                imported > 0,
+                "backlog {before_total} 存在时本轮必须导入，实际 {imported}"
+            );
+            assert!(
+                after_total < before_total,
+                "未导入计数必须下降: {before_total} -> {after_total}"
+            );
+        }
     }
 }
