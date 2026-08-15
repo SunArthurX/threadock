@@ -650,6 +650,8 @@ button {
 .bulk-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .bulk-btn.danger { border-color: rgba(239, 68, 68, 0.4); color: #ef4444; }
 .bulk-btn.danger:hover { background: rgba(239, 68, 68, 0.12); }
+.bulk-tag-input { flex: 1; min-width: 100px; max-width: 180px; padding: 3px 8px; border: 1px solid var(--border, #444); border-radius: 5px; background: var(--bg-2); color: var(--text); font-size: 11px; }
+.bulk-tag-input:focus { outline: none; border-color: var(--accent, #4f8cff); }
 
 /* SearchPanel 顶部：筛选 + 复制 */
 .search-panel-head { display: flex; align-items: center; gap: 10px; }
@@ -697,6 +699,10 @@ button {
   margin-bottom: 10px;
   line-height: 1.35;
 }
+.detail h2 .title-text { cursor: text; }
+.detail h2 .title-edit-hint { font-size: 11px; opacity: 0.3; margin-left: 6px; font-weight: 400; }
+.detail h2:hover .title-edit-hint { opacity: 0.7; }
+.title-input { width: 100%; padding: 4px 8px; font-size: 18px; font-weight: 650; border: 1px solid var(--accent, #4f8cff); border-radius: 6px; background: var(--bg-2); color: var(--text); outline: none; }
 
 .detail .meta-row {
   font-size: 12px;
@@ -2894,6 +2900,30 @@ button {
 /* 知识库优化 */
 .todo-check { cursor: pointer; font-size: 14px; opacity: .8; }
 .kb-item.done .kb-text { text-decoration: line-through; opacity: .45; }
+
+/* 知识跨会话引用 */
+.knowledge-xref { background: var(--bg-elevated, rgba(255,255,255,0.04)); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+.knowledge-xref .knowledge-label { font-size: 12.5px; opacity: 0.85; margin-bottom: 8px; }
+.knowledge-xref-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.knowledge-xref-item { background: var(--bg-2); border-radius: 6px; }
+.knowledge-xref-item summary { padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; list-style: none; }
+.knowledge-xref-item summary::-webkit-details-marker { display: none; }
+.knowledge-xref-item summary:hover { background: rgba(255,255,255,0.04); border-radius: 6px; }
+.knowledge-xref-item .xref-kind { font-size: 13px; }
+.knowledge-xref-item .xref-keyword { flex: 1; font-size: 11.5px; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; }
+.knowledge-xref-item .xref-count { font-size: 11px; opacity: 0.65; padding: 1px 6px; background: var(--bg-elevated, rgba(255,255,255,0.05)); border-radius: 8px; }
+.knowledge-xref-convs { padding: 4px 10px 8px 30px; display: flex; flex-direction: column; gap: 2px; }
+.xref-conv-row { background: none; border: none; text-align: left; padding: 4px 8px; border-radius: 4px; cursor: pointer; color: var(--text); font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.xref-conv-row:hover { background: var(--bg-elevated, rgba(255,255,255,0.05)); }
+.xref-conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Empty state CTA */
+.empty-cta { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center; color: var(--text-muted); }
+.empty-cta .empty-icon { font-size: 48px; margin-bottom: 12px; opacity: 0.5; }
+.empty-cta .empty-title { font-size: 15px; color: var(--text); margin-bottom: 8px; font-weight: 600; }
+.empty-cta .empty-hint { font-size: 12.5px; opacity: 0.75; line-height: 1.6; }
+.empty-cta .empty-hint kbd { display: inline-block; padding: 1px 5px; font-size: 11px; font-family: ui-monospace, monospace; background: var(--bg-elevated, rgba(255,255,255,0.05)); border: 1px solid var(--border); border-radius: 3px; margin: 0 2px; }
+.empty-cta .empty-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; justify-content: center; }
 
 /* 知识提取 tabs */
 .knowledge-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 20px 0; border-bottom: 1px solid var(--border, rgba(255,255,255,0.06)); }

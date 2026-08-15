@@ -62,6 +62,8 @@ interface Props {
   onBulkArchive?: (ids: string[], archived: boolean) => Promise<void> | void;
   /** 批量删除（软删 / 回收站） */
   onBulkDelete?: (ids: string[]) => Promise<void> | void;
+  /** 批量加标签（每个 id 都会调一次 add_tag，未来可加 batch 接口） */
+  onBulkAddTag?: (ids: string[], tag: string) => Promise<void> | void;
 }
 
 const SCOPES: [ListScope, string][] = [
@@ -74,7 +76,7 @@ export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
   expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onRestore,
-  onBulkFavorite, onBulkArchive, onBulkDelete,
+  onBulkFavorite, onBulkArchive, onBulkDelete, onBulkAddTag,
 }: Props) {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [sortBy, setSortBy] = useState<SortBy>(() => {
@@ -83,6 +85,8 @@ export default function ConversationList({
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pinned, setPinned] = useState<Set<string>>(loadPinnedIds);
+  // 批量加标签：input + Enter 触发
+  const [bulkTagInput, setBulkTagInput] = useState("");
   const togglePin = (id: string) => {
     setPinned((p) => {
       const n = new Set(p);
@@ -231,6 +235,20 @@ export default function ConversationList({
           ) : (
             <button className="bulk-btn" onClick={() => runBulk("归档", [...selectedIds], onBulkArchive ? (ids) => onBulkArchive(ids, true) : undefined)}>🗄 归档</button>
           )}
+          <input
+            className="bulk-tag-input"
+            placeholder="# 批量加标签…"
+            value={bulkTagInput}
+            onChange={(e) => setBulkTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && bulkTagInput.trim()) {
+                const tag = bulkTagInput.trim().replace(/^#+/, "").trim();
+                if (tag) runBulk(`加标签 #${tag}`, [...selectedIds], onBulkAddTag ? (ids) => onBulkAddTag(ids, tag) : undefined);
+                setBulkTagInput("");
+              }
+            }}
+            title="输入标签名后按 Enter（自动去 # 前缀）"
+          />
           <button className="bulk-btn danger" onClick={() => runBulk("删除（入回收站）", [...selectedIds], onBulkDelete)}>🗑 删除</button>
         </div>
       )}

@@ -1,7 +1,8 @@
 // 知识提取弹窗：分区展示会话纪要（摘要/决策/TODO/错误/命令/文件），
 // 一键复制为 Markdown 交接文档，支持重新提取与 Esc 关闭。
-// 增强：类型筛选 tabs（点击只看一类）+ JSON/Markdown 文件下载导出。
-import { useEffect, useState } from "react";
+// 增强：类型筛选 tabs（点击只看一类）+ JSON/Markdown 文件下载导出 +
+//       跨会话引用（同文件/同命令还出现在哪些会话里）
+import { useEffect, useMemo, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { ExtractionResult } from "./types";
@@ -9,13 +10,19 @@ import { showToast } from "./toast";
 
 interface Props {
   knowledge: ExtractionResult;
+  /** 所属会话 ID（用于跨会话引用排除自身）。 */
+  conversationId?: string;
   /** 所属会话标题（弹窗副标题展示）。 */
   convTitle?: string | null;
   onClose: () => void;
   onReextract: () => void;
+  /** 跳转到其他会话（跨会话引用点击）。 */
+  onJumpToConversation?: (conversationId: string) => void;
 }
 
 type Tab = "all" | "summary" | "decisions" | "todos" | "errors" | "commands" | "files";
+interface XrefConv { id: string; title: string | null; provider: string; updated_at_ms: number | null }
+interface XrefEntry { keyword: string; kind: "file" | "command"; other_count: number; other_conversations: XrefConv[] }
 const TABS: { value: Tab; label: string; icon: string }[] = [
   { value: "all", label: "全部", icon: "📚" },
   { value: "summary", label: "摘要", icon: "📖" },
@@ -78,7 +85,7 @@ export function knowledgeToJson(k: ExtractionResult): string {
   }, null, 2);
 }
 
-export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextract }: Props) {
+export default function KnowledgeModal({ knowledge, conversationId, convTitle, onClose, onReextract, onJumpToConversation }: Props) {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
 
@@ -90,6 +97,27 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+
+  // 跨会话引用：取 files + commands 中 Top 5（按出现频次）调用后端 xref
+  const [xref, setXref] = useState<XrefEntry[]>([]);
+  const [xrefLoading, setXrefLoading] = useState(false);
+  const xrefKeywords = useMemo(() => {
+    const files = (knowledge.files ?? []).map((f) => ({ text: f.path, kind: "file" as const }));
+    const cmds = (knowledge.commands ?? []).map((c) => ({ text: c, kind: "command" as const }));
+    return [...files, ...cmds].slice(0, 12); // 限 12 关键词避免请求爆
+  }, [knowledge.files, knowledge.commands]);
+  useEffect(() => {
+    if (!conversationId || xrefKeywords.length === 0) {
+      setXref([]);
+      return;
+    }
+    setXrefLoading(true);
+    invoke<XrefEntry[]>("knowledge_xref", { conversationId, keywords: xrefKeywords })
+      .then((r) => setXref(r.filter((e) => e.other_count > 0)))
+      .catch(() => setXref([]))
+      .finally(() => setXrefLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId, xrefKeywords.map((k) => k.text).join("|")]);
 
   // 计数（用于 tab 徽标）
   const counts: Record<Tab, number> = {
@@ -181,6 +209,42 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
           </div>
         )}
         <div className="settings-body">
+          {/* 跨会话引用：同文件/同命令 还出现在哪些会话里 */}
+          {conversationId && (xrefLoading || xref.length > 0) && (
+            <div className="knowledge-xref">
+              <div className="knowledge-label">
+                🔗 跨会话引用（{xrefLoading ? "查询中…" : `${xref.length} 个文件/命令还在其他会话里出现`}）
+              </div>
+              {xrefLoading ? (
+                <div className="sk-line" style={{ margin: 12 }} />
+              ) : (
+                <div className="knowledge-xref-list">
+                  {xref.map((e) => (
+                    <details key={`${e.kind}-${e.keyword}`} className="knowledge-xref-item">
+                      <summary>
+                        <span className={`xref-kind ${e.kind}`}>{e.kind === "file" ? "📄" : "⚙️"}</span>
+                        <span className="xref-keyword mono" title={e.keyword}>{e.keyword.length > 40 ? e.keyword.slice(0, 40) + "…" : e.keyword}</span>
+                        <span className="xref-count">{e.other_count} 个会话</span>
+                      </summary>
+                      <div className="knowledge-xref-convs">
+                        {e.other_conversations.map((c) => (
+                          <button
+                            key={c.id}
+                            className="xref-conv-row"
+                            onClick={() => onJumpToConversation?.(c.id)}
+                            title="点击跳转到该会话"
+                          >
+                            <span className={`badge source ${c.provider}`}>{c.provider}</span>
+                            <span className="xref-conv-title">{c.title ?? "(无标题)"}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {isEmpty && (
             <div className="knowledge-empty">
               本会话未提取到知识要点（决策/TODO/命令/文件等）——常见于短问答类会话；

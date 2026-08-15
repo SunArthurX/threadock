@@ -720,9 +720,15 @@ export default function App() {
         {knowledge && selectedConv && (
           <KnowledgeModal
             knowledge={knowledge}
+            conversationId={selectedConv.id}
             convTitle={selectedConv.user_title ?? selectedConv.title}
             onClose={() => setKnowledge(null)}
             onReextract={extractKnowledge}
+            onJumpToConversation={(cid) => {
+              // 跨会话引用跳到其他会话：保留知识弹窗
+              invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: cid })
+                .then((d) => { setSelectedConv(d.conversation); setMessages(d.messages); setEvents(d.events); setCompletenessLabel(d.completeness_label); setDetailTags(d.tags ?? []); setKnowledge(null); });
+            }}
           />
         )}
 
@@ -810,6 +816,13 @@ export default function App() {
                       }
                       await loadConversations();
                     }}
+                    onBulkAddTag={async (ids, tag) => {
+                      // 逐条 add_tag：未来如需可加 batch 接口
+                      for (const id of ids) {
+                        try { await invoke("add_tag", { id, tag }); } catch { /* 单条失败不影响整体 */ }
+                      }
+                      showToast(`✓ 已为 ${ids.length} 条会话加标签 #${tag}`, "info");
+                    }}
                     onBulkDelete={async (ids) => {
                       // 软删前先记录原状态，撤销时能恢复
                       const snapshot = conversations.filter((c) => ids.includes(c.id));
@@ -850,10 +863,30 @@ export default function App() {
                     onToggleFavorite={() => selectedConv && toggleFavorite(selectedConv)}
                     onToggleArchive={toggleArchive}
                     onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
+                    onRenameTitle={async (title) => {
+                      try {
+                        await invoke("set_user_title", { id: selectedConv!.id, title });
+                        // 本地同步 selectedConv + 列表
+                        const next = { ...selectedConv!, user_title: title };
+                        setSelectedConv(next);
+                        setConversations((p) => p.map((c) => c.id === next.id ? next : c));
+                        showToast(title ? "✓ 标题已更新" : "✓ 已恢复原始标题", "info", 2000);
+                      } catch (e) {
+                        showToast(`改标题失败：${String(e)}`, "error");
+                      }
+                    }}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={extractKnowledge}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
-                : <div className="empty">选择一条会话查看详情</div>}
+                : <div className="empty empty-cta">
+                    <div className="empty-icon">💬</div>
+                    <div className="empty-title">选择一条会话查看详情</div>
+                    <div className="empty-hint">
+                      还没数据？试试
+                      <button className="action-btn" style={{ marginLeft: 6 }} onClick={() => setImportMenu(true)}>⬇ 导入会话</button>
+                      或按 <kbd>⌘K</kbd> 唤起命令面板
+                    </div>
+                  </div>}
             </div>
           </div>
         )}

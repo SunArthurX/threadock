@@ -11,8 +11,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { formatTime } from "./types";
+import { exportAllSettings, importAllSettings, defaultSettingsFilename } from "./settingsIO";
 
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
@@ -474,6 +476,32 @@ function AboutSection({ onShowChangelog }: { onShowChangelog: () => void }) {
       <div className="settings-row" style={{ marginTop: 8 }}>
         <span>查看本版本更新日志</span>
         <button className="action-btn" onClick={onShowChangelog}>📋 查看更新日志</button>
+      </div>
+      <div className="settings-row" style={{ marginTop: 8 }}>
+        <span>配置导入/导出</span>
+        <button className="action-btn" onClick={async () => {
+          try {
+            const path = await save({ defaultPath: defaultSettingsFilename(), filters: [{ name: "JSON", extensions: ["json"] }] });
+            if (typeof path !== "string") return;
+            const json = exportAllSettings();
+            await invoke("save_text_file", { path, content: json });
+            showToast(`✓ 已导出配置（${(json.length / 1024).toFixed(1)} KB）`, "info", 4000);
+          } catch (e) {
+            showToast(`导出失败：${typeof e === "string" ? e : String(e)}`, "error");
+          }
+        }} title="导出主题/偏好/Pin/收藏/搜索历史 等本地配置（不含会话内容与密码）">⤓ 导出配置</button>
+        <button className="action-btn" onClick={async () => {
+          try {
+            const path = await open({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
+            if (typeof path !== "string") return;
+            const content = await invoke<string>("read_text_file", { path });
+            const mode = window.confirm("选择导入模式：\n确定 = 合并（仅覆盖文件中的 key，保留其他）\n取消 = 完全替换（清空所有现有偏好）") ? "merge" : "replace";
+            const { applied, skipped } = importAllSettings(content, mode);
+            showToast(`✓ 已导入 ${applied} 项配置${skipped > 0 ? `（跳过 ${skipped} 项无效 key）` : ""}，刷新页面生效`, "info", 5000);
+          } catch (e) {
+            showToast(`导入失败：${typeof e === "string" ? e : String(e)}`, "error");
+          }
+        }} title="从 JSON 文件导入偏好（合并 / 替换 两种模式）">⤒ 导入配置</button>
       </div>
     </section>
   );

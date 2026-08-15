@@ -1234,6 +1234,25 @@ impl Repository {
         Ok(())
     }
 
+    /// 设置用户自定义标题（user_title）。传空串或 null 表示清除。
+    /// 原始 title（agent 提取）保留不变；前端展示用 COALESCE(user_title, title)。
+    pub fn set_user_title(&self, conversation_id: &str, user_title: Option<&str>) -> StorageResult<()> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        // 空串视为清除
+        let normalized = user_title.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let changed = conn.execute(
+            "UPDATE conversations SET user_title = ?1 WHERE id = ?2",
+            params![normalized, conversation_id],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::NotFound {
+                entity: "conversation",
+                id: conversation_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
     /// 查询会话是否已收藏。
     pub fn is_favorite(&self, conversation_id: &str) -> StorageResult<bool> {
         let conn = self.conn.lock().expect("mutex poisoned");

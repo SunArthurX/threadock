@@ -73,3 +73,15 @@ pub(crate) async fn export_conversation(
 pub(crate) fn save_text_file(path: String, content: String) -> Result<(), String> {
     std::fs::write(&path, content.as_bytes()).map_err(|e| io_err(e))
 }
+
+/// 读取文本文件（导入配置 / 读取报告用）。
+/// 限制最大 1 MB 防止误读大文件把内存吃满。
+#[tauri::command]
+pub(crate) fn read_text_file(path: String) -> Result<String, String> {
+    const MAX_BYTES: u64 = 1_048_576; // 1 MB
+    let meta = std::fs::metadata(&path).map_err(|e| io_err(e))?;
+    if meta.len() > MAX_BYTES {
+        return Err(format!("文件过大 ({} 字节 > 1 MB 上限)", meta.len()));
+    }
+    std::fs::read_to_string(&path).map_err(|e| io_err(e))
+}

@@ -23,6 +23,8 @@ interface Props {
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onRescanAudit: () => void;
+  /** 改写 user_title（空串/null 表示清除）。 */
+  onRenameTitle?: (title: string | null) => Promise<void> | void;
 }
 
 export default function ConversationDetail({
@@ -30,7 +32,7 @@ export default function ConversationDetail({
   timelineMode, highlightMsgId, collapsedMsgs, tags,
   onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
   onToggleFavorite, onToggleArchive,
-  onAddTag, onRemoveTag, onRescanAudit,
+  onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -41,6 +43,10 @@ export default function ConversationDetail({
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchIdx, setSearchIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // inline 标题编辑：双击标题进入 input；Enter 保存 / Esc 取消 / 失焦保存
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(conv.user_title ?? "");
 
   // ⌘F / Ctrl+F 唤起消息内搜索
   useEffect(() => {
@@ -195,10 +201,43 @@ export default function ConversationDetail({
     </div>
   );
 
+  const submitTitle = async () => {
+    if (!onRenameTitle) { setEditingTitle(false); return; }
+    const next = titleDraft.trim();
+    const prev = conv.user_title?.trim() ?? "";
+    if (next === prev) { setEditingTitle(false); return; }
+    try {
+      await onRenameTitle(next ? next : null);
+    } catch { /* 失败保持草稿 */ }
+    setEditingTitle(false);
+  };
+
   return (
     <div className="detail">
-      <h2>
-        {conv.user_title ?? conv.title ?? "(无标题)"}
+      <h2
+        className={editingTitle ? "editing" : ""}
+        onDoubleClick={() => { if (onRenameTitle) { setTitleDraft(conv.user_title ?? ""); setEditingTitle(true); } }}
+        title={onRenameTitle ? "双击改标题（自定义后展示你的标题）" : undefined}
+      >
+        {editingTitle ? (
+          <input
+            className="title-input"
+            value={titleDraft}
+            autoFocus
+            placeholder="自定义标题（空 = 恢复原始）"
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={submitTitle}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") submitTitle();
+              if (e.key === "Escape") { setTitleDraft(conv.user_title ?? ""); setEditingTitle(false); }
+            }}
+          />
+        ) : (
+          <span className="title-text">
+            {conv.user_title ?? conv.title ?? "(无标题)"}
+            {onRenameTitle && <span className="title-edit-hint" title="双击改标题">✎</span>}
+          </span>
+        )}
         {completenessLabel && <span className={`badge completeness ${completenessLabel}`}>{completenessLabel}</span>}
       </h2>
       <div className="meta-row">

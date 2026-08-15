@@ -386,6 +386,85 @@ pub(crate) async fn extract_knowledge(
     Ok(ch_knowledge::RuleExtractor::new().extract(&input))
 }
 
+/// 知识跨会话引用：给定文件/命令关键词，返回各关键词在多少个其他会话里被提到。
+/// 复用 storage.search（FTS5 + 角色过滤），比前端逐条 search 快一个数量级。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct XrefConv {
+    pub id: String,
+    pub title: Option<String>,
+    pub provider: String,
+    pub updated_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct XrefEntry {
+    pub keyword: String,
+    pub kind: String, // "file" | "command"
+    pub other_count: i64,
+    pub other_conversations: Vec<XrefConv>,
+}
+
+#[tauri::command]
+pub(crate) async fn knowledge_xref(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+    keywords: Vec<KnowledgeXrefKeyword>,
+) -> Result<Vec<XrefEntry>, String> {
+    use ch_search::SearchQuery;
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let mut out = Vec::with_capacity(keywords.len());
+    for kw in keywords {
+        if kw.text.trim().is_empty() {
+            continue;
+        }
+        // FTS5 模糊匹配（加上前缀通配符 * 走 MATCH 表达式）
+        let q = SearchQuery {
+            query: format!("\"{}\"*", kw.text.replace('"', " ")),
+            role: None,
+            workspace_id: None,
+            limit: 50,
+        };
+        let results = repo.search(&q).map_err(|e| storage_err(e))?;
+        // 聚合 by conversation_id（排除自身）
+        use std::collections::BTreeMap;
+        let mut by_conv: BTreeMap<String, i64> = BTreeMap::new();
+        for r in &results {
+            if r.conversation_id == conversation_id {
+                continue;
+            }
+            *by_conv.entry(r.conversation_id.clone()).or_insert(0) += 1;
+        }
+        // 取 Top 10
+        let mut ranked: Vec<(String, i64)> = by_conv.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.truncate(10);
+        let mut convs = Vec::with_capacity(ranked.len());
+        for (cid, _n) in &ranked {
+            if let Ok(Some(conv)) = repo.get_conversation(cid) {
+                convs.push(XrefConv {
+                    id: conv.id.clone(),
+                    title: conv.user_title.clone().or(conv.title.clone()),
+                    provider: conv.provider.to_string(),
+                    updated_at_ms: ch_storage::timestamp::to_millis(conv.updated_at),
+                });
+            }
+        }
+        out.push(XrefEntry {
+            keyword: kw.text,
+            kind: kw.kind,
+            other_count: convs.len() as i64,
+            other_conversations: convs,
+        });
+    }
+    Ok(out)
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct KnowledgeXrefKeyword {
+    pub text: String,
+    pub kind: String, // "file" | "command"
+}
+
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "debug")]
 pub(crate) async fn search(
@@ -462,6 +541,19 @@ pub(crate) async fn set_favorite(
 ) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
     repo.set_favorite(&id, favorite).map_err(|e| storage_err(e))
+}
+
+/// 设置/清除会话的用户自定义标题（user_title）。
+/// - title 传 null 或空串 → 清除（恢复使用 agent 提取的原始 title）
+/// - 非空 → 保存为 user_title
+#[tauri::command]
+pub(crate) async fn set_user_title(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    repo.set_user_title(&id, title.as_deref()).map_err(|e| storage_err(e))
 }
 
 #[tauri::command]
