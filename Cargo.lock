@@ -188,7 +188,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "ch-adapter-claude-code"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -202,7 +202,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-codex"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -216,7 +216,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-cursor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cargo_metadata",
  "ch-adapter-sdk",
@@ -246,7 +246,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-jsonl"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -260,7 +260,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-markdown"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -275,7 +275,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-minimax"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "ch-domain",
@@ -304,7 +304,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-zcode"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -319,7 +319,7 @@ dependencies = [
 
 [[package]]
 name = "ch-audit"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-export",
@@ -335,7 +335,7 @@ dependencies = [
 
 [[package]]
 name = "ch-backup"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -352,7 +352,7 @@ dependencies = [
 
 [[package]]
 name = "ch-benchmarks"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-adapter-markdown",
  "ch-domain",
@@ -364,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "ch-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "ch-adapter-claude-code",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "ch-daemon"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-adapter-jsonl",
  "ch-adapter-markdown",
@@ -412,18 +412,20 @@ dependencies = [
 
 [[package]]
 name = "ch-domain"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
  "time",
+ "toml",
  "uuid",
 ]
 
 [[package]]
 name = "ch-export"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-adapter-markdown",
  "ch-domain",
@@ -437,7 +439,7 @@ dependencies = [
 
 [[package]]
 name = "ch-identity-resolver"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "thiserror",
@@ -445,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "ch-knowledge"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -459,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "ch-normalization"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -472,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "ch-ops-metrics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "regex",
@@ -487,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "ch-raw-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -501,7 +503,7 @@ dependencies = [
 
 [[package]]
 name = "ch-search"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "serde",
@@ -514,7 +516,7 @@ dependencies = [
 
 [[package]]
 name = "ch-storage"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ch-domain",
  "rusqlite",
@@ -812,6 +814,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
+
+[[package]]
 name = "hashlink"
 version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,6 +839,16 @@ name = "htmlescape"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9025058dae765dee5070ec375f591e2ba14638c63feff74f13805a72e523163"
+
+[[package]]
+name = "indexmap"
+version = "2.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
+dependencies = [
+ "equivalent",
+ "hashbrown 0.17.1",
+]
 
 [[package]]
 name = "inout"
@@ -1342,6 +1360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf41e0cfaf7226dca15e8197172c295a782857fcb97fad1808a166870dee75a3"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "sharded-slab"
 version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1623,6 +1650,47 @@ dependencies = [
  "num-conv",
  "time-core",
 ]
+
+[[package]]
+name = "toml"
+version = "0.8.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc1beb996b9d83529a9e75c17a1686767d148d70663143c7854d8b4a09ced362"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41fe8c660ae4257887cf66394862d21dbca4a6ddd26f04a3560410406a2f819a"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_write",
+ "winnow",
+]
+
+[[package]]
+name = "toml_write"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
 
 [[package]]
 name = "tracing"
@@ -1922,6 +1990,15 @@ name = "windows_x86_64_msvc"
 version = "0.52.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
+
+[[package]]
+name = "winnow"
+version = "0.7.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "zerocopy"

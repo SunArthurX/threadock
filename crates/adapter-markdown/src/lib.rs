@@ -194,17 +194,31 @@ mod tests {
         assert_eq!(raw.title.as_deref(), Some("关于 Tauri Android 后台任务"));
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("Tauri Android"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("Tauri Android"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
-        assert!(raw.messages[1].text.as_deref().unwrap().contains("WorkManager"));
+        assert!(raw.messages[1]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("WorkManager"));
     }
 
     #[test]
     fn parses_events() {
         let raw = parse_str(SAMPLE, "sample.md").unwrap();
         assert_eq!(raw.events.len(), 2);
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::CommandStarted));
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::DiffGenerated));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::CommandStarted));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::DiffGenerated));
     }
 
     #[test]
@@ -213,7 +227,10 @@ mod tests {
         let raw = parse_str(md, "zh.md").unwrap();
         assert_eq!(raw.messages[0].role, Role::User);
         assert_eq!(raw.messages[1].role, Role::Assistant);
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::CommandStarted));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::CommandStarted));
     }
 
     #[test]
@@ -250,7 +267,11 @@ mod tests {
         std::fs::write(f.path(), "## User\nhi from file\n## Assistant\nyo\n").unwrap();
         let raw = parse_file(f.path()).unwrap();
         assert_eq!(raw.messages.len(), 2);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("hi from file"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("hi from file"));
     }
 
     #[test]

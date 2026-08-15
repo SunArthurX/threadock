@@ -172,8 +172,8 @@ mod tests {
     use super::*;
     use crate::protocol::{encode_bytes, AdapterMetadata, HealthResponse, PROTOCOL_VERSION};
     use ch_domain::Provider;
-    use ch_normalization::{RawConversation, RawMessage};
     use ch_domain::Role;
+    use ch_normalization::{RawConversation, RawMessage};
     use std::io::Cursor;
 
     struct FakeAdapter;
@@ -221,8 +221,7 @@ mod tests {
         let out = run(r#"{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}"#);
         let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
         assert_eq!(resp.id, serde_json::json!(1));
-        let hello: HelloResponse =
-            serde_json::from_value(resp.result.unwrap()).unwrap();
+        let hello: HelloResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
         assert_eq!(hello.metadata.id, "fake");
         assert_eq!(hello.metadata.protocol_version, PROTOCOL_VERSION);
     }

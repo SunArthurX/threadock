@@ -24,7 +24,7 @@
 pub mod normalize;
 pub mod resolver;
 
-pub use normalize::{canonicalize_path, canonicalize_git_remote, normalized_name};
+pub use normalize::{canonicalize_git_remote, canonicalize_path, normalized_name};
 pub use resolver::{
     resolve, IdentityKey, Resolution, SourceWorkspaceCandidate, AUTO_CONFIRM_THRESHOLD,
 };

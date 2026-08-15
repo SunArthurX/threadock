@@ -406,7 +406,10 @@ mod tests {
         let c = SourceWorkspaceCandidate::new("my-web-app");
         let k = known("ws_7", "web-app");
         let r = resolve(&c, &[k]);
-        assert!(r.needs_confirmation(), "0.7 similarity must need confirmation");
+        assert!(
+            r.needs_confirmation(),
+            "0.7 similarity must need confirmation"
+        );
         if let Resolution::NeedsConfirmation { candidate, .. } = r {
             assert!(candidate.is_some());
             if let Some(m) = candidate {

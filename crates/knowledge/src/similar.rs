@@ -75,7 +75,11 @@ pub fn find_similar(
         .filter(|h| h.score > 0.0)
         .collect();
 
-    hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     hits.truncate(limit);
     hits
 }
@@ -122,11 +126,11 @@ fn keywords(text: &str) -> HashSet<String> {
 /// 常见停用词（避免无意义词拉高相似度）。
 fn is_stopword(s: &str) -> bool {
     const STOP: &[&str] = &[
-        "the", "and", "for", "are", "but", "not", "you", "all", "can", "her", "was", "one",
-        "our", "out", "has", "have", "from", "this", "that", "with", "they", "will", "each",
-        "which", "their", "what", "about", "would", "there", "been", "more", "than", "very",
-        "your", "into", "them", "then", "这些", "我们", "一个", "可以", "什么", "怎么",
-        "使用", "进行", "这个", "那个",
+        "the", "and", "for", "are", "but", "not", "you", "all", "can", "her", "was", "one", "our",
+        "out", "has", "have", "from", "this", "that", "with", "they", "will", "each", "which",
+        "their", "what", "about", "would", "there", "been", "more", "than", "very", "your", "into",
+        "them", "then", "这些", "我们", "一个", "可以", "什么", "怎么", "使用", "进行", "这个",
+        "那个",
     ];
     STOP.contains(&s)
 }
@@ -168,7 +172,9 @@ mod tests {
         assert!(!hits.is_empty());
         assert_eq!(hits[0].conversation_id, "c1");
         // 无关会话应排后面或被过滤
-        assert!(hits.iter().all(|h| h.conversation_id == "c1" || h.score < hits[0].score));
+        assert!(hits
+            .iter()
+            .all(|h| h.conversation_id == "c1" || h.score < hits[0].score));
     }
 
     #[test]
@@ -232,10 +238,7 @@ mod tests {
 
     #[test]
     fn conversation_text_from_messages() {
-        let msgs = vec![
-            msg("你好"),
-            msg("你好啊"),
-        ];
+        let msgs = vec![msg("你好"), msg("你好啊")];
         let ct = conversation_text("c1", Some("测试"), &msgs);
         assert_eq!(ct.id, "c1");
         assert_eq!(ct.title.as_deref(), Some("测试"));

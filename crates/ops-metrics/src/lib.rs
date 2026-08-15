@@ -46,7 +46,10 @@ pub fn read_line_capped<R: std::io::BufRead>(
                 Err(e) => return Err(e),
             };
             if available.is_empty() {
-                return Ok(CappedLine { complete: false, oversized });
+                return Ok(CappedLine {
+                    complete: false,
+                    oversized,
+                });
             }
             match available.iter().position(|&b| b == b'\n') {
                 Some(pos) => {
@@ -79,7 +82,10 @@ pub fn read_line_capped<R: std::io::BufRead>(
         };
         r.consume(consumed);
         if done {
-            return Ok(CappedLine { complete: true, oversized });
+            return Ok(CappedLine {
+                complete: true,
+                oversized,
+            });
         }
     }
 }
@@ -147,7 +153,12 @@ pub fn infer_destructive(command: &str) -> bool {
         "sudo ",
         "> /dev/sd",
     ];
-    rules.iter().any(|r| c.starts_with(r) || c.contains(&format!(" {r}")) || c.contains(&format!("; {r}")) || c.contains(&format!("&& {r}")))
+    rules.iter().any(|r| {
+        c.starts_with(r)
+            || c.contains(&format!(" {r}"))
+            || c.contains(&format!("; {r}"))
+            || c.contains(&format!("&& {r}"))
+    })
 }
 
 #[cfg(test)]
@@ -176,7 +187,11 @@ mod tests {
 
         let l4 = read_line_capped(&mut r, &mut buf, cap).unwrap();
         assert!(!l4.complete, "EOF 且无更多内容");
-        assert_eq!(buf.as_slice().trim_ascii_end(), b"c", "末行无换行符也应读出");
+        assert_eq!(
+            buf.as_slice().trim_ascii_end(),
+            b"c",
+            "末行无换行符也应读出"
+        );
     }
 
     #[test]

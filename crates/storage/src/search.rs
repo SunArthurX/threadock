@@ -202,7 +202,9 @@ mod tests {
         let r = seed();
         let results = r.search(&SearchQuery::new("tauri")).unwrap();
         assert!(!results.is_empty(), "should find tauri matches");
-        assert!(results.iter().all(|sr| sr.conversation_id.starts_with("conv")));
+        assert!(results
+            .iter()
+            .all(|sr| sr.conversation_id.starts_with("conv")));
         // 第一条命中应来自 Android 那条会话
         assert!(results[0].title.as_deref().unwrap_or("").contains("Tauri"));
     }
@@ -226,7 +228,9 @@ mod tests {
             .search(&SearchQuery::new("android").with_workspace(&wid))
             .unwrap();
         assert!(!results.is_empty());
-        assert!(results.iter().all(|sr| sr.workspace_id.as_deref() == Some(wid.as_str())));
+        assert!(results
+            .iter()
+            .all(|sr| sr.workspace_id.as_deref() == Some(wid.as_str())));
     }
 
     #[test]

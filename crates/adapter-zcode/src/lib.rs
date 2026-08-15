@@ -136,25 +136,35 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
 }
 
 /// 解析单条 ZCode 会话。
-pub fn parse_session(db_path: impl AsRef<Path>, session_id: &str) -> AdapterResult<RawConversation> {
+pub fn parse_session(
+    db_path: impl AsRef<Path>,
+    session_id: &str,
+) -> AdapterResult<RawConversation> {
     let conn = open_db(db_path)?;
 
     // 1. 会话元信息（含时间戳 + parent_id 主子链路）
     let (title, _directory, model, time_created, time_updated, parent_id): (
-        String, String, Option<String>, i64, i64, Option<String>,
+        String,
+        String,
+        Option<String>,
+        i64,
+        i64,
+        Option<String>,
     ) = conn
         .query_row(
             "SELECT title, directory, NULL, time_created, time_updated, parent_id
              FROM session WHERE id = ?1",
             params![session_id],
-            |r| Ok((
-                r.get(0)?,
-                r.get(1)?,
-                r.get::<_, Option<String>>(2)?,
-                r.get(3)?,
-                r.get(4)?,
-                r.get::<_, Option<String>>(5)?,
-            )),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get::<_, Option<String>>(5)?,
+                ))
+            },
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => ZCodeError::NotFound(session_id.to_string()),
@@ -162,9 +172,7 @@ pub fn parse_session(db_path: impl AsRef<Path>, session_id: &str) -> AdapterResu
         })?;
 
     // parent_id 为空字符串时视为无父级（顶层主任务）
-    let source_parent_id = parent_id
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+    let source_parent_id = parent_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
 
     let started_at = time::OffsetDateTime::from_unix_timestamp(time_created / 1000).ok();
     let _updated_at = time::OffsetDateTime::from_unix_timestamp(time_updated / 1000).ok();
@@ -180,13 +188,20 @@ pub fn parse_session(db_path: impl AsRef<Path>, session_id: &str) -> AdapterResu
          ORDER BY time_created, id",
     )?;
     let msg_rows = msg_stmt.query_map(params![session_id], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
     })?;
 
     for msg_row in msg_rows {
         let (msg_id, msg_data, msg_time) = msg_row?;
         let msg_obj: serde_json::Value = serde_json::from_str(&msg_data).unwrap_or_default();
-        let role_str = msg_obj.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+        let role_str = msg_obj
+            .get("role")
+            .and_then(|r| r.as_str())
+            .unwrap_or("user");
         let role = match role_str {
             "assistant" => Role::Assistant,
             "system" => Role::System,
@@ -414,8 +429,13 @@ mod tests {
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
         ).unwrap();
-        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", []).unwrap();
-        conn.execute("INSERT INTO message VALUES ('m','s',0,0,'{\"role\":\"user\"}',0)", []).unwrap();
+        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO message VALUES ('m','s',0,0,'{\"role\":\"user\"}',0)",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO part VALUES ('p1','m','s',0,0,'{\"type\":\"text\",\"text\":\"<system-reminder>noise</system-reminder>\"}',0)",
             [],
@@ -452,7 +472,8 @@ mod tests {
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
         ).unwrap();
-        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", []).unwrap();
+        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
+            .unwrap();
         drop(conn);
         assert!(matches!(
             super::parse_session(&db, "s"),

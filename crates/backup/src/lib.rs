@@ -93,7 +93,11 @@ pub struct BackupSource {
 /// 3. zstd 压缩。
 /// 4. XChaCha20-Poly1305 加密。
 /// 5. 写入 `[magic][nonce][ciphertext+tag]`。
-pub fn create_backup(source: &BackupSource, password: &str, out: &Path) -> BackupResult<BackupMeta> {
+pub fn create_backup(
+    source: &BackupSource,
+    password: &str,
+    out: &Path,
+) -> BackupResult<BackupMeta> {
     let key = derive_key(password)?;
     let cipher = XChaCha20Poly1305::new(&key.into());
 
@@ -131,8 +135,8 @@ pub fn create_backup(source: &BackupSource, password: &str, out: &Path) -> Backu
     let payload_hash = blake3::hash(&payload).to_hex().to_string();
 
     // 4. zstd 压缩
-    let compressed = zstd::encode_all(payload.as_slice(), 9)
-        .map_err(|e| BackupError::Zstd(e.to_string()))?;
+    let compressed =
+        zstd::encode_all(payload.as_slice(), 9).map_err(|e| BackupError::Zstd(e.to_string()))?;
 
     // 5. 加密
     let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
@@ -160,7 +164,11 @@ pub fn create_backup(source: &BackupSource, password: &str, out: &Path) -> Backu
 /// 恢复备份到目标目录。
 ///
 /// 流程：读取 → 校验魔数 → 解密 → 解压 → 解析容器 → 写出 db + raw。
-pub fn restore_backup(backup_path: &Path, password: &str, target_dir: &Path) -> BackupResult<BackupMeta> {
+pub fn restore_backup(
+    backup_path: &Path,
+    password: &str,
+    target_dir: &Path,
+) -> BackupResult<BackupMeta> {
     let key = derive_key(password)?;
     let cipher = XChaCha20Poly1305::new(&key.into());
 
@@ -186,8 +194,8 @@ pub fn restore_backup(backup_path: &Path, password: &str, target_dir: &Path) -> 
         .map_err(|e| BackupError::Decrypt(e.to_string()))?;
 
     // 解压
-    let payload = zstd::decode_all(compressed.as_slice())
-        .map_err(|e| BackupError::Zstd(e.to_string()))?;
+    let payload =
+        zstd::decode_all(compressed.as_slice()).map_err(|e| BackupError::Zstd(e.to_string()))?;
 
     // 完整性校验
     let actual_hash = blake3::hash(&payload).to_hex().to_string();
@@ -278,8 +286,8 @@ fn now_millis() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ch_storage::Repository;
     use ch_domain::{Conversation, Provider};
+    use ch_storage::Repository;
     use tempfile::TempDir;
 
     fn seeded() -> (TempDir, PathBuf) {
@@ -313,7 +321,10 @@ mod tests {
 
         // 备份（无 raw）
         let meta = create_backup(
-            &BackupSource { db_path: db.clone(), raw_root: None },
+            &BackupSource {
+                db_path: db.clone(),
+                raw_root: None,
+            },
             "test-password-1",
             &backup_path,
         )
@@ -339,7 +350,10 @@ mod tests {
         let backup_dir = TempDir::new().unwrap();
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
-            &BackupSource { db_path: db, raw_root: None },
+            &BackupSource {
+                db_path: db,
+                raw_root: None,
+            },
             "correct-pw-1",
             &backup_path,
         )
@@ -370,7 +384,10 @@ mod tests {
         let backup_path = backup_dir.path().join("hub.chbak");
 
         let meta = create_backup(
-            &BackupSource { db_path: db, raw_root: Some(raw_root) },
+            &BackupSource {
+                db_path: db,
+                raw_root: Some(raw_root),
+            },
             "pw-12345678",
             &backup_path,
         )
@@ -384,7 +401,10 @@ mod tests {
         assert_eq!(meta2.raw_count, 1);
         let restored_raw = restore_dir.path().join("raw/ab/cd/abcd.json.zst");
         assert!(restored_raw.exists());
-        assert_eq!(std::fs::read(&restored_raw).unwrap(), b"fake compressed content");
+        assert_eq!(
+            std::fs::read(&restored_raw).unwrap(),
+            b"fake compressed content"
+        );
     }
 
     #[test]
@@ -393,7 +413,10 @@ mod tests {
         let backup_dir = TempDir::new().unwrap();
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
-            &BackupSource { db_path: db, raw_root: None },
+            &BackupSource {
+                db_path: db,
+                raw_root: None,
+            },
             "pw-12345678",
             &backup_path,
         )
@@ -408,7 +431,10 @@ mod tests {
         let backup_dir = TempDir::new().unwrap();
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
-            &BackupSource { db_path: db, raw_root: None },
+            &BackupSource {
+                db_path: db,
+                raw_root: None,
+            },
             "pw-12345678",
             &backup_path,
         )

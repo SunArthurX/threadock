@@ -85,7 +85,8 @@ pub fn to_markdown(
             EventType::ToolCallStarted | EventType::ToolCallCompleted => {
                 ("Tool", options.include_events)
             }
-            EventType::ApprovalRequested | EventType::ApprovalGranted
+            EventType::ApprovalRequested
+            | EventType::ApprovalGranted
             | EventType::ApprovalDenied => ("Approval", options.include_events),
             EventType::ArtifactCreated => ("Artifact", options.include_events),
             _ => continue,

@@ -46,7 +46,10 @@ fn adapter_process_isolates_crash() {
     let mut proc = AdapterProcess::spawn("false").unwrap();
     let result = proc.handshake();
     assert!(
-        matches!(result, Err(HostError::ProcessExited(_)) | Err(HostError::Io(_))),
+        matches!(
+            result,
+            Err(HostError::ProcessExited(_)) | Err(HostError::Io(_))
+        ),
         "crashed adapter must be detected, got {:?}",
         result
     );

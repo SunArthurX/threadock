@@ -30,7 +30,11 @@ pub fn seed_conversations(
         let cid = repo.upsert_conversation(&conv).unwrap();
 
         for j in 0..messages_per_conv {
-            let role = if j % 2 == 0 { Role::User } else { Role::Assistant };
+            let role = if j % 2 == 0 {
+                Role::User
+            } else {
+                Role::Assistant
+            };
             let mut m = Message::new(&cid, role, (j + 1) as i64);
             m.content_text = Some(format!(
                 "消息 {i}-{j}：这是一段用于性能测试的内容，讨论 Tauri Android 后台任务和 Rust 错误处理。关键词：WorkManager、thiserror、cargo build。"

@@ -110,9 +110,7 @@ pub fn export_workspace(
         let events = repo.list_events(&c.id)?;
         let content = match format {
             ExportFormat::Markdown => to_markdown(c, &messages, &events, &opts),
-            ExportFormat::Json => {
-                to_json(Some(&ws), c, &messages, &events, &opts)?
-            }
+            ExportFormat::Json => to_json(Some(&ws), c, &messages, &events, &opts)?,
         };
         let ext = match format {
             ExportFormat::Markdown => "md",
@@ -184,7 +182,12 @@ mod tests {
         let (_dir, repo, _cid) = seeded_repo();
         let outdir = TempDir::new().unwrap();
         let out = outdir.path().join("x.md");
-        let err = export_conversation(&repo, "conv_nope", out.to_str().unwrap(), ExportFormat::Markdown);
+        let err = export_conversation(
+            &repo,
+            "conv_nope",
+            out.to_str().unwrap(),
+            ExportFormat::Markdown,
+        );
         assert!(err.is_err());
     }
 
@@ -200,7 +203,8 @@ mod tests {
 
         let mut conv_ids = Vec::new();
         for i in 0..3 {
-            let mut c = ch_domain::Conversation::new(ch_domain::Provider::Generic, format!("src-{i}"));
+            let mut c =
+                ch_domain::Conversation::new(ch_domain::Provider::Generic, format!("src-{i}"));
             c.workspace_id = Some(ws_id.clone());
             c.title = Some(format!("会话 {i}"));
             let cid = repo.upsert_conversation(&c).unwrap();
@@ -221,9 +225,13 @@ mod tests {
         let (_dir, repo, ws_id, conv_ids) = seeded_with_workspace();
         let outdir = TempDir::new().unwrap();
 
-        let summary =
-            export_workspace(&repo, &ws_id, outdir.path().to_str().unwrap(), ExportFormat::Markdown)
-                .unwrap();
+        let summary = export_workspace(
+            &repo,
+            &ws_id,
+            outdir.path().to_str().unwrap(),
+            ExportFormat::Markdown,
+        )
+        .unwrap();
         assert_eq!(summary.conversations_exported, 3);
         assert_eq!(summary.files_written, 3);
 
@@ -231,7 +239,14 @@ mod tests {
         let entries: Vec<_> = std::fs::read_dir(outdir.path()).unwrap().collect();
         let md_count = entries
             .iter()
-            .filter(|e| e.as_ref().unwrap().path().extension().and_then(|x| x.to_str()) == Some("md"))
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .and_then(|x| x.to_str())
+                    == Some("md")
+            })
             .count();
         assert_eq!(md_count, 3);
 
@@ -248,9 +263,13 @@ mod tests {
     fn export_workspace_json_format() {
         let (_dir, repo, ws_id, _conv_ids) = seeded_with_workspace();
         let outdir = TempDir::new().unwrap();
-        let summary =
-            export_workspace(&repo, &ws_id, outdir.path().to_str().unwrap(), ExportFormat::Json)
-                .unwrap();
+        let summary = export_workspace(
+            &repo,
+            &ws_id,
+            outdir.path().to_str().unwrap(),
+            ExportFormat::Json,
+        )
+        .unwrap();
         assert_eq!(summary.files_written, 3);
         let json_files: Vec<_> = std::fs::read_dir(outdir.path())
             .unwrap()
@@ -264,7 +283,12 @@ mod tests {
     fn export_workspace_nonexistent_errors() {
         let (_dir, repo, _ws_id, _conv_ids) = seeded_with_workspace();
         let outdir = TempDir::new().unwrap();
-        let err = export_workspace(&repo, "ws_nope", outdir.path().to_str().unwrap(), ExportFormat::Markdown);
+        let err = export_workspace(
+            &repo,
+            "ws_nope",
+            outdir.path().to_str().unwrap(),
+            ExportFormat::Markdown,
+        );
         assert!(err.is_err());
     }
 
@@ -277,8 +301,13 @@ mod tests {
             .upsert_workspace(&ch_domain::Workspace::new("empty-ws"))
             .unwrap();
         let outdir = TempDir::new().unwrap();
-        let summary = export_workspace(&repo, &ws_id, outdir.path().to_str().unwrap(), ExportFormat::Markdown)
-            .unwrap();
+        let summary = export_workspace(
+            &repo,
+            &ws_id,
+            outdir.path().to_str().unwrap(),
+            ExportFormat::Markdown,
+        )
+        .unwrap();
         assert_eq!(summary.conversations_exported, 0);
         assert_eq!(summary.files_written, 0);
     }

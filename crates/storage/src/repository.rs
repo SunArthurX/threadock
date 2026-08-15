@@ -7,8 +7,8 @@
 
 use crate::error::{StorageError, StorageResult};
 use crate::filter::ConversationFilter;
-use crate::search;
 use crate::migration;
+use crate::search;
 use crate::timestamp;
 use ch_domain::{
     now_utc, Conversation, Event, EventType, Message, Provider, Role, Status, Workspace,
@@ -216,8 +216,10 @@ impl Repository {
                 git_remote: r.get(4)?,
                 git_common_dir: r.get(5)?,
                 status: parse_status(&r.get::<_, String>(6)?),
-                created_at: timestamp::from_millis(Some(r.get::<_, Option<i64>>(7)?.unwrap_or(0))).unwrap_or_else(now_utc),
-                updated_at: timestamp::from_millis(Some(r.get::<_, Option<i64>>(8)?.unwrap_or(0))).unwrap_or_else(now_utc),
+                created_at: timestamp::from_millis(Some(r.get::<_, Option<i64>>(7)?.unwrap_or(0)))
+                    .unwrap_or_else(now_utc),
+                updated_at: timestamp::from_millis(Some(r.get::<_, Option<i64>>(8)?.unwrap_or(0)))
+                    .unwrap_or_else(now_utc),
             })
         })?;
         let mut v = Vec::new();
@@ -303,7 +305,10 @@ impl Repository {
         .map_err(Into::into)
     }
 
-    pub fn list_conversations(&self, workspace_id: Option<&str>) -> StorageResult<Vec<Conversation>> {
+    pub fn list_conversations(
+        &self,
+        workspace_id: Option<&str>,
+    ) -> StorageResult<Vec<Conversation>> {
         let conn = self.conn.lock().unwrap();
         let mut sql = String::from(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
@@ -337,7 +342,11 @@ impl Repository {
         let mut args: Vec<SqlValue> = Vec::new();
         let mut next_idx = 1usize;
 
-        let push = |clause: String, val: SqlValue, wc: &mut Vec<String>, a: &mut Vec<SqlValue>, idx: &mut usize| {
+        let push = |clause: String,
+                    val: SqlValue,
+                    wc: &mut Vec<String>,
+                    a: &mut Vec<SqlValue>,
+                    idx: &mut usize| {
             wc.push(clause.replace("?", &format!("?{idx}")));
             a.push(val);
             *idx += 1;
@@ -434,11 +443,7 @@ impl Repository {
     }
 
     /// 统计指定父会话的子任务数量。
-    pub fn count_children(
-        &self,
-        parent_source_id: &str,
-        provider_id: &str,
-    ) -> StorageResult<i64> {
+    pub fn count_children(&self, parent_source_id: &str, provider_id: &str) -> StorageResult<i64> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.query_row(
             "SELECT COUNT(*) FROM conversations
@@ -472,9 +477,9 @@ impl Repository {
         let mut n = 0;
         // 分块事务：每 2000 条一个事务，避免长持主锁阻塞 UI 查询
         for records in records.chunks(2000) {
-        let tx = conn.transaction()?;
-        for r in records {
-            let changed = tx.execute(
+            let tx = conn.transaction()?;
+            for r in records {
+                let changed = tx.execute(
                 "INSERT OR IGNORE INTO usage_records
                     (id, provider_id, source_session_id, turn_id, model, ts,
                      input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
@@ -501,9 +506,9 @@ impl Repository {
                     r.context_exceeded,
                 ],
             )?;
-            n += changed;
-        }
-        tx.commit()?;
+                n += changed;
+            }
+            tx.commit()?;
         }
         Ok(n)
     }
@@ -516,31 +521,31 @@ impl Repository {
         let mut conn = self.conn.lock().unwrap();
         let mut n = 0;
         for records in records.chunks(2000) {
-        let tx = conn.transaction()?;
-        for r in records {
-            let changed = tx.execute(
-                "INSERT OR IGNORE INTO tool_call_records
+            let tx = conn.transaction()?;
+            for r in records {
+                let changed = tx.execute(
+                    "INSERT OR IGNORE INTO tool_call_records
                     (id, provider_id, source_session_id, tool_name, ts, read_only,
                      destructive, approval_status, exit_code, duration_ms, status, command_text)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    r.id,
-                    format!("prov_{}", r.provider.as_str()),
-                    r.source_session_id,
-                    r.tool_name,
-                    timestamp::to_millis(Some(r.ts)).unwrap_or(0),
-                    r.read_only,
-                    r.destructive,
-                    r.approval_status,
-                    r.exit_code,
-                    r.duration_ms,
-                    r.status.as_str(),
-                    r.command_text,
-                ],
-            )?;
-            n += changed;
-        }
-        tx.commit()?;
+                    params![
+                        r.id,
+                        format!("prov_{}", r.provider.as_str()),
+                        r.source_session_id,
+                        r.tool_name,
+                        timestamp::to_millis(Some(r.ts)).unwrap_or(0),
+                        r.read_only,
+                        r.destructive,
+                        r.approval_status,
+                        r.exit_code,
+                        r.duration_ms,
+                        r.status.as_str(),
+                        r.command_text,
+                    ],
+                )?;
+                n += changed;
+            }
+            tx.commit()?;
         }
         Ok(n)
     }
@@ -549,8 +554,8 @@ impl Repository {
     fn range_clause(days: Option<i64>) -> (String, Option<i64>) {
         match days {
             Some(d) => {
-                let cutoff = timestamp::to_millis(Some(ch_domain::now_utc())).unwrap_or(0)
-                    - d * 86_400_000;
+                let cutoff =
+                    timestamp::to_millis(Some(ch_domain::now_utc())).unwrap_or(0) - d * 86_400_000;
                 ("ts >= ?1".to_string(), Some(cutoff))
             }
             None => ("1=1".to_string(), None),
@@ -723,7 +728,11 @@ impl Repository {
     }
 
     /// 风险调用列表（破坏性 / 出错 / 需审批）。
-    pub fn ops_risky_calls(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
+    pub fn ops_risky_calls(
+        &self,
+        days: Option<i64>,
+        n: i64,
+    ) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
         let conn = self.conn.lock().unwrap();
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
@@ -748,7 +757,8 @@ impl Repository {
                     .unwrap_or(ch_domain::Provider::Unknown),
                 source_session_id: r.get(2)?,
                 tool_name: r.get(3)?,
-                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?)).unwrap_or_else(ch_domain::now_utc),
+                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?))
+                    .unwrap_or_else(ch_domain::now_utc),
                 read_only: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
                 destructive: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
                 approval_status: r.get(7)?,
@@ -840,7 +850,11 @@ impl Repository {
                  WHERE provider_id = ?1
                    AND COALESCE(installation_id, '') = COALESCE(?2, '')
                    AND source_conversation_id = ?3",
-                params![provider_id, conv.installation_id, conv.source_conversation_id],
+                params![
+                    provider_id,
+                    conv.installation_id,
+                    conv.source_conversation_id
+                ],
                 |r| r.get(0),
             )
             .optional()?;
@@ -999,11 +1013,13 @@ impl Repository {
     }
 
     /// 读取某 provider 的 {source_id: observed_ms} 新鲜度表。
-    pub fn import_state_map(&self, provider_id: &str) -> StorageResult<std::collections::HashMap<String, Option<i64>>> {
+    pub fn import_state_map(
+        &self,
+        provider_id: &str,
+    ) -> StorageResult<std::collections::HashMap<String, Option<i64>>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT source_id, observed_ms FROM import_state WHERE provider_id = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT source_id, observed_ms FROM import_state WHERE provider_id = ?1")?;
         let rows = stmt.query_map(params![provider_id], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?))
         })?;
@@ -1159,7 +1175,10 @@ impl Repository {
         for chunk in records.chunks(2000) {
             let tx = conn.transaction()?;
             if first {
-                tx.execute("DELETE FROM usage_records WHERE provider_id = ?1", params![provider_id])?;
+                tx.execute(
+                    "DELETE FROM usage_records WHERE provider_id = ?1",
+                    params![provider_id],
+                )?;
                 first = false;
             }
             for r in chunk {
@@ -1251,7 +1270,10 @@ impl Repository {
         for chunk in records.chunks(2000) {
             let tx = conn.transaction()?;
             if first {
-                tx.execute("DELETE FROM asset_records WHERE provider_id = ?1", params![provider_id])?;
+                tx.execute(
+                    "DELETE FROM asset_records WHERE provider_id = ?1",
+                    params![provider_id],
+                )?;
                 first = false;
             }
             for r in chunk {
@@ -1312,14 +1334,25 @@ impl Repository {
     ) -> StorageResult<usize> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
-        tx.execute("DELETE FROM automation_records WHERE provider_id = ?1", params![provider_id])?;
+        tx.execute(
+            "DELETE FROM automation_records WHERE provider_id = ?1",
+            params![provider_id],
+        )?;
         let mut n = 0;
         for r in records {
             n += tx.execute(
                 "INSERT OR IGNORE INTO automation_records
                     (id, provider_id, name, kind, schedule, status, detail)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![r.id, provider_id, r.name, r.kind, r.schedule, r.status, r.detail],
+                params![
+                    r.id,
+                    provider_id,
+                    r.name,
+                    r.kind,
+                    r.schedule,
+                    r.status,
+                    r.detail
+                ],
             )?;
         }
         tx.commit()?;
@@ -1408,7 +1441,11 @@ impl Repository {
                 provider: r.get(0)?,
                 input_tokens: input,
                 cache_read_tokens: cached,
-                hit_rate: if total > 0 { cached as f64 / total as f64 } else { 0.0 },
+                hit_rate: if total > 0 {
+                    cached as f64 / total as f64
+                } else {
+                    0.0
+                },
             })
         })?;
         let mut v = Vec::new();
@@ -1450,7 +1487,10 @@ impl Repository {
                     out.push(AnomalyRow {
                         kind: "error_spike".into(),
                         agent: "*".into(),
-                        detail: format!("{day} 错误 {cnt} 次（均值 {avg:.1} 的 {:.1} 倍）", cnt as f64 / avg),
+                        detail: format!(
+                            "{day} 错误 {cnt} 次（均值 {avg:.1} 的 {:.1} 倍）",
+                            cnt as f64 / avg
+                        ),
                         severity: "high".into(),
                     });
                 }
@@ -1467,7 +1507,11 @@ impl Repository {
         {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for r in rows {
                 let (sid, rc, n) = r?;
@@ -1475,7 +1519,11 @@ impl Repository {
                     kind: "retry_storm".into(),
                     agent: "*".into(),
                     detail: format!("会话 {sid:.18}… 共重试 {rc} 次 / {n} 请求"),
-                    severity: if rc >= 20 { "high".into() } else { "medium".into() },
+                    severity: if rc >= 20 {
+                        "high".into()
+                    } else {
+                        "medium".into()
+                    },
                 });
             }
         }
@@ -1491,7 +1539,11 @@ impl Repository {
         {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for r in rows {
                 let (name, cx, n) = r?;
@@ -1533,19 +1585,40 @@ impl Repository {
             let completed: i64 = r.get::<_, Option<i64>>(3)?.unwrap_or(0);
             let retries: i64 = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
             let sessions: i64 = r.get(5)?;
-            let success_rate = if total > 0 { completed as f64 / total as f64 * 100.0 } else { 0.0 };
-            let error_rate = if total > 0 { errors as f64 / total as f64 * 100.0 } else { 0.0 };
-            let retry_rate = if total > 0 { retries as f64 / total as f64 * 100.0 } else { 0.0 };
-            let stability = (success_rate * 0.6 - retry_rate * 0.3 - error_rate * 0.1).clamp(0.0, 100.0);
+            let success_rate = if total > 0 {
+                completed as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let error_rate = if total > 0 {
+                errors as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let retry_rate = if total > 0 {
+                retries as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let stability =
+                (success_rate * 0.6 - retry_rate * 0.3 - error_rate * 0.1).clamp(0.0, 100.0);
             Ok(AgentHealth {
                 provider: r.get(0)?,
                 total_requests: total,
-                errors, completed, retries, sessions,
-                success_rate, error_rate, retry_rate, stability_score: stability,
+                errors,
+                completed,
+                retries,
+                sessions,
+                success_rate,
+                error_rate,
+                retry_rate,
+                stability_score: stability,
             })
         })?;
         let mut v = Vec::new();
-        for r in rows { v.push(r?); }
+        for r in rows {
+            v.push(r?);
+        }
         Ok(v)
     }
 
@@ -1565,7 +1638,10 @@ impl Repository {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })?;
         let mut by_p: std::collections::HashMap<String, Vec<i64>> = Default::default();
-        for r in rows { let (p, d) = r?; by_p.entry(p).or_default().push(d); }
+        for r in rows {
+            let (p, d) = r?;
+            by_p.entry(p).or_default().push(d);
+        }
         let mut result = Vec::new();
         for (p, mut ds) in by_p {
             ds.sort();
@@ -1578,7 +1654,11 @@ impl Repository {
                 avg_ms: ds.iter().sum::<i64>() as f64 / n as f64,
             });
         }
-        result.sort_by(|a, b| b.p95_ms.partial_cmp(&a.p95_ms).unwrap_or(std::cmp::Ordering::Equal));
+        result.sort_by(|a, b| {
+            b.p95_ms
+                .partial_cmp(&a.p95_ms)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         Ok(result)
     }
 
@@ -1605,17 +1685,32 @@ impl Repository {
             let outp: i64 = r.get::<_, Option<i64>>(3)?.unwrap_or(0);
             let reqs: i64 = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
             let cached: i64 = r.get::<_, Option<i64>>(5)?.unwrap_or(0);
-            let ratio = if outp > 0 { inp as f64 / outp as f64 } else { 0.0 };
-            let cache_ratio = if inp > 0 { cached as f64 / inp as f64 } else { 0.0 };
+            let ratio = if outp > 0 {
+                inp as f64 / outp as f64
+            } else {
+                0.0
+            };
+            let cache_ratio = if inp > 0 {
+                cached as f64 / inp as f64
+            } else {
+                0.0
+            };
             let waste = ((ratio / 100.0).min(1.0) * 60.0 + (1.0 - cache_ratio) * 40.0).min(100.0);
             Ok(TokenWaste {
-                provider: r.get(0)?, session_id: r.get(1)?,
-                input_tokens: inp, output_tokens: outp, ratio, requests: reqs,
-                cache_read: cached, waste_score: waste,
+                provider: r.get(0)?,
+                session_id: r.get(1)?,
+                input_tokens: inp,
+                output_tokens: outp,
+                ratio,
+                requests: reqs,
+                cache_read: cached,
+                waste_score: waste,
             })
         })?;
         let mut v = Vec::new();
-        for r in rows { v.push(r?); }
+        for r in rows {
+            v.push(r?);
+        }
         Ok(v)
     }
 
@@ -1655,9 +1750,21 @@ impl Repository {
             let cached: i64 = r.get::<_, Option<i64>>(7)?.unwrap_or(0);
             let avg_dur: f64 = r.get::<_, Option<f64>>(8)?.unwrap_or(0.0);
             let sessions: i64 = r.get(9)?;
-            let success_rate = if total > 0 { (total - errors) as f64 / total as f64 * 100.0 } else { 0.0 };
-            let cache_hit = if input > 0 { cached as f64 / input as f64 * 100.0 } else { 0.0 };
-            let cost_per_session = if sessions > 0 { cost / sessions as f64 } else { 0.0 };
+            let success_rate = if total > 0 {
+                (total - errors) as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let cache_hit = if input > 0 {
+                cached as f64 / input as f64 * 100.0
+            } else {
+                0.0
+            };
+            let cost_per_session = if sessions > 0 {
+                cost / sessions as f64
+            } else {
+                0.0
+            };
             let tokens_per_session = if sessions > 0 { tokens / sessions } else { 0 };
             Ok(AgentBenchmark {
                 provider: r.get(0)?,
@@ -1673,7 +1780,9 @@ impl Repository {
             })
         })?;
         let mut v = Vec::new();
-        for r in rows { v.push(r?); }
+        for r in rows {
+            v.push(r?);
+        }
         Ok(v)
     }
 
@@ -1825,7 +1934,8 @@ impl Repository {
                     .unwrap_or(ch_domain::Provider::Unknown),
                 source_session_id: r.get(2)?,
                 tool_name: r.get(3)?,
-                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?)).unwrap_or_else(ch_domain::now_utc),
+                ts: timestamp::from_millis(Some(r.get::<_, i64>(4)?))
+                    .unwrap_or_else(ch_domain::now_utc),
                 read_only: r.get::<_, Option<i64>>(5)?.map(|v| v != 0),
                 destructive: r.get::<_, Option<i64>>(6)?.map(|v| v != 0),
                 approval_status: r.get(7)?,
@@ -2088,9 +2198,8 @@ impl Repository {
     /// 列出会话的所有标签。
     pub fn list_tags(&self, conversation_id: &str) -> StorageResult<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT tag FROM conversation_tags WHERE conversation_id = ? ORDER BY tag",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT tag FROM conversation_tags WHERE conversation_id = ? ORDER BY tag")?;
         let rows = stmt.query_map([conversation_id], |r| r.get::<_, String>(0))?;
         let mut v = Vec::new();
         for r in rows {
@@ -2102,8 +2211,8 @@ impl Repository {
     /// 列出收藏的会话 ID。
     pub fn list_favorite_conversation_ids(&self) -> StorageResult<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT id FROM conversations WHERE favorite = 1 ORDER BY updated_at DESC")?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM conversations WHERE favorite = 1 ORDER BY updated_at DESC")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
         let mut v = Vec::new();
         for r in rows {
@@ -2178,7 +2287,10 @@ impl Repository {
     }
 
     /// 列出某会话的所有历史版本（按版本降序）。
-    pub fn list_knowledge_versions(&self, conversation_id: &str) -> StorageResult<Vec<KnowledgeRecord>> {
+    pub fn list_knowledge_versions(
+        &self,
+        conversation_id: &str,
+    ) -> StorageResult<Vec<KnowledgeRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, version, extractor, result_json, created_at, updated_at
@@ -2276,9 +2388,8 @@ impl Repository {
     /// 列出所有已启用的脱敏规则。
     pub fn list_redaction_rules(&self) -> StorageResult<Vec<RedactionRuleRecord>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, name, pattern, enabled FROM redaction_rules ORDER BY name",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT id, name, pattern, enabled FROM redaction_rules ORDER BY name")?;
         let rows = stmt.query_map([], |r| {
             Ok(RedactionRuleRecord {
                 id: r.get(0)?,
@@ -2780,8 +2891,14 @@ mod tests {
     #[test]
     fn cursor_roundtrip() {
         let r = repo();
-        r.upsert_cursor(Provider::Generic, None, "default", "2026-08-02T00:00:00Z", None)
-            .unwrap();
+        r.upsert_cursor(
+            Provider::Generic,
+            None,
+            "default",
+            "2026-08-02T00:00:00Z",
+            None,
+        )
+        .unwrap();
         let v = r.get_cursor(Provider::Generic, None, "default").unwrap();
         assert_eq!(v.as_deref(), Some("2026-08-02T00:00:00Z"));
 
@@ -3068,12 +3185,16 @@ mod tests {
         r.clear_all().unwrap();
         let conv = ch_domain::Conversation::new(Provider::ZCode, "src-batch-regress");
         let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
-        let id = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000)).unwrap();
+        let id = r
+            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
+            .unwrap();
         let got = r.get_conversation(&id).unwrap().unwrap();
         assert_eq!(got.source_conversation_id, "src-batch-regress");
         assert_eq!(r.list_messages(&id).unwrap().len(), 1);
         // 幂等重放
-        let id2 = r.import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000)).unwrap();
+        let id2 = r
+            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
+            .unwrap();
         assert_eq!(id, id2);
         assert_eq!(r.list_messages(&id).unwrap().len(), 1, "重放不产生重复消息");
     }
@@ -3087,17 +3208,53 @@ mod tests {
         st.insert("s1".to_string(), Some(1000i64));
 
         // 源无更新（同时间/更早）→ 已导入
-        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(1000)));
-        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(900)));
+        assert!(Repository::is_up_to_date(
+            &st,
+            &existing,
+            "prov_zcode",
+            "s1",
+            Some(1000)
+        ));
+        assert!(Repository::is_up_to_date(
+            &st,
+            &existing,
+            "prov_zcode",
+            "s1",
+            Some(900)
+        ));
         // 源有新对话（更新时间更晚）→ 可再导入
-        assert!(!Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", Some(1001)));
+        assert!(!Repository::is_up_to_date(
+            &st,
+            &existing,
+            "prov_zcode",
+            "s1",
+            Some(1001)
+        ));
         // 源时间未知 → 退化存在性
-        assert!(Repository::is_up_to_date(&st, &existing, "prov_zcode", "s1", None));
+        assert!(Repository::is_up_to_date(
+            &st,
+            &existing,
+            "prov_zcode",
+            "s1",
+            None
+        ));
         // 不存在 → 未导入
-        assert!(!Repository::is_up_to_date(&st, &existing, "prov_zcode", "s2", Some(1)));
+        assert!(!Repository::is_up_to_date(
+            &st,
+            &existing,
+            "prov_zcode",
+            "s2",
+            Some(1)
+        ));
         // 无观察记录（历史遗留）→ 存在即已导入
         let st2: HashMap<String, Option<i64>> = HashMap::new();
-        assert!(Repository::is_up_to_date(&st2, &existing, "prov_zcode", "s1", Some(9999)));
+        assert!(Repository::is_up_to_date(
+            &st2,
+            &existing,
+            "prov_zcode",
+            "s1",
+            Some(9999)
+        ));
     }
 
     #[test]

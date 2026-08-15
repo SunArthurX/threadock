@@ -5,7 +5,10 @@ use std::time::Instant;
 fn main() {
     let home = std::env::var("HOME").unwrap();
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
-    let st = DaemonState::open(DaemonStateConfig { data_dir: dir.into() }).unwrap();
+    let st = DaemonState::open(DaemonStateConfig {
+        data_dir: dir.into(),
+    })
+    .unwrap();
     let repo = st.repo.lock().unwrap();
 
     let t = Instant::now();

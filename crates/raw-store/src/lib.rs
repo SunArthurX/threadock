@@ -249,7 +249,10 @@ mod tests {
         assert_eq!(payload.hash, expected);
         assert_eq!(payload.hash.len(), 64);
         // hex 字符，且全小写
-        assert!(payload.hash.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert!(payload
+            .hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
@@ -313,7 +316,9 @@ mod tests {
     fn invalid_hash_rejected() {
         let (_dir, store) = store();
         assert!(store.get("short").is_err());
-        assert!(store.get("z00000000000000000000000000000000000000000000000000000000000000").is_err()); // 非 hex
+        assert!(store
+            .get("z00000000000000000000000000000000000000000000000000000000000000")
+            .is_err()); // 非 hex
         assert!(store.exists("bad").is_err());
     }
 

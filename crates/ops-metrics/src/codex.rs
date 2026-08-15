@@ -41,16 +41,12 @@ pub fn collect_codex_session(
             continue;
         };
         seq += 1;
-        let ts = rec
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .and_then(|s| {
-                time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
-            });
+        let ts = rec.get("timestamp").and_then(|v| v.as_str()).and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        });
 
         // session_meta.cwd（归因）
-        if rec.get("type").and_then(|v| v.as_str()) == Some("session_meta")
-            && source_dir.is_none()
+        if rec.get("type").and_then(|v| v.as_str()) == Some("session_meta") && source_dir.is_none()
         {
             source_dir = rec
                 .pointer("/payload/cwd")
@@ -66,11 +62,12 @@ pub fn collect_codex_session(
                             ts.unwrap_or_else(ch_domain::now_utc),
                             u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
                             u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                            u
-                                .get("reasoning_output_tokens")
+                            u.get("reasoning_output_tokens")
                                 .and_then(|v| v.as_i64())
                                 .unwrap_or(0),
-                            u.get("cached_input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
+                            u.get("cached_input_tokens")
+                                .and_then(|v| v.as_i64())
+                                .unwrap_or(0),
                         ));
                     }
                 }
@@ -135,17 +132,16 @@ pub fn collect_codex_session(
 fn extract_cmd_from_args(name: &str, args: &str) -> Option<String> {
     if name == "exec_command" || name == "shell" {
         let v: serde_json::Value = serde_json::from_str(args).unwrap_or_default();
-        return v
-            .get("cmd")
-            .and_then(|c| c.as_str())
-            .map(|s| s.to_string());
+        return v.get("cmd").and_then(|c| c.as_str()).map(|s| s.to_string());
     }
     None
 }
 
 /// 采集整个 ~/.codex（sessions/ + archived_sessions/）。
 /// 文件级并行（按 CPU 数分片，封顶 8 线程）：114 个文件从串行 ~6.5s 降至 ~1s。
-pub fn collect_codex(codex_home: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
+pub fn collect_codex(
+    codex_home: impl AsRef<Path>,
+) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
     let home = codex_home.as_ref();
     let mut files = Vec::new();
     scan_jsonl(&home.join("sessions"), &mut files);
@@ -188,7 +184,10 @@ pub fn collect_codex(codex_home: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord
             });
         }
     });
-    Ok((all_usage.into_inner().unwrap(), all_tools.into_inner().unwrap()))
+    Ok((
+        all_usage.into_inner().unwrap(),
+        all_tools.into_inner().unwrap(),
+    ))
 }
 
 fn scan_jsonl(dir: &Path, out: &mut Vec<std::path::PathBuf>) {

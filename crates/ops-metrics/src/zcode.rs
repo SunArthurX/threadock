@@ -13,7 +13,9 @@ use std::path::Path;
 
 /// 采集 ZCode 用量（model_usage 请求级）+ 工具调用。
 /// 返回 (usage, tool_calls)。库不存在时返回空（静默）。
-pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
+pub fn collect_zcode(
+    db_path: impl AsRef<Path>,
+) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
     if !db_path.as_ref().exists() {
         return Ok((Vec::new(), Vec::new()));
     }
@@ -66,7 +68,12 @@ pub fn collect_zcode(db_path: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, 
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(ToolCallRecord {
-                id: format!("zt_{}_{}_{}", r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?),
+                id: format!(
+                    "zt_{}_{}_{}",
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?
+                ),
                 provider: Provider::ZCode,
                 source_session_id: r.get(0)?,
                 tool_name: r.get(1)?,
@@ -121,11 +128,8 @@ mod tests {
             [],
         )
         .unwrap();
-        conn.execute(
-            "INSERT INTO session VALUES ('s1','/tmp/proj')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO session VALUES ('s1','/tmp/proj')", [])
+            .unwrap();
         conn.execute(
             "INSERT INTO tool_usage VALUES ('s1','Bash',1000000,0,1,'none',0,300,'completed')",
             [],

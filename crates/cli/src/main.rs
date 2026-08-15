@@ -52,12 +52,11 @@ fn run() -> Result<()> {
         .filter(|p| !p.as_os_str().is_empty())
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
-    let raw_store = ch_raw_store::RawStore::new(&data_dir)
-        .context("open raw store")?;
+    let raw_store = ch_raw_store::RawStore::new(&data_dir).context("open raw store")?;
 
     // Tantivy 索引：与数据库同目录下的 index/（plan §9.5/§13）
-    let search_index = ch_search::SearchIndex::open(data_dir.join("index"))
-        .context("open search index")?;
+    let search_index =
+        ch_search::SearchIndex::open(data_dir.join("index")).context("open search index")?;
 
     // 把 String slice 转成 &str 方便字面量匹配
     let sub_str: Vec<&str> = sub.iter().map(|s| s.as_str()).collect();
@@ -224,7 +223,12 @@ fn run() -> Result<()> {
                 println!("(no custom rules)");
             } else {
                 for r in rules {
-                    println!("  {} = {} ({})", r.name, r.pattern, if r.enabled { "on" } else { "off" });
+                    println!(
+                        "  {} = {} ({})",
+                        r.name,
+                        r.pattern,
+                        if r.enabled { "on" } else { "off" }
+                    );
                 }
             }
         }
@@ -242,7 +246,10 @@ fn run() -> Result<()> {
                 data_dir: data_dir.clone(),
             })
             .context("open daemon state")?;
-            eprintln!("Conversation Hub daemon listening on stdio (data: {})", data_dir.display());
+            eprintln!(
+                "Conversation Hub daemon listening on stdio (data: {})",
+                data_dir.display()
+            );
             ch_daemon::serve_stdio(
                 &state,
                 std::io::stdin().lock(),
@@ -339,17 +346,17 @@ fn show_conversation(repo: &ch_storage::Repository, id: &str) -> Result<()> {
     }
     println!("\n--- Messages ---");
     for m in repo.list_messages(id).context("list messages")? {
-        println!("[{}] {}", m.role, m.content_text.as_deref().unwrap_or("(empty)"));
+        println!(
+            "[{}] {}",
+            m.role,
+            m.content_text.as_deref().unwrap_or("(empty)")
+        );
     }
     let events = repo.list_events(id).context("list events")?;
     if !events.is_empty() {
         println!("\n--- Events ---");
         for e in events {
-            println!(
-                "[{}] {}",
-                e.event_type,
-                e.summary.as_deref().unwrap_or("")
-            );
+            println!("[{}] {}", e.event_type, e.summary.as_deref().unwrap_or(""));
         }
     }
     Ok(())
@@ -391,8 +398,8 @@ fn import_from_claude_code(
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let claude_home = format!("{home}/.claude");
     // 找到对应文件
-    let sessions = ch_adapter_claude_code::discover_sessions(&claude_home)
-        .context("discover sessions")?;
+    let sessions =
+        ch_adapter_claude_code::discover_sessions(&claude_home).context("discover sessions")?;
     let session = sessions
         .into_iter()
         .find(|s| s.session_id == session_id)
@@ -400,7 +407,13 @@ fn import_from_claude_code(
 
     let raw = ch_adapter_claude_code::parse_session(&session.file_path)
         .context("parse claude code session")?;
-    let summary = import_raw(repo, search_index, raw_store, raw, Some(&session.project_dir))?;
+    let summary = import_raw(
+        repo,
+        search_index,
+        raw_store,
+        raw,
+        Some(&session.project_dir),
+    )?;
     println!("✓ 从 Claude Code 导入成功");
     print_summary(&summary);
     Ok(())
@@ -410,8 +423,8 @@ fn import_from_claude_code(
 fn list_zcode_sessions() -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
-    let sessions = ch_adapter_zcode::discover_sessions(&db_path)
-        .context("discover zcode sessions")?;
+    let sessions =
+        ch_adapter_zcode::discover_sessions(&db_path).context("discover zcode sessions")?;
     if sessions.is_empty() {
         println!("（未找到 ZCode 会话，检查 ~/.zcode/cli/db/db.sqlite 是否存在）");
         return Ok(());
@@ -419,10 +432,7 @@ fn list_zcode_sessions() -> Result<()> {
     println!("找到 {} 个 ZCode 会话：", sessions.len());
     println!("{:<42} {:>6} TITLE", "SESSION_ID", "MSGS");
     for s in sessions.iter().take(50) {
-        println!(
-            "{:<42} {:>6} {}",
-            s.session_id, s.message_count, s.title,
-        );
+        println!("{:<42} {:>6} {}", s.session_id, s.message_count, s.title,);
     }
     if sessions.len() > 50 {
         println!("...（仅显示前 50，共 {} 个）", sessions.len());
@@ -439,8 +449,8 @@ fn import_from_zcode(
 ) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
-    let raw = ch_adapter_zcode::parse_session(&db_path, session_id)
-        .context("parse zcode session")?;
+    let raw =
+        ch_adapter_zcode::parse_session(&db_path, session_id).context("parse zcode session")?;
     let summary = import_raw(repo, search_index, raw_store, raw, None)?;
     println!("✓ 从 ZCode 导入成功");
     print_summary(&summary);
@@ -476,7 +486,9 @@ fn import_raw(
     let mut conv = normalized.conversation;
     conv.workspace_id = workspace_id.clone();
     conv.raw_payload_id = Some(raw_payload.hash.clone());
-    let conversation_id = repo.upsert_conversation(&conv).context("upsert conversation")?;
+    let conversation_id = repo
+        .upsert_conversation(&conv)
+        .context("upsert conversation")?;
 
     for m in &normalized.messages {
         let mut m = m.clone();
@@ -588,7 +600,11 @@ fn run_tantivy_search(index: &ch_search::SearchIndex, args: &[&str]) -> Result<(
         println!("(no matches via Tantivy)");
         return Ok(());
     }
-    println!("Tantivy found {} match(es) for {:?}:", hits.len(), query_str);
+    println!(
+        "Tantivy found {} match(es) for {:?}:",
+        hits.len(),
+        query_str
+    );
     println!("{:-<80}", "");
     for (idx, h) in hits.iter().enumerate() {
         println!(
@@ -651,10 +667,7 @@ fn run_search(repo: &ch_storage::Repository, args: &[&str]) -> Result<()> {
         return Ok(());
     }
     println!("Found {} match(es) for {:?}:", results.len(), query_str);
-    println!(
-        "{:-<80}",
-        ""
-    );
+    println!("{:-<80}", "");
     for (idx, sr) in results.iter().enumerate() {
         println!(
             "{}. [{}] {} | {}",
@@ -767,11 +780,14 @@ fn find_similar_cli(repo: &ch_storage::Repository, conversation_id: &str) -> Res
 
 /// 显示已保存的知识提取结果（plan §13.5 读取持久化版本）。
 fn show_saved_knowledge(repo: &ch_storage::Repository, conversation_id: &str) -> Result<()> {
-    let rec = repo
-        .get_knowledge(conversation_id)?
-        .ok_or_else(|| anyhow::anyhow!("未找到已保存的知识提取，先运行 `ch knowledge <id> --save`"))?;
+    let rec = repo.get_knowledge(conversation_id)?.ok_or_else(|| {
+        anyhow::anyhow!("未找到已保存的知识提取，先运行 `ch knowledge <id> --save`")
+    })?;
     let result: ch_knowledge::ExtractionResult = serde_json::from_str(&rec.result_json)?;
-    println!("=== 已保存的知识提取（版本 {}，提取器 {}）===", rec.version, rec.extractor);
+    println!(
+        "=== 已保存的知识提取（版本 {}，提取器 {}）===",
+        rec.version, rec.extractor
+    );
     println!();
     print_extraction_result(&result);
     Ok(())
@@ -848,7 +864,9 @@ fn print_usage() {
     eprintln!("  list   [--workspace <id>] [--favorite] [--archived] [--provider <p>]  List/filter conversations");
     eprintln!("  show   <conversation-id>                Show conversation detail");
     eprintln!("  search <keyword...> [--provider <p>] [--workspace <id>]  Full-text search (FTS5)");
-    eprintln!("  search-tantivy <keyword...> [--provider <p>]            Full-text search (Tantivy)");
+    eprintln!(
+        "  search-tantivy <keyword...> [--provider <p>]            Full-text search (Tantivy)"
+    );
     eprintln!("  export markdown <id> <out.md>           Export conversation to Markdown");
     eprintln!("  export json <id> <out.json>             Export conversation to JSON");
     eprintln!("  export workspace <id> <out-dir>         Export all conversations in a workspace");
@@ -861,7 +879,9 @@ fn print_usage() {
     eprintln!("  tags <id>                               List tags");
     eprintln!("  favorites                               List favorite conversation ids");
     eprintln!("  archive <id>                            Archive conversation");
-    eprintln!("  delete <id> [--hard]                    Soft/hard delete conversation (plan §11.4)");
+    eprintln!(
+        "  delete <id> [--hard]                    Soft/hard delete conversation (plan §11.4)"
+    );
     eprintln!("  undelete <id>                           Restore soft-deleted conversation");
     eprintln!("  integrity                               Run SQLite integrity check");
     eprintln!("  knowledge <id> [--save|--show]          Extract/save/show knowledge (plan §13.5)");

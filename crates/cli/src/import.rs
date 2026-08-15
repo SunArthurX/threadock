@@ -64,9 +64,7 @@ pub fn import_markdown(
     // 可选 workspace：用身份解析器（plan §4.3）决定归并到已有还是新建。
     // 候选用：显示名 + 源文件父目录作为 canonical_path。
     let workspace_id = if let Some(name) = workspace_name {
-        let parent_path = path_ref
-            .parent()
-            .map(|p| p.to_string_lossy().into_owned());
+        let parent_path = path_ref.parent().map(|p| p.to_string_lossy().into_owned());
         let mut candidate = ch_identity_resolver::SourceWorkspaceCandidate::new(name);
         candidate.canonical_path = parent_path.clone();
 
@@ -88,7 +86,9 @@ pub fn import_markdown(
         let resolution = ch_identity_resolver::resolve(&candidate, &known);
         match resolution {
             ch_identity_resolver::Resolution::AutoMerge(m) => Some(m.workspace_id),
-            ch_identity_resolver::Resolution::NeedsConfirmation { candidate: Some(m), .. } => {
+            ch_identity_resolver::Resolution::NeedsConfirmation {
+                candidate: Some(m), ..
+            } => {
                 // plan §4.3：低置信度匹配（名称相似度）需用户确认。
                 // CLI 模式无法交互确认，明确打印提示后仍按最佳候选归并；
                 // 用户可用 `ch list --workspace` 检查，或用不同 --workspace 名避免误并。
@@ -103,7 +103,9 @@ pub fn import_markdown(
                 eprintln!("  如需避免，请重新导入时使用不同的 --workspace 名称，或先手动调整。");
                 Some(m.workspace_id)
             }
-            ch_identity_resolver::Resolution::NeedsConfirmation { candidate: None, .. }
+            ch_identity_resolver::Resolution::NeedsConfirmation {
+                candidate: None, ..
+            }
             | ch_identity_resolver::Resolution::CreateNew => {
                 // 新建统一 workspace
                 let mut ws = ch_domain::Workspace::new(name);
@@ -217,7 +219,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(conv.title.as_deref(), Some("测试会话"));
-        assert_eq!(repo.list_messages(&summary.conversation_id).unwrap().len(), 2);
+        assert_eq!(
+            repo.list_messages(&summary.conversation_id).unwrap().len(),
+            2
+        );
         assert_eq!(repo.list_events(&summary.conversation_id).unwrap().len(), 1);
     }
 
@@ -230,7 +235,10 @@ mod tests {
         let s1 = import_markdown(&repo, None, f.path(), None).unwrap();
         let s2 = import_markdown(&repo, None, f.path(), None).unwrap();
 
-        assert_eq!(s1.conversation_id, s2.conversation_id, "same conversation id");
+        assert_eq!(
+            s1.conversation_id, s2.conversation_id,
+            "same conversation id"
+        );
         assert_eq!(repo.count_conversations().unwrap(), 1);
         assert_eq!(repo.list_messages(&s1.conversation_id).unwrap().len(), 2);
     }
@@ -255,7 +263,10 @@ mod tests {
         let summary = import_markdown(&repo, None, f.path(), None).unwrap();
         assert!(summary.workspace_id.is_none());
 
-        let conv = repo.get_conversation(&summary.conversation_id).unwrap().unwrap();
+        let conv = repo
+            .get_conversation(&summary.conversation_id)
+            .unwrap()
+            .unwrap();
         assert!(conv.workspace_id.is_none());
     }
 
@@ -309,7 +320,10 @@ mod tests {
         assert_eq!(hash.len(), 64);
 
         // conversation 入库后 raw_payload_id 指回 Raw Store
-        let conv = repo.get_conversation(&summary.conversation_id).unwrap().unwrap();
+        let conv = repo
+            .get_conversation(&summary.conversation_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(conv.raw_payload_id.as_deref(), Some(hash.as_str()));
 
         // Raw Store 里能读回原始内容
@@ -327,9 +341,15 @@ mod tests {
         let summary = import_markdown(&repo, None, f.path(), None).unwrap();
         assert!(summary.raw_payload_id.is_none());
 
-        let conv = repo.get_conversation(&summary.conversation_id).unwrap().unwrap();
+        let conv = repo
+            .get_conversation(&summary.conversation_id)
+            .unwrap()
+            .unwrap();
         assert!(conv.raw_payload_id.is_none());
-        assert_eq!(repo.list_messages(&summary.conversation_id).unwrap().len(), 2);
+        assert_eq!(
+            repo.list_messages(&summary.conversation_id).unwrap().len(),
+            2
+        );
     }
 
     #[test]
@@ -366,7 +386,10 @@ mod tests {
         assert_eq!(summary.messages_imported, 2);
         assert_eq!(summary.events_imported, 1);
 
-        let conv = repo.get_conversation(&summary.conversation_id).unwrap().unwrap();
+        let conv = repo
+            .get_conversation(&summary.conversation_id)
+            .unwrap()
+            .unwrap();
         assert_eq!(conv.title.as_deref(), Some("JSONL 会话"));
         assert_eq!(conv.model.as_deref(), Some("gpt-test"));
     }

@@ -29,5 +29,9 @@ fn main() {
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    serve_stdio(&state, stdin.lock(), &mut std::io::BufWriter::new(stdout.lock()));
+    serve_stdio(
+        &state,
+        stdin.lock(),
+        &mut std::io::BufWriter::new(stdout.lock()),
+    );
 }

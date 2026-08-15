@@ -67,7 +67,8 @@ fn migrations() -> Vec<Migration> {
             version: 9,
             description: "CodeAgentOps M6-M9: assets/automations/usage attribution",
             sql: crate::schema::SCHEMA_V9,
-        },        Migration {
+        },
+        Migration {
             version: 10,
             description: "import freshness state (stale-import detection)",
             sql: crate::schema::SCHEMA_V10,
@@ -89,9 +90,7 @@ pub fn current_version(conn: &Connection) -> StorageResult<u32> {
         return Ok(0);
     }
     let v: Option<i64> = conn
-        .query_row("SELECT MAX(version) FROM schema_version", [], |r| {
-            r.get(0)
-        })
+        .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
         .unwrap_or(None);
     Ok(v.map(|v| v as u32).unwrap_or(0))
 }
@@ -127,12 +126,10 @@ pub fn migrate_to(conn: &mut Connection, target: u32) -> StorageResult<()> {
 }
 
 fn apply_migration(conn: &mut Connection, m: &Migration) -> StorageResult<()> {
-    let tx = conn
-        .transaction()
-        .map_err(|e| StorageError::Migration {
-            version: m.version,
-            reason: format!("begin tx: {e}"),
-        })?;
+    let tx = conn.transaction().map_err(|e| StorageError::Migration {
+        version: m.version,
+        reason: format!("begin tx: {e}"),
+    })?;
 
     // 逐条执行 SQL 语句（按 ; 分割），允许注释和空段
     for stmt in split_sql_statements(m.sql) {
@@ -148,7 +145,10 @@ fn apply_migration(conn: &mut Connection, m: &Migration) -> StorageResult<()> {
     // 记录版本
     tx.execute(
         "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
-        rusqlite::params![m.version as i64, crate::timestamp::to_millis(Some(now_utc())).unwrap()],
+        rusqlite::params![
+            m.version as i64,
+            crate::timestamp::to_millis(Some(now_utc())).unwrap()
+        ],
     )
     .map_err(|e| StorageError::Migration {
         version: m.version,
@@ -159,7 +159,11 @@ fn apply_migration(conn: &mut Connection, m: &Migration) -> StorageResult<()> {
         version: m.version,
         reason: format!("commit: {e}"),
     })?;
-    tracing::info!(version = m.version, desc = m.description, "migration applied");
+    tracing::info!(
+        version = m.version,
+        desc = m.description,
+        "migration applied"
+    );
     Ok(())
 }
 
@@ -300,7 +304,7 @@ mod tests {
             "events",
             "sync_cursors",
             "audit_logs",
-            "conversation_tags", // V2
+            "conversation_tags",     // V2
             "knowledge_extractions", // V3
             "redaction_rules",       // V4
         ] {
@@ -321,7 +325,11 @@ mod tests {
             "messages_ad_fts",
             "messages_au_fts",
         ] {
-            let kind = if obj == "messages_fts" { "table" } else { "trigger" };
+            let kind = if obj == "messages_fts" {
+                "table"
+            } else {
+                "trigger"
+            };
             let n: i64 = conn
                 .query_row(
                     "SELECT count(*) FROM sqlite_master WHERE type=? AND name=?",
@@ -352,9 +360,8 @@ mod tests {
 
     #[test]
     fn split_sql_handles_comments_and_blanks() {
-        let stmts = split_sql_statements(
-            "-- a comment\nCREATE TABLE x (a INT); -- trailing\n\nSELECT 1;",
-        );
+        let stmts =
+            split_sql_statements("-- a comment\nCREATE TABLE x (a INT); -- trailing\n\nSELECT 1;");
         assert_eq!(stmts.len(), 2);
         assert!(stmts[0].contains("CREATE TABLE x"));
         assert!(!stmts[0].contains("--"));

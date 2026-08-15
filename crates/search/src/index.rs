@@ -5,9 +5,7 @@ use ch_domain::{Provider, Role};
 use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
-use tantivy::schema::{
-    Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value,
-};
+use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value};
 use tantivy::tokenizer::{LowerCaser, NgramTokenizer, SimpleTokenizer, TextAnalyzer};
 use tantivy::{doc, Index as TantivyIndex, IndexReader, IndexWriter, ReloadPolicy};
 
@@ -160,7 +158,11 @@ impl SearchIndex {
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()
             .map_err(|e| SearchError::Tantivy(e.to_string()))?;
-        Ok(Self { index, reader, fields })
+        Ok(Self {
+            index,
+            reader,
+            fields,
+        })
     }
 
     /// 创建内存索引（主要用于测试）。
@@ -173,7 +175,11 @@ impl SearchIndex {
             .reload_policy(ReloadPolicy::Manual)
             .try_into()
             .map_err(|e| SearchError::Tantivy(e.to_string()))?;
-        Ok(Self { index, reader, fields })
+        Ok(Self {
+            index,
+            reader,
+            fields,
+        })
     }
 
     /// 创建一个 writer（调用方负责 commit）。
@@ -184,15 +190,12 @@ impl SearchIndex {
     }
 
     /// 索引一条消息（自动按 message_id 删除旧版本后插入，保证幂等）。
-    pub fn index_message(
-        &self,
-        writer: &mut IndexWriter,
-        m: &IndexableMessage,
-    ) -> LibResult<()> {
+    pub fn index_message(&self, writer: &mut IndexWriter, m: &IndexableMessage) -> LibResult<()> {
         // 先删旧
-        let _ = writer.delete_term(
-            tantivy::Term::from_field_text(self.fields.message_id, &m.message_id),
-        );
+        let _ = writer.delete_term(tantivy::Term::from_field_text(
+            self.fields.message_id,
+            &m.message_id,
+        ));
         let f = &self.fields;
         let mut doc = doc!(
             f.message_id => m.message_id.as_str(),
@@ -273,7 +276,8 @@ impl SearchIndex {
                 .doc(doc_addr)
                 .map_err(|e| SearchError::Tantivy(e.to_string()))?;
             let get = |field: Field| -> Option<String> {
-                doc.get_first(field).and_then(|v| v.as_str().map(|s| s.to_string()))
+                doc.get_first(field)
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
             };
             let provider_str = get(f.provider).unwrap_or_default();
             let role_str = get(f.role).unwrap_or_default();
@@ -300,14 +304,18 @@ impl SearchIndex {
     where
         F: FnOnce(&mut IndexWriter) -> LibResult<usize>,
     {
-        writer.delete_all_documents().map_err(|e| SearchError::Tantivy(e.to_string()))?;
+        writer
+            .delete_all_documents()
+            .map_err(|e| SearchError::Tantivy(e.to_string()))?;
         reindex(writer)
     }
 
     /// 清空所有索引文档（用于「重置数据」）。
     pub fn clear_all(&self) -> LibResult<()> {
         let writer = self.writer(15_000_000)?;
-        writer.delete_all_documents().map_err(|e| SearchError::Tantivy(e.to_string()))?;
+        writer
+            .delete_all_documents()
+            .map_err(|e| SearchError::Tantivy(e.to_string()))?;
         self.commit(writer)?;
         Ok(())
     }
@@ -438,7 +446,12 @@ mod tests {
         let idx = SearchIndex::open_in_memory().unwrap();
         index_samples(
             &idx,
-            &[msg("m1", "c1", "后台任务", "讨论 Android 后台任务的实现方案")],
+            &[msg(
+                "m1",
+                "c1",
+                "后台任务",
+                "讨论 Android 后台任务的实现方案",
+            )],
         );
         // 中文双字查询
         let hits = idx.search(&SearchQuery::new("后台任务")).unwrap();

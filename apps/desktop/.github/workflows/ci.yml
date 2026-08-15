@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust Tests & Lints
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Clippy (tauri)
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test (workspace)
+        run: cargo test --workspace
+
+  frontend:
+    name: Frontend Build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: TypeScript check
+        working-directory: apps/desktop
+        run: npx tsc --noEmit
+
+      - name: Vite build
+        working-directory: apps/desktop
+        run: npx vite build
+
+  tauri-build:
+    name: Tauri Build
+    runs-on: macos-latest
+    needs: [rust, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Build Tauri app
+        working-directory: apps/desktop
+        run: npx tauri build --debug
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ""

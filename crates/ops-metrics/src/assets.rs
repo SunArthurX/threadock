@@ -27,7 +27,9 @@ fn risky_hits(text: &str) -> i64 {
     patterns
         .iter()
         .filter(|p| {
-            regex::Regex::new(p).map(|re| re.is_match(text)).unwrap_or(false)
+            regex::Regex::new(p)
+                .map(|re| re.is_match(text))
+                .unwrap_or(false)
         })
         .count() as i64
 }
@@ -160,15 +162,22 @@ pub fn collect_agent_assets(home: &Path, provider: Provider) -> OpsResult<Vec<As
         Provider::ClaudeCode => {
             scan_skills_dir(&home.join(".claude/skills"), provider, "skill", &mut out);
             // installed_plugins.json：{plugins: {"name@market":[{version,installedAt,scope}]}}
-            if let Ok(txt) = std::fs::read_to_string(home.join(".claude/plugins/installed_plugins.json")) {
+            if let Ok(txt) =
+                std::fs::read_to_string(home.join(".claude/plugins/installed_plugins.json"))
+            {
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                     if let Some(map) = v.pointer("/plugins").and_then(|p| p.as_object()) {
                         for (full_name, installs) in map {
-                            let (name, ver, at) = match installs.as_array().and_then(|a| a.first()) {
+                            let (name, ver, at) = match installs.as_array().and_then(|a| a.first())
+                            {
                                 Some(inst) => (
                                     full_name.split('@').next().unwrap_or(full_name).to_string(),
-                                    inst.get("version").and_then(|x| x.as_str()).map(|s| s.to_string()),
-                                    inst.get("installedAt").and_then(|x| x.as_str()).map(|s| s.to_string()),
+                                    inst.get("version")
+                                        .and_then(|x| x.as_str())
+                                        .map(|s| s.to_string()),
+                                    inst.get("installedAt")
+                                        .and_then(|x| x.as_str())
+                                        .map(|s| s.to_string()),
                                 ),
                                 None => (full_name.clone(), None, None),
                             };
@@ -195,7 +204,12 @@ pub fn collect_agent_assets(home: &Path, provider: Provider) -> OpsResult<Vec<As
         }
         Provider::MinimaxCode => {
             scan_skills_dir(&home.join(".minimax/skills"), provider, "skill", &mut out);
-            scan_skills_dir(&home.join(".minimax/.builtin-skills"), provider, "builtin_skill", &mut out);
+            scan_skills_dir(
+                &home.join(".minimax/.builtin-skills"),
+                provider,
+                "builtin_skill",
+                &mut out,
+            );
         }
         _ => {}
     }
@@ -262,6 +276,8 @@ mod tests {
         std::fs::create_dir_all(&sk).unwrap();
         std::fs::write(sk.join("SKILL.md"), "---\nname: docx\n---\n内容").unwrap();
         let recs = collect_agent_assets(dir.path(), Provider::MinimaxCode).unwrap();
-        assert!(recs.iter().any(|r| r.kind == "builtin_skill" && r.name == "docx"));
+        assert!(recs
+            .iter()
+            .any(|r| r.kind == "builtin_skill" && r.name == "docx"));
     }
 }

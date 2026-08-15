@@ -37,7 +37,11 @@ fn dispatch(state: &DaemonState, line: &str) -> JsonRpcResponse {
     let req: JsonRpcRequest = match serde_json::from_str(line) {
         Ok(r) => r,
         Err(e) => {
-            return JsonRpcResponse::err(serde_json::Value::Null, -32700, format!("parse error: {e}"))
+            return JsonRpcResponse::err(
+                serde_json::Value::Null,
+                -32700,
+                format!("parse error: {e}"),
+            )
         }
     };
     let id = req.id.unwrap_or(serde_json::Value::Null);
@@ -57,9 +61,7 @@ fn dispatch(state: &DaemonState, line: &str) -> JsonRpcResponse {
         "knowledge.get" => handle_get_knowledge(state, req.params),
         "search.query" => handle_search(state, req.params),
         "provider.sync" => handle_sync(state, req.params),
-        other => {
-            return JsonRpcResponse::err(id, -32601, format!("method not found: {other}"))
-        }
+        other => return JsonRpcResponse::err(id, -32601, format!("method not found: {other}")),
     };
 
     match result {
@@ -146,15 +148,16 @@ fn handle_delete(
     state: &DaemonState,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let p: DeleteParams =
-        serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
+    let p: DeleteParams = serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     if p.hard.unwrap_or(false) {
-        repo.hard_delete_conversation(&p.id).map_err(|e| e.to_string())?;
+        repo.hard_delete_conversation(&p.id)
+            .map_err(|e| e.to_string())?;
         serde_json::to_value(serde_json::json!({"id": p.id, "deleted": true, "hard": true}))
             .map_err(|e| e.to_string())
     } else {
-        repo.soft_delete_conversation(&p.id).map_err(|e| e.to_string())?;
+        repo.soft_delete_conversation(&p.id)
+            .map_err(|e| e.to_string())?;
         serde_json::to_value(serde_json::json!({"id": p.id, "deleted": true, "hard": false}))
             .map_err(|e| e.to_string())
     }
@@ -165,10 +168,10 @@ fn handle_restore(
     state: &DaemonState,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let p: DeleteParams =
-        serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
+    let p: DeleteParams = serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.restore_conversation(&p.id).map_err(|e| e.to_string())?;
+    repo.restore_conversation(&p.id)
+        .map_err(|e| e.to_string())?;
     serde_json::to_value(serde_json::json!({"id": p.id, "restored": true}))
         .map_err(|e| e.to_string())
 }
@@ -196,7 +199,9 @@ fn handle_similar(
         .get_conversation(&p.conversation_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("conversation not found: {}", p.conversation_id))?;
-    let target_msgs = repo.list_messages(&p.conversation_id).map_err(|e| e.to_string())?;
+    let target_msgs = repo
+        .list_messages(&p.conversation_id)
+        .map_err(|e| e.to_string())?;
     let target = ch_knowledge::conversation_text(
         &p.conversation_id,
         Some(target_conv.effective_title()),
@@ -243,7 +248,9 @@ fn handle_list_messages(
     let p: ListMessagesParams =
         serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    let msgs: Vec<Message> = repo.list_messages(&p.conversation_id).map_err(|e| e.to_string())?;
+    let msgs: Vec<Message> = repo
+        .list_messages(&p.conversation_id)
+        .map_err(|e| e.to_string())?;
     serde_json::to_value(&msgs).map_err(|e| e.to_string())
 }
 
@@ -259,7 +266,9 @@ fn handle_list_events(
     let p: ListEventsParams =
         serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    let events = repo.list_events(&p.conversation_id).map_err(|e| e.to_string())?;
+    let events = repo
+        .list_events(&p.conversation_id)
+        .map_err(|e| e.to_string())?;
     serde_json::to_value(&events).map_err(|e| e.to_string())
 }
 
@@ -280,8 +289,12 @@ fn handle_extract(
         .get_conversation(&p.conversation_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("conversation not found: {}", p.conversation_id))?;
-    let messages = repo.list_messages(&p.conversation_id).map_err(|e| e.to_string())?;
-    let events = repo.list_events(&p.conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo
+        .list_messages(&p.conversation_id)
+        .map_err(|e| e.to_string())?;
+    let events = repo
+        .list_events(&p.conversation_id)
+        .map_err(|e| e.to_string())?;
     let input = ch_knowledge::ExtractionInput {
         title: Some(conv.effective_title().to_string()),
         messages,
@@ -309,8 +322,7 @@ fn handle_save_knowledge(
     let id = repo
         .save_knowledge(&p.conversation_id, &p.result.extractor, &json)
         .map_err(|e| e.to_string())?;
-    serde_json::to_value(serde_json::json!({"id": id, "saved": true}))
-        .map_err(|e| e.to_string())
+    serde_json::to_value(serde_json::json!({"id": id, "saved": true})).map_err(|e| e.to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -351,8 +363,7 @@ fn handle_search(
     state: &DaemonState,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let p: SearchParams =
-        serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
+    let p: SearchParams = serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
 
     let engine = p.engine.as_deref().unwrap_or("tantivy");
     match engine {
@@ -381,9 +392,11 @@ struct SyncParams {
 }
 
 /// 导入一个文件（plan §8.3 完整流水线）：归档 raw → 解析 → 标准化 → 入库 → 索引。
-fn handle_sync(state: &DaemonState, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    let p: SyncParams =
-        serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
+fn handle_sync(
+    state: &DaemonState,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let p: SyncParams = serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
     let path = Path::new(&p.path);
 
     // 1. Raw 归档
@@ -423,7 +436,9 @@ fn handle_sync(state: &DaemonState, params: serde_json::Value) -> Result<serde_j
     // 4. 索引（Tantivy）
     let idx = state.search_index.lock().map_err(|e| e.to_string())?;
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo
+        .list_messages(&conversation_id)
+        .map_err(|e| e.to_string())?;
     drop(repo);
     let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
     for m in &messages {
@@ -436,7 +451,8 @@ fn handle_sync(state: &DaemonState, params: serde_json::Value) -> Result<serde_j
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
         };
-        idx.index_message(&mut writer, &im).map_err(|e| e.to_string())?;
+        idx.index_message(&mut writer, &im)
+            .map_err(|e| e.to_string())?;
     }
     idx.commit(writer).map_err(|e| e.to_string())?;
 
@@ -502,9 +518,9 @@ fn resolve_workspace(
     let resolution = ch_identity_resolver::resolve(&candidate, &known);
     match resolution {
         ch_identity_resolver::Resolution::AutoMerge(m) => Ok(Some(m.workspace_id)),
-        ch_identity_resolver::Resolution::NeedsConfirmation { candidate: Some(m), .. } => {
-            Ok(Some(m.workspace_id))
-        }
+        ch_identity_resolver::Resolution::NeedsConfirmation {
+            candidate: Some(m), ..
+        } => Ok(Some(m.workspace_id)),
         _ => {
             let mut ws = Workspace::new(name);
             ws.canonical_path = path.parent().map(|p| p.to_string_lossy().into_owned());
@@ -620,7 +636,11 @@ mod tests {
     #[test]
     fn conversation_get_not_found() {
         let state = seeded_state();
-        let resp = send(&state, "conversation.get", serde_json::json!({"id": "nope"}));
+        let resp = send(
+            &state,
+            "conversation.get",
+            serde_json::json!({"id": "nope"}),
+        );
         assert!(resp.error.is_some());
     }
 
@@ -659,11 +679,7 @@ mod tests {
         // 给 seeded 会话加一个事件
         let repo = state.repo.lock().unwrap();
         let cid = repo.list_conversations(None).unwrap()[0].id.clone();
-        let mut e = ch_domain::Event::new(
-            &cid,
-            ch_domain::EventType::CommandStarted,
-            1,
-        );
+        let mut e = ch_domain::Event::new(&cid, ch_domain::EventType::CommandStarted, 1);
         e.summary = Some("cargo build".into());
         repo.upsert_event(&e).unwrap();
         drop(repo);
@@ -698,12 +714,16 @@ mod tests {
         );
         let result = resp.result.unwrap();
         assert!(result["extractor"].as_str().unwrap().contains("rule"));
-        assert!(result["decisions"].as_array().unwrap().iter().any(|d| {
-            d["decision"].as_str().unwrap_or("").contains("WorkManager")
-        }));
-        assert!(result["todos"].as_array().unwrap().iter().any(|t| {
-            t["text"].as_str().unwrap_or("").contains("Android 14")
-        }));
+        assert!(result["decisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| { d["decision"].as_str().unwrap_or("").contains("WorkManager") }));
+        assert!(result["todos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| { t["text"].as_str().unwrap_or("").contains("Android 14") }));
     }
 
     #[test]
@@ -768,11 +788,7 @@ mod tests {
         assert_eq!(result["hard"], false);
 
         // 仍存在但 status=deleted
-        let get_resp = send(
-            &state,
-            "conversation.get",
-            serde_json::json!({"id": cid}),
-        );
+        let get_resp = send(&state, "conversation.get", serde_json::json!({"id": cid}));
         let conv = get_resp.result.unwrap();
         assert_eq!(conv["source_status"], "deleted");
 
@@ -800,11 +816,7 @@ mod tests {
         assert_eq!(resp.result.unwrap()["hard"], true);
 
         // 再查应报错
-        let get_resp = send(
-            &state,
-            "conversation.get",
-            serde_json::json!({"id": cid}),
-        );
+        let get_resp = send(&state, "conversation.get", serde_json::json!({"id": cid}));
         assert!(get_resp.error.is_some());
     }
 
@@ -892,7 +904,10 @@ mod tests {
             serde_json::json!({"path": path_str, "workspace_name": "sync-ws"}),
         );
         let result = resp.result.unwrap();
-        assert!(result["conversation_id"].as_str().unwrap().starts_with("conv_"));
+        assert!(result["conversation_id"]
+            .as_str()
+            .unwrap()
+            .starts_with("conv_"));
         assert_eq!(result["messages"], 2);
         assert!(result["raw_payload_id"].as_str().unwrap().len() == 64);
 

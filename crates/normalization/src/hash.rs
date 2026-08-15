@@ -98,9 +98,7 @@ fn canonicalize_value(v: &serde_json::Value) -> serde_json::Value {
             }
             Value::Object(sorted)
         }
-        Value::Array(arr) => {
-            Value::Array(arr.iter().map(canonicalize_value).collect())
-        }
+        Value::Array(arr) => Value::Array(arr.iter().map(canonicalize_value).collect()),
         other => other.clone(),
     }
 }
@@ -111,20 +109,8 @@ mod tests {
 
     #[test]
     fn same_message_same_hash() {
-        let h1 = content_hash_for_message(
-            Provider::Codex,
-            "src-1",
-            Role::User,
-            "hello",
-            None,
-        );
-        let h2 = content_hash_for_message(
-            Provider::Codex,
-            "src-1",
-            Role::User,
-            "hello",
-            None,
-        );
+        let h1 = content_hash_for_message(Provider::Codex, "src-1", Role::User, "hello", None);
+        let h2 = content_hash_for_message(Provider::Codex, "src-1", Role::User, "hello", None);
         assert_eq!(h1, h2);
     }
 
@@ -162,9 +148,8 @@ mod tests {
 
     #[test]
     fn conversation_hash_changes_with_messages() {
-        let base = |hashes: &[&str]| {
-            content_hash_for_conversation(Provider::Codex, "conv-1", hashes)
-        };
+        let base =
+            |hashes: &[&str]| content_hash_for_conversation(Provider::Codex, "conv-1", hashes);
         let h1 = base(&["aaa", "bbb"]);
         let h2 = base(&["aaa", "bbb"]);
         let h3 = base(&["aaa", "ccc"]);

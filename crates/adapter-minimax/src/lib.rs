@@ -209,7 +209,10 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
 }
 
 /// 解析单条 MiniMax 会话。
-pub fn parse_session(db_path: impl AsRef<Path>, session_id: &str) -> AdapterResult<RawConversation> {
+pub fn parse_session(
+    db_path: impl AsRef<Path>,
+    session_id: &str,
+) -> AdapterResult<RawConversation> {
     let conn = open_db(&db_path)?;
 
     // 1. 会话元信息
@@ -235,7 +238,9 @@ pub fn parse_session(db_path: impl AsRef<Path>, session_id: &str) -> AdapterResu
     let created_at_ms = sess
         .get("createdAtMs")
         .and_then(|v| v.as_i64())
-        .and_then(|ms| time::OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000).ok());
+        .and_then(|ms| {
+            time::OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000).ok()
+        });
     // 主子任务链路：parentSessionId 为 null 表示顶层主任务
     let source_parent_id = sess
         .get("parentSessionId")
@@ -323,10 +328,7 @@ fn clean_content(s: &str) -> String {
             }
             // 整行是一个标签：以 `<...>` 或 `<... />` 结尾，且中间没有中文/长文本
             // 用「是否只含 ASCII + 标签字符」判定装饰标签
-            let inner = t
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .trim();
+            let inner = t.trim_start_matches('<').trim_end_matches('>').trim();
             // 装饰标签特征：不含引号、不含中文、长度短、以 / 结尾或是单个标识符
             let is_decorator = !inner.contains('"')
                 && !inner.chars().any(|c| c as u32 > 0x4DFF) // 非中文/特殊符号
@@ -441,8 +443,14 @@ mod tests {
         drop(conn);
 
         let all = discover_all_sessions(&db).unwrap();
-        assert!(all.iter().any(|s| s.session_id == "c1"), "隐藏但有标题的子任务应保留");
-        assert!(!all.iter().any(|s| s.session_id == "s1"), "无标题残根应排除");
+        assert!(
+            all.iter().any(|s| s.session_id == "c1"),
+            "隐藏但有标题的子任务应保留"
+        );
+        assert!(
+            !all.iter().any(|s| s.session_id == "s1"),
+            "无标题残根应排除"
+        );
         assert_eq!(all[0].parent_session_id.as_deref(), Some("p1"));
     }
 
@@ -456,11 +464,23 @@ mod tests {
         assert_eq!(raw.model.as_deref(), Some("coder"));
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("排序算法"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("排序算法"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         // greeting 装饰被清理掉
-        assert!(!raw.messages[1].text.as_deref().unwrap().contains("<greeting"));
-        assert!(raw.messages[1].text.as_deref().unwrap().contains("快速排序"));
+        assert!(!raw.messages[1]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("<greeting"));
+        assert!(raw.messages[1]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("快速排序"));
         assert!(raw.started_at.is_some());
         assert!(raw.messages[0].created_at.is_some());
     }

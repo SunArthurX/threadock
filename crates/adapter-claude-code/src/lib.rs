@@ -263,9 +263,7 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
 fn parse_iso_timestamp(s: &str) -> Option<time::OffsetDateTime> {
     // time crate 的 parse 需要 Format
     // 简单方案：手动解析 ISO 8601 的常见格式
-    let formats = [
-        time::format_description::well_known::Rfc3339,
-    ];
+    let formats = [time::format_description::well_known::Rfc3339];
     for fmt in &formats {
         if let Ok(dt) = time::OffsetDateTime::parse(s, fmt) {
             return Some(dt);
@@ -326,10 +324,11 @@ mod tests {
     fn thinking_filtered_out() {
         let raw = parse_str(SAMPLE, "test-session").unwrap();
         // thinking 内容不应出现在任何消息中
-        assert!(raw
-            .messages
-            .iter()
-            .all(|m| !m.text.as_deref().unwrap_or("").contains("我应该先查看")));
+        assert!(raw.messages.iter().all(|m| !m
+            .text
+            .as_deref()
+            .unwrap_or("")
+            .contains("我应该先查看")));
     }
 
     #[test]
@@ -346,12 +345,14 @@ mod tests {
     fn extracts_tool_use_and_result_as_events() {
         let raw = parse_str(SAMPLE, "test-session").unwrap();
         assert!(!raw.events.is_empty());
-        assert!(raw.events.iter().any(|e| e
-            .summary
-            .as_deref()
-            .unwrap_or("")
-            .contains("Bash")));
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::ToolCallCompleted));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.summary.as_deref().unwrap_or("").contains("Bash")));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::ToolCallCompleted));
     }
 
     #[test]

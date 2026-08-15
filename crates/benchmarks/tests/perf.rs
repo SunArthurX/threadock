@@ -29,10 +29,20 @@ fn import_throughput() {
     println!("│ 耗时:     {elapsed_ms:>7} ms                    │");
     println!("│ 吞吐:   {throughput:>10.0} msg/s                │");
     println!("│ 目标:       > 500 msg/s                │");
-    println!("│ 结果:     {}", if throughput > 500.0 { "✓ PASS" } else { "✗ FAIL" });
+    println!(
+        "│ 结果:     {}",
+        if throughput > 500.0 {
+            "✓ PASS"
+        } else {
+            "✗ FAIL"
+        }
+    );
     println!("└──────────────────────────────────────────┘");
 
-    assert!(throughput > 500.0, "吞吐 {throughput:.0} msg/s 低于目标 500");
+    assert!(
+        throughput > 500.0,
+        "吞吐 {throughput:.0} msg/s 低于目标 500"
+    );
 }
 
 /// plan §7.2：搜索 P95 < 300ms（FTS5）
@@ -54,7 +64,10 @@ fn fts5_search_latency() {
     println!("│ 查询次数: {count:>10}                          │");
     println!("│ P95 延迟: {p95:>10.1} ms                       │");
     println!("│ 目标:        < 300 ms                         │");
-    println!("│ 结果:     {}", if p95 < 300.0 { "✓ PASS" } else { "✗ FAIL" });
+    println!(
+        "│ 结果:     {}",
+        if p95 < 300.0 { "✓ PASS" } else { "✗ FAIL" }
+    );
     println!("└──────────────────────────────────────────────┘");
 
     assert!(p95 < 300.0, "P95 {p95:.1}ms 超过目标 300ms");
@@ -126,7 +139,10 @@ fn cold_start() {
     println!("├──────────────────────────────────────────────┤");
     println!("│ P95 延迟: {p95:>10.1} ms                       │");
     println!("│ 目标:        < 2500 ms                        │");
-    println!("│ 结果:     {}", if p95 < 2500.0 { "✓ PASS" } else { "✗ FAIL" });
+    println!(
+        "│ 结果:     {}",
+        if p95 < 2500.0 { "✓ PASS" } else { "✗ FAIL" }
+    );
     println!("└──────────────────────────────────────────────┘");
 
     assert!(p95 < 2500.0, "冷启动 P95 {p95:.1}ms 超过目标 2500ms");

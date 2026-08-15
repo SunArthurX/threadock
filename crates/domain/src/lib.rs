@@ -3,6 +3,8 @@
 //! 对应 plan §4「术语和统一领域模型」与 §12「数据模型」。
 //! 本 crate 只定义类型，不涉及任何存储或解析逻辑。
 
+pub mod config;
+
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -355,10 +357,7 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    pub fn new(
-        provider: Provider,
-        source_conversation_id: impl Into<String>,
-    ) -> Self {
+    pub fn new(provider: Provider, source_conversation_id: impl Into<String>) -> Self {
         Self {
             id: new_id("conv"),
             workspace_id: None,
@@ -437,11 +436,7 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(
-        conversation_id: impl Into<String>,
-        role: Role,
-        sequence_number: i64,
-    ) -> Self {
+    pub fn new(conversation_id: impl Into<String>, role: Role, sequence_number: i64) -> Self {
         Self {
             id: new_id("msg"),
             conversation_id: conversation_id.into(),

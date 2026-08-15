@@ -90,7 +90,10 @@ mod tests {
         let json = serde_json::to_string(&req).unwrap();
         let back: ParseRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(back.source_id, "test.md");
-        assert_eq!(decode_bytes(&back.content_base64).unwrap(), b"## User\nhello");
+        assert_eq!(
+            decode_bytes(&back.content_base64).unwrap(),
+            b"## User\nhello"
+        );
     }
 
     #[test]

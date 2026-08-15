@@ -81,17 +81,33 @@ pub struct AuditReport {
 /// 内置危险命令规则（name, 正则, 严重级）。
 pub fn builtin_dangerous_rules() -> Vec<(&'static str, &'static str, Severity)> {
     vec![
-        ("rm_recursive", r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)", Severity::High),
-        ("force_push", r"git\s+push\s+.*(--force\b|-f\b)", Severity::High),
+        (
+            "rm_recursive",
+            r"rm\s+(-[a-zA-Z]*r[a-zA-Z]*f|-[a-zA-Z]*f[a-zA-Z]*r)",
+            Severity::High,
+        ),
+        (
+            "force_push",
+            r"git\s+push\s+.*(--force\b|-f\b)",
+            Severity::High,
+        ),
         ("hard_reset", r"git\s+reset\s+--hard", Severity::High),
         ("disk_write", r"(dd\s+of=|mkfs\w*)", Severity::High),
-        ("remote_exec", r"(curl|wget)\s+[^\n|;]*\|\s*(sudo\s+)?(ba)?sh", Severity::High),
+        (
+            "remote_exec",
+            r"(curl|wget)\s+[^\n|;]*\|\s*(sudo\s+)?(ba)?sh",
+            Severity::High,
+        ),
         ("fork_bomb", r":\(\)\s*\{\s*:\|:&\s*\}\s*;", Severity::High),
         ("chmod_world", r"chmod\s+-R\s+777", Severity::High),
         ("sudo", r"\bsudo\b", Severity::Medium),
         ("git_clean", r"git\s+clean\s+-\w*f", Severity::Medium),
         ("kill_force", r"kill\s+-9", Severity::Medium),
-        ("docker_prune", r"docker\s+(system|rmi|volume)\s+(prune|-a)", Severity::Medium),
+        (
+            "docker_prune",
+            r"docker\s+(system|rmi|volume)\s+(prune|-a)",
+            Severity::Medium,
+        ),
         ("npm_publish", r"npm\s+publish", Severity::Low),
     ]
 }
@@ -238,9 +254,18 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
     }
 
     // 严重度统计
-    let high = findings.iter().filter(|f| f.severity == Severity::High).count();
-    let medium = findings.iter().filter(|f| f.severity == Severity::Medium).count();
-    let low = findings.iter().filter(|f| f.severity == Severity::Low).count();
+    let high = findings
+        .iter()
+        .filter(|f| f.severity == Severity::High)
+        .count();
+    let medium = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Medium)
+        .count();
+    let low = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Low)
+        .count();
 
     Ok(AuditReport {
         generated_at: {
@@ -285,7 +310,11 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 /// 渲染 HTML 报告（自包含、可直接打开）。
 pub fn render_html(report: &AuditReport) -> String {
     let mut html = String::new();
-    writeln!(html, "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">").unwrap();
+    writeln!(
+        html,
+        "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
+    )
+    .unwrap();
     writeln!(html, "<title>Conversation Hub 安全审计报告</title>").unwrap();
     writeln!(
         html,
@@ -318,13 +347,18 @@ pub fn render_html(report: &AuditReport) -> String {
         report.high, report.medium, report.low
     )
     .unwrap();
-    writeln!(html, "<table><tr><th>级别</th><th>类型</th><th>规则</th><th>来源</th><th>上下文</th></tr>").unwrap();
+    writeln!(
+        html,
+        "<table><tr><th>级别</th><th>类型</th><th>规则</th><th>来源</th><th>上下文</th></tr>"
+    )
+    .unwrap();
     for f in report.findings.iter().take(500) {
-        let title_disp = html_escape(
-            &f.conversation_title.clone().unwrap_or_else(|| {
-                f.source_conversation_id.chars().take(18).collect::<String>()
-            }),
-        );
+        let title_disp = html_escape(&f.conversation_title.clone().unwrap_or_else(|| {
+            f.source_conversation_id
+                .chars()
+                .take(18)
+                .collect::<String>()
+        }));
         writeln!(
             html,
             "<tr><td><span class='sev sev-{:?}'>{:?}</span></td><td>{}</td><td><code>{}</code></td><td>{} · {}</td><td><code>{}</code></td></tr>",
@@ -339,7 +373,9 @@ pub fn render_html(report: &AuditReport) -> String {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 #[cfg(test)]
@@ -362,11 +398,16 @@ mod tests {
             content_text: "我的 token 是 ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890 请保管".into(),
         };
         let f = sc.scan_message(&row);
-        assert!(f.iter().any(|x| x.rule == "github_token"), "应命中 github_token: {f:?}");
+        assert!(
+            f.iter().any(|x| x.rule == "github_token"),
+            "应命中 github_token: {f:?}"
+        );
         // 片段必须脱敏
         let gh = f.iter().find(|x| x.rule == "github_token").unwrap();
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
-        assert!(!gh.snippet.contains("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890"));
+        assert!(!gh
+            .snippet
+            .contains("ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890"));
     }
 
     #[test]

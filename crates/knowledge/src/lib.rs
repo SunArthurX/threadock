@@ -23,7 +23,5 @@ pub mod model;
 pub mod similar;
 
 pub use extract::{RuleExtractor, TODOS};
-pub use model::{
-    Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem,
-};
-pub use similar::{find_similar, conversation_text, ConversationText, SimilarHit};
+pub use model::{Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem};
+pub use similar::{conversation_text, find_similar, ConversationText, SimilarHit};

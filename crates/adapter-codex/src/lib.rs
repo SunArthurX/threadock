@@ -147,7 +147,8 @@ fn read_first_json_line(path: &Path) -> AdapterResult<serde_json::Value> {
 pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversation> {
     use std::io::BufRead;
     let path = file_path.as_ref();
-    let file = std::fs::File::open(path).map_err(|_| CodexError::NotFound(path.display().to_string()))?;
+    let file =
+        std::fs::File::open(path).map_err(|_| CodexError::NotFound(path.display().to_string()))?;
 
     let mut session_id: Option<String> = None;
     let mut started_at: Option<time::OffsetDateTime> = None;
@@ -352,11 +353,23 @@ mod tests {
         assert_eq!(raw.source_conversation_id, "sess-codex-1");
         assert_eq!(raw.messages.len(), 2, "AGENTS.md 注入应被过滤");
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("排序函数"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("排序函数"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
-        assert!(raw.messages[1].text.as_deref().unwrap().contains("快速排序"));
+        assert!(raw.messages[1]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("快速排序"));
         assert_eq!(raw.events.len(), 1);
-        assert!(raw.events[0].summary.as_deref().unwrap().contains("exec_command"));
+        assert!(raw.events[0]
+            .summary
+            .as_deref()
+            .unwrap()
+            .contains("exec_command"));
         assert_eq!(raw.title.as_deref(), Some("帮我写个排序函数"));
         assert!(raw.started_at.is_some());
         assert!(raw.messages[0].created_at.is_some());

@@ -41,7 +41,10 @@ pub fn canonicalize_git_remote(input: &str) -> String {
     // SSH 形式：git@host:org/repo
     if let Some(rest) = s.strip_prefix("git@") {
         // rest = host:org/repo(.git)
-        return rest.replacen(':', "/", 1).trim_end_matches(".git").to_string();
+        return rest
+            .replacen(':', "/", 1)
+            .trim_end_matches(".git")
+            .to_string();
     }
 
     // 去协议
@@ -132,7 +135,10 @@ mod tests {
     #[test]
     fn path_handles_backslashes() {
         // 反斜杠统一为正斜杠；盘符作为普通段保留
-        assert_eq!(canonicalize_path("C:\\Users\\foo\\proj"), "C:/Users/foo/proj");
+        assert_eq!(
+            canonicalize_path("C:\\Users\\foo\\proj"),
+            "C:/Users/foo/proj"
+        );
     }
 
     #[test]

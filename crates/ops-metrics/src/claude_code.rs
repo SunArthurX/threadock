@@ -43,16 +43,9 @@ pub fn collect_claude_code_session(
             continue;
         };
         seq += 1;
-        let ts = rec
-            .get("timestamp")
-            .and_then(|v| v.as_str())
-            .and_then(|s| {
-                time::OffsetDateTime::parse(
-                    s,
-                    &time::format_description::well_known::Rfc3339,
-                )
-                .ok()
-            });
+        let ts = rec.get("timestamp").and_then(|v| v.as_str()).and_then(|s| {
+            time::OffsetDateTime::parse(s, &time::format_description::well_known::Rfc3339).ok()
+        });
 
         // assistant 消息的 usage
         if rec.get("type").and_then(|v| v.as_str()) == Some("assistant") {
@@ -127,7 +120,9 @@ pub fn collect_claude_code_session(
 }
 
 /// 采集整个 ~/.claude/projects 下所有会话。
-pub fn collect_claude_code(claude_home: impl AsRef<Path>) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
+pub fn collect_claude_code(
+    claude_home: impl AsRef<Path>,
+) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {
     let projects = claude_home.as_ref().join("projects");
     if !projects.exists() {
         return Ok((Vec::new(), Vec::new()));

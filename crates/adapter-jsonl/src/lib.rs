@@ -220,8 +220,14 @@ mod tests {
     fn parses_events() {
         let raw = parse_str(SAMPLE, "test.jsonl").unwrap();
         assert_eq!(raw.events.len(), 2);
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::CommandStarted));
-        assert!(raw.events.iter().any(|e| e.event_type == EventType::DiffGenerated));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::CommandStarted));
+        assert!(raw
+            .events
+            .iter()
+            .any(|e| e.event_type == EventType::DiffGenerated));
     }
 
     #[test]

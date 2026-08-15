@@ -348,7 +348,6 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 "#;
 
-
 /// V9：CodeAgentOps M6-M9 —— 资产清单、自动化任务、用量归因扩展。
 pub const SCHEMA_V9: &str = r#"
 ALTER TABLE usage_records ADD COLUMN source_dir TEXT;

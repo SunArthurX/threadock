@@ -69,9 +69,8 @@ fn collect_zcode_automations(db: &Path, out: &mut Vec<AutomationRecord>) -> OpsR
     }
     let conn = open_ro(db)?;
     // workflow_definition：启用的定义
-    let mut stmt = conn.prepare(
-        "SELECT name, source, enabled, trusted FROM workflow_definition",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT name, source, enabled, trusted FROM workflow_definition")?;
     let rows = stmt.query_map([], |r| {
         let enabled: i64 = r.get(2)?;
         let trusted: i64 = r.get(3)?;
@@ -85,7 +84,11 @@ fn collect_zcode_automations(db: &Path, out: &mut Vec<AutomationRecord>) -> OpsR
     for row in rows {
         let (name, source, enabled, trusted) = row?;
         let status = if enabled {
-            if trusted { "enabled·trusted" } else { "enabled·untrusted" }
+            if trusted {
+                "enabled·trusted"
+            } else {
+                "enabled·untrusted"
+            }
         } else {
             "disabled"
         };
@@ -153,8 +156,10 @@ fn collect_minimax_background(home: &Path, out: &mut Vec<AutomationRecord>) {
                 if p.extension().and_then(|x| x.to_str()) == Some("json") {
                     if let Ok(txt) = std::fs::read_to_string(&p) {
                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-                            title = title.or(v.get("title").and_then(|x| x.as_str()).map(String::from));
-                            status = status.or(v.get("status").and_then(|x| x.as_str()).map(String::from));
+                            title =
+                                title.or(v.get("title").and_then(|x| x.as_str()).map(String::from));
+                            status = status
+                                .or(v.get("status").and_then(|x| x.as_str()).map(String::from));
                         }
                     }
                 }
@@ -213,8 +218,16 @@ mod tests {
              CREATE TABLE workflow_run (name TEXT, status TEXT, time_created INTEGER);",
         )
         .unwrap();
-        conn.execute("INSERT INTO workflow_definition VALUES ('daily','user',1,1)", []).unwrap();
-        conn.execute("INSERT INTO workflow_run VALUES ('daily','completed',1784560908997)", []).unwrap();
+        conn.execute(
+            "INSERT INTO workflow_definition VALUES ('daily','user',1,1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO workflow_run VALUES ('daily','completed',1784560908997)",
+            [],
+        )
+        .unwrap();
         drop(conn);
         let recs = collect_automations(dir.path()).unwrap();
         let a = recs.iter().find(|r| r.name == "daily").unwrap();

@@ -3,9 +3,7 @@
 //! 这是纯算法、可充分测试的基线。未来可新增 `LlmExtractor` 走模型 API，
 //! `ExtractionResult` 契约不变。
 
-use crate::model::{
-    Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem,
-};
+use crate::model::{Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem};
 use ch_domain::{EventType, Role};
 use regex::Regex;
 
@@ -94,7 +92,16 @@ impl RuleExtractor {
 
     /// TODO 关键词（plan §13.5：TODO 提取）。
     pub fn todo_keywords() -> &'static [&'static str] {
-        &["TODO", "FIXME", "待办", "需要", "应该", "接下来", "还要", "尚未"]
+        &[
+            "TODO",
+            "FIXME",
+            "待办",
+            "需要",
+            "应该",
+            "接下来",
+            "还要",
+            "尚未",
+        ]
     }
 
     fn extract_todos(&self, input: &ExtractionInput) -> Vec<TodoItem> {
@@ -127,7 +134,10 @@ impl RuleExtractor {
 
         // 来自 Command 事件
         for e in &input.events {
-            if matches!(e.event_type, EventType::CommandStarted | EventType::CommandCompleted) {
+            if matches!(
+                e.event_type,
+                EventType::CommandStarted | EventType::CommandCompleted
+            ) {
                 if let Some(s) = &e.summary {
                     cmds.push(s.clone());
                 }
@@ -157,7 +167,15 @@ impl RuleExtractor {
     // ── 错误：关键词句子 + Error 事件 ──────────────────────────────────────
 
     fn extract_errors(&self, input: &ExtractionInput) -> Vec<ErrorItem> {
-        let keywords = ["error", "错误", "failed", "failure", "panic", "exception", "报错"];
+        let keywords = [
+            "error",
+            "错误",
+            "failed",
+            "failure",
+            "panic",
+            "exception",
+            "报错",
+        ];
         let mut errors = Vec::new();
 
         // Error 事件
@@ -202,7 +220,17 @@ impl RuleExtractor {
     // ── 决策：决策性表述 ───────────────────────────────────────────────────
 
     fn extract_decisions(&self, input: &ExtractionInput) -> Vec<Decision> {
-        let keywords = ["决定", "选用", "结论", "应该", "采用", "选择", "最终", "recommend", "decide"];
+        let keywords = [
+            "决定",
+            "选用",
+            "结论",
+            "应该",
+            "采用",
+            "选择",
+            "最终",
+            "recommend",
+            "decide",
+        ];
         let mut decisions = Vec::new();
         for m in &input.messages {
             if let Some(text) = &m.content_text {
@@ -252,8 +280,9 @@ impl RuleExtractor {
         }
 
         // 消息中的路径模式（src/xxx 或 *.ext）
-        let path_re = Regex::new(r"[\w\-./]+/[ \w\-./]+\.\w+|[\w\-]+\.(rs|ts|js|py|go|md|toml|json)")
-            .unwrap();
+        let path_re =
+            Regex::new(r"[\w\-./]+/[ \w\-./]+\.\w+|[\w\-]+\.(rs|ts|js|py|go|md|toml|json)")
+                .unwrap();
         for m in &input.messages {
             if let Some(text) = &m.content_text {
                 for cap in path_re.captures_iter(text) {
@@ -439,7 +468,12 @@ mod tests {
         let r = ext.extract(&input(
             None,
             vec![],
-            vec![event("e1", EventType::Error, 1, "panic: index out of bounds")],
+            vec![event(
+                "e1",
+                EventType::Error,
+                1,
+                "panic: index out of bounds",
+            )],
         ));
         assert!(r.errors.iter().any(|e| e.error.contains("panic")));
     }
@@ -456,10 +490,7 @@ mod tests {
             )],
             vec![],
         ));
-        assert!(r
-            .decisions
-            .iter()
-            .any(|d| d.decision.contains("SQLite")));
+        assert!(r.decisions.iter().any(|d| d.decision.contains("SQLite")));
     }
 
     #[test]
@@ -468,7 +499,12 @@ mod tests {
         let r = ext.extract(&input(
             None,
             vec![],
-            vec![event("e1", EventType::DiffGenerated, 1, "src/main.rs 修改了入口")],
+            vec![event(
+                "e1",
+                EventType::DiffGenerated,
+                1,
+                "src/main.rs 修改了入口",
+            )],
         ));
         assert!(r.files.iter().any(|f| f.path.contains("main.rs")));
     }
@@ -500,7 +536,11 @@ mod tests {
             vec![],
         ));
         // 两条相同 TODO 应去重为 1 条
-        let count = r.todos.iter().filter(|t| t.text.contains("修复 bug")).count();
+        let count = r
+            .todos
+            .iter()
+            .filter(|t| t.text.contains("修复 bug"))
+            .count();
         assert_eq!(count, 1);
     }
 

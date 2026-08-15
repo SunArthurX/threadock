@@ -130,15 +130,21 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     }
 
     // 5. 完整度
-    let has_tools = events
-        .iter()
-        .any(|e| matches!(e.event_type, EventType::ToolCallStarted | EventType::ToolCallCompleted));
+    let has_tools = events.iter().any(|e| {
+        matches!(
+            e.event_type,
+            EventType::ToolCallStarted | EventType::ToolCallCompleted
+        )
+    });
     let has_diffs = events
         .iter()
         .any(|e| matches!(e.event_type, EventType::DiffGenerated));
-    let has_commands = events
-        .iter()
-        .any(|e| matches!(e.event_type, EventType::CommandStarted | EventType::CommandCompleted));
+    let has_commands = events.iter().any(|e| {
+        matches!(
+            e.event_type,
+            EventType::CommandStarted | EventType::CommandCompleted
+        )
+    });
     let has_approvals = events.iter().any(|e| {
         matches!(
             e.event_type,
@@ -241,7 +247,10 @@ mod tests {
             events: vec![],
             source_parent_id: None,
         };
-        assert!(matches!(normalize(raw), Err(NormalizationError::NoMessages)));
+        assert!(matches!(
+            normalize(raw),
+            Err(NormalizationError::NoMessages)
+        ));
     }
 
     #[test]

@@ -15,11 +15,14 @@ fn main() {
 
     println!("── collect_zcode ──");
     let t = Instant::now();
-    let (u3, t3) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).unwrap();
+    let (u3, t3) =
+        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).unwrap();
     println!("  {:?}  usage={} tools={}", t.elapsed(), u3.len(), t3.len());
 
     println!("── collect_minimax ──");
     let t = Instant::now();
-    let u4 = ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite")).unwrap();
+    let u4 =
+        ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite"))
+            .unwrap();
     println!("  {:?}  usage={}", t.elapsed(), u4.len());
 }

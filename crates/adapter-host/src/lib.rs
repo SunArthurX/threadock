@@ -181,9 +181,10 @@ impl AdapterProcess {
         self.stdin.flush()?;
 
         let mut buf = String::new();
-        let n = self.stdout.read_line(&mut buf).map_err(|e| {
-            HostError::ProcessExited(format!("read response failed: {e}"))
-        })?;
+        let n = self
+            .stdout
+            .read_line(&mut buf)
+            .map_err(|e| HostError::ProcessExited(format!("read response failed: {e}")))?;
         if n == 0 {
             return Err(HostError::ProcessExited(
                 "adapter stdout closed (process likely crashed)".into(),
@@ -196,7 +197,8 @@ impl AdapterProcess {
                 err.code, err.message
             )));
         }
-        resp.result.ok_or_else(|| HostError::Protocol("no result".into()))
+        resp.result
+            .ok_or_else(|| HostError::Protocol("no result".into()))
     }
 }
 
@@ -270,10 +272,7 @@ mod tests {
         let conv = client.parse("src.md", b"hello").unwrap();
         assert_eq!(conv.source_conversation_id, "src.md");
         assert_eq!(conv.messages.len(), 1);
-        assert_eq!(
-            conv.messages[0].text.as_deref(),
-            Some("hello")
-        );
+        assert_eq!(conv.messages[0].text.as_deref(), Some("hello"));
     }
 
     #[test]
@@ -307,6 +306,10 @@ mod tests {
             result,
             Err(HostError::ProcessExited(_)) | Err(HostError::Io(_))
         );
-        assert!(is_expected, "expected ProcessExited or Io, got {:?}", result);
+        assert!(
+            is_expected,
+            "expected ProcessExited or Io, got {:?}",
+            result
+        );
     }
 }

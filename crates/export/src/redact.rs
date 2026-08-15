@@ -226,7 +226,8 @@ mod tests {
 
     #[test]
     fn redacts_aws_secret_in_context() {
-        let (_out, stats) = redact("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
+        let (_out, stats) =
+            redact("aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY");
         assert_eq!(stats.aws_secret_key, 1);
     }
 
@@ -263,10 +264,7 @@ mod tests {
     fn custom_rule_alongside_builtin() {
         // 用非 email 格式的内部域名，避免被 email 规则先吃掉
         let rule = CustomRule::new("internal_host", r"host-\d+\.corp");
-        let (out, _stats) = redact_with(
-            "部署在 host-42.corp 和 AKIAIOSFODNN7EXAMPLE",
-            &[rule],
-        );
+        let (out, _stats) = redact_with("部署在 host-42.corp 和 AKIAIOSFODNN7EXAMPLE", &[rule]);
         assert!(out.contains("[REDACTED:internal_host]"));
         assert!(out.contains("[REDACTED:aws_access_key]"));
     }

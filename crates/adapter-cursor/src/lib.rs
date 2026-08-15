@@ -20,7 +20,7 @@
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
-use rusqlite::{OpenFlags, Connection};
+use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 use thiserror::Error;
 
@@ -77,16 +77,16 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
         "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND key != 'composerData:empty-state-draft'",
     )?;
     let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, Vec<u8>>(1)?,
-        ))
+        Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
     })?;
 
     let mut sessions = Vec::new();
     for row in rows {
         let (key, value) = row?;
-        let session_id = key.strip_prefix("composerData:").unwrap_or(&key).to_string();
+        let session_id = key
+            .strip_prefix("composerData:")
+            .unwrap_or(&key)
+            .to_string();
         let obj: serde_json::Value = serde_json::from_slice(&value).unwrap_or_default();
         let headers = obj
             .get("fullConversationHeadersOnly")
@@ -110,7 +110,10 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
 }
 
 /// 解析单条 Cursor 会话：读取它的所有 bubble，提取文本与工具事件。
-pub fn parse_session(db_path: impl AsRef<Path>, conversation_id: &str) -> AdapterResult<RawConversation> {
+pub fn parse_session(
+    db_path: impl AsRef<Path>,
+    conversation_id: &str,
+) -> AdapterResult<RawConversation> {
     let conn = open_db(&db_path)?;
 
     // 1. 读 composerData 拿 bubble 列表
@@ -122,7 +125,9 @@ pub fn parse_session(db_path: impl AsRef<Path>, conversation_id: &str) -> Adapte
             |r| r.get::<_, Vec<u8>>(0),
         )
         .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => CursorError::NotFound(conversation_id.to_string()),
+            rusqlite::Error::QueryReturnedNoRows => {
+                CursorError::NotFound(conversation_id.to_string())
+            }
             other => other.into(),
         })?;
     let composer: serde_json::Value = serde_json::from_slice(&value)?;
@@ -266,10 +271,8 @@ mod tests {
     fn make_test_db(dir: &Path) -> std::path::PathBuf {
         let db = dir.join("state.vscdb");
         let conn = Connection::open(&db).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);",
-        )
-        .unwrap();
+        conn.execute_batch("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);")
+            .unwrap();
 
         // 一个 composerData + 2 个 bubble（用户 + 助手）
         let composer = serde_json::json!({
@@ -330,7 +333,11 @@ mod tests {
         assert_eq!(raw.provider, Provider::Cursor);
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("帮我写个函数"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap()
+            .contains("帮我写个函数"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(raw.started_at.is_some());
         // 标题取自首条用户消息
