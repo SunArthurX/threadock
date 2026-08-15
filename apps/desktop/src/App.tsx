@@ -1,6 +1,7 @@
 // App 主组件：布局 + 状态管理 + 导航（组件已拆分到独立文件）
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import OpsView from "./OpsView";
 import SourcePanel from "./SourcePanel";
@@ -101,6 +102,17 @@ export default function App() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
+  // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; detail: string; finished: boolean } | null>(null);
+  useEffect(() => {
+    const un = listen<{ current: number; total: number; detail: string; finished: boolean }>("sync_progress", (e) => {
+      setSyncProgress(e.payload);
+      if (e.payload.finished) {
+        window.setTimeout(() => setSyncProgress(null), 1500);
+      }
+    });
+    return () => { un.then((f) => f()); };
+  }, []);
   const showError = (e: unknown) => setError(typeof e === "string" ? e : (e as {message?:string}).message ?? String(e));
 
   // ── effects ──
@@ -385,10 +397,13 @@ export default function App() {
       setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
       setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
       setChildConvs({}); setExpandedParents(new Set());
-      showToast("✓ 已重置（保留了脱敏规则与治理配置），正在后台重新导入会话…", "info", 8000);
+      showToast("✓ 已重置（保留了脱敏规则与治理配置），正在后台重新导入（顶部有进度条）…", "info", 8000);
     } catch (e) { showError(e); }
     setResetting(false);
-    // 重新导入放后台静默执行（全量重导分钟级，此前前台 ⟳ 让人以为重置没完成）
+    // 重置后红点/来源显隐立即归零（旧值是重置前的残留）
+    refreshNewCount();
+    refreshProviders();
+    // 重新导入放后台静默执行（进度条仍可见；全量重导分钟级）
     window.setTimeout(() => autoSync(true), 1500);
   };
 
@@ -484,8 +499,21 @@ export default function App() {
           <h1>Threadock</h1>
           {view === "chat" && (<>
             {syncing ? (
-              <span className="sync-status syncing-chip">⟳ 数据更新中…<button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button></span>
+              <span className="sync-status syncing-chip">
+                ⟳ {syncProgress && syncProgress.total > 0
+                  ? `导入中 ${syncProgress.current}/${syncProgress.total}${syncProgress.detail && syncProgress.detail !== "done" ? ` · ${syncProgress.detail}` : ""}`
+                  : "数据更新中…"}
+                <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button>
+              </span>
             ) : syncResult && <span className="sync-status done">{syncResult}</span>}
+            {syncProgress && syncProgress.total > 0 && (
+              <div className="sync-progress" title={`导入进度 ${syncProgress.current}/${syncProgress.total}`}>
+                <div
+                  className="sync-progress-fill"
+                  style={{ width: `${Math.min(100, (syncProgress.current / syncProgress.total) * 100)}%` }}
+                />
+              </div>
+            )}
             <div className="search-box">
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}

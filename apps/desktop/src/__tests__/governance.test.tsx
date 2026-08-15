@@ -102,3 +102,14 @@ describe("时间线归并排序（M15 修复验证）", () => {
     expect(container.querySelector(".tl-time")?.textContent).not.toBe(""); // 事件时间不再为空
   });
 });
+
+describe("toast 上限（防刷屏）", () => {
+  beforeEach(() => _resetToasts());
+  it("最多保留 4 条，溢出丢最旧", () => {
+    for (let i = 1; i <= 6; i++) showToast(`t${i}`);
+    const list = getToasts();
+    expect(list.length).toBe(4);
+    expect(list[0].text).toBe("t3"); // t1/t2 被丢弃
+    expect(list[3].text).toBe("t6");
+  });
+});

@@ -5,6 +5,7 @@ use super::*;
 use ch_daemon::DaemonState;
 use ch_normalization::{normalize, RawConversation};
 use std::path::Path;
+use tauri::Emitter;
 
 /// 导入一个会话文件（plan §8.3 流水线）。
 /// 按扩展名自动选择 markdown/jsonl adapter。
@@ -407,11 +408,26 @@ pub(crate) async fn import_from_codex(
 #[tauri::command]
 pub(crate) async fn auto_sync(
     state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     let _guard = BusyGuard::acquire()?;
-    // 同步重活（5 来源发现+解析+批量入库，可达数分钟）移出 runtime worker 线程
-    run_blocking(|| auto_sync_inner(&state, limit))
+    // 同步重活（5 来源发现+解析+批量入库，可达数分钟）移出 runtime worker 线程；
+    // 逐条导入进度经 "sync_progress" 事件推给前端顶部进度条
+    run_blocking(move || {
+        let mut emit = move |done: u64, total: u64, detail: &str| {
+            let _ = app.emit(
+                "sync_progress",
+                serde_json::json!({
+                    "current": done,
+                    "total": total,
+                    "detail": detail,
+                    "finished": detail == "done",
+                }),
+            );
+        };
+        auto_sync_inner_with(&state, limit, &mut emit)
+    })
 }
 
 /// 解析闭包类型别名（单来源会话 → RawConversation）。
@@ -616,12 +632,24 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
 /// - 已导入但缺主子链路的旧数据，用 repair_parents_batch 补上
 /// - limit 默认 500（覆盖全部会话；旧版 50 导致 MiniMax/ZCode 大量子任务丢失）
 #[tracing::instrument(skip_all, level = "info")]
+#[cfg(test)] // 命令层走带事件上报的 _with 版本；此无进度壳仅供单测
 pub(crate) fn auto_sync_inner(
     state: &DaemonState,
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
+    auto_sync_inner_with(state, limit, &mut |_, _, _| {})
+}
+
+/// 带进度回调的同步实现：每导入成功 1 条回调 (done, total, 当前来源名)。
+fn auto_sync_inner_with(
+    state: &DaemonState,
+    limit: Option<usize>,
+    progress: &mut dyn FnMut(u64, u64, &str),
+) -> Result<serde_json::Value, String> {
     CANCEL_SYNC.store(false, std::sync::atomic::Ordering::SeqCst);
     let mut cancelled = false;
+    let mut total_planned: u64 = 0;
+    let mut done_planned: u64 = 0;
     let lim = limit.unwrap_or(500);
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
@@ -687,6 +715,16 @@ pub(crate) fn auto_sync_inner(
                 continue;
             }
         };
+        // 预估本轮待导入量（进度条 total）：与下方判定同口径，配额内取小
+        let pending_total: u64 = items
+            .iter()
+            .filter(|it| {
+                let key = (src.provider_id.to_string(), it.session_id.clone());
+                !existing.contains(&key) || is_stale(src.provider_id, &it.session_id, it.src_ms)
+            })
+            .count()
+            .min(lim) as u64;
+        total_planned += pending_total;
         let mut ok = 0u32;
         let mut skip = 0u32;
         let mut imported_count = 0u32;
@@ -724,6 +762,8 @@ pub(crate) fn auto_sync_inner(
                             pending_index.extend(o.indexable);
                             ok += 1;
                             imported_count += 1;
+                            done_planned += 1;
+                            progress(done_planned, total_planned, src.workspace);
                             if imported_count.is_multiple_of(5) {
                                 std::thread::sleep(std::time::Duration::from_millis(1));
                             }
@@ -772,6 +812,7 @@ pub(crate) fn auto_sync_inner(
 
     // 索引统一提交：整轮同步只有 1 次 tantivy commit
     commit_index(state, &pending_index)?;
+    progress(done_planned, total_planned, "done");
 
     // 记录同步时间戳（持久化，供节流与展示）
     if let Ok(repo) = state.repo.lock() {
@@ -1023,8 +1064,25 @@ mod backlog_e2e_tests {
         .expect("state open");
 
         let before = sources_new_count_inner(&state).expect("count before");
-        let v = auto_sync_inner(&state, None).expect("sync");
+        // 带进度回调：断言单调不减、最终 done、current==total
+        let mut events: Vec<(u64, u64, String)> = Vec::new();
+        let v = auto_sync_inner_with(&state, None, &mut |done, total, detail| {
+            events.push((done, total, detail.to_string()));
+        })
+        .expect("sync");
         let after = sources_new_count_inner(&state).expect("count after");
+        assert!(!events.is_empty(), "至少应有一次进度回报");
+        assert_eq!(
+            events.last().expect("unexpected None").2,
+            "done",
+            "最后一条必须是完成回报"
+        );
+        for w in events.windows(2) {
+            assert!(w[1].0 >= w[0].0, "进度 current 必须单调不减");
+            assert!(w[1].1 >= w[0].1, "total 只随来源发现递增（渐进预估）");
+        }
+        let (d, t, _) = events.last().expect("unexpected None");
+        assert!(*d <= *t, "完成时 current 不得超过 total（失败导入会小于）");
         println!("before={before}");
         println!("sync={v}");
         println!("after={after}");

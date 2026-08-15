@@ -1,0 +1,4 @@
+
+/* 顶部同步进度条 */
+.sync-progress { position: relative; width: 110px; height: 6px; border-radius: 3px; border: 1px solid var(--border, #444); overflow: hidden; align-self: center; }
+.sync-progress-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent, #4f8cff); transition: width .3s; }

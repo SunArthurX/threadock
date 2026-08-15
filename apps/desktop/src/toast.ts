@@ -36,9 +36,11 @@ export function getToasts(): Toast[] {
 export const toastSnapshot = getToasts;
 
 /** 弹出一条通知（默认 5 秒自动消失）。 */
+const MAX_TOASTS = 4;
+
 export function showToast(text: string, kind: ToastKind = "info", ttlMs = 5000): number {
   const id = nextId++;
-  toasts = [...toasts, { id, kind, text }];
+  toasts = [...toasts, { id, kind, text }].slice(-MAX_TOASTS); // 溢出丢最旧，避免堆叠刷屏
   emit();
   window.setTimeout(() => dismissToast(id), ttlMs);
   return id;
