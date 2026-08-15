@@ -271,7 +271,7 @@ export default function App() {
         {error && <div className="error-banner" onClick={() => setError(null)}>{error} (点击关闭)</div>}
 
         <div className="topbar">
-          <h1>Conversation Hub</h1>
+          <h1>Threadock</h1>
           {view === "chat" && (<>
             {syncing ? (
               <span className="sync-status syncing-chip">⟳ 数据更新中…<button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => {})}>取消</button></span>

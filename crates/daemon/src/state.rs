@@ -32,7 +32,7 @@ impl DaemonState {
     /// 在 `data_dir` 下打开/创建双连接 + `SearchIndex` + `RawStore`。
     pub fn open(config: DaemonStateConfig) -> Result<Self, DaemonStateError> {
         std::fs::create_dir_all(&config.data_dir)?;
-        let db_path = config.data_dir.join("conversation-hub.db");
+        let db_path = config.data_dir.join("threadock.db");
         let repo = Repository::open(&db_path)?;
         // 第二个连接：同一 DB 文件，独立 Mutex（WAL 读写并发）
         let read_repo = Repository::open(&db_path)?;
@@ -50,7 +50,7 @@ impl DaemonState {
     /// 内存模式（测试用）。
     pub fn open_in_memory() -> Result<Self, DaemonStateError> {
         let dir = tempfile::TempDir::new().map_err(DaemonStateError::Io)?;
-        let db_path = dir.path().join("conversation-hub.db");
+        let db_path = dir.path().join("threadock.db");
         let repo = Repository::open(&db_path)?;
         let read_repo = Repository::open(&db_path)?;
         let search_index = SearchIndex::open_in_memory()?;

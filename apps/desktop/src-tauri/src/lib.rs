@@ -1,4 +1,4 @@
-//! Conversation Hub 桌面应用后端：Tauri command 层。
+//! Threadock 桌面应用后端：Tauri command 层。
 //!
 //! 通过嵌入 DaemonState（plan §8.2 单点写者）访问数据层。
 //! 每个 command 是薄包装，复用 daemon/storage/knowledge 的能力。
@@ -1047,7 +1047,7 @@ async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<Strin
     let s = repo.ops_weekly_summary().map_err(|e| internal_err(e))?;
     let mut html = String::new();
     use std::fmt::Write;
-    writeln!(html, "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>Conversation Hub 周报</title>").expect("write to String");
+    writeln!(html, "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>Threadock 周报</title>").expect("write to String");
     writeln!(html, "<style>body{{font-family:-apple-system,'PingFang SC',sans-serif;margin:40px;background:#f7f8fa;color:#1a1e2e;}}").expect("write to String");
     writeln!(html, "h1{{font-size:20px;}} .meta{{color:#666;font-size:13px;margin-bottom:24px;}}").expect("write to String");
     writeln!(html, ".grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;}}").expect("write to String");
@@ -1058,7 +1058,7 @@ async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<Strin
     writeln!(html, "th{{background:#f9fafb;font-size:11px;color:#6b7280;text-transform:uppercase;}}").expect("write to String");
     writeln!(html, ".good{{color:#059669;}} .warn{{color:#d97706;}} .bad{{color:#dc2626;}}").expect("write to String");
     writeln!(html, "</style></head><body>").expect("write to String");
-    writeln!(html, "<h1>📊 Conversation Hub 治理周报</h1>").expect("write to String");
+    writeln!(html, "<h1>📊 Threadock 治理周报</h1>").expect("write to String");
     writeln!(html, "<div class='meta'>{} · 覆盖最近 7 天 · {} 个 Agent</div>",
         ch_domain::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
         s.benchmark.len()).expect("write to String");
@@ -1909,5 +1909,5 @@ pub fn run() {
             list_tags,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Conversation Hub");
+        .expect("error while running Threadock");
 }
