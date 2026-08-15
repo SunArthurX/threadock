@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn normalize_assigns_sequence_numbers() {
-        let n = normalize(sample_raw()).unwrap();
+        let n = normalize(sample_raw()).expect("unexpected None");
         assert_eq!(n.messages.len(), 2);
         assert_eq!(n.messages[0].sequence_number, 1);
         assert_eq!(n.messages[1].sequence_number, 2);
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn normalize_computes_message_hashes() {
-        let n = normalize(sample_raw()).unwrap();
+        let n = normalize(sample_raw()).expect("unexpected None");
         for m in &n.messages {
             assert!(m.content_hash.is_some(), "every message should have a hash");
         }
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn normalize_computes_conversation_hash() {
-        let n = normalize(sample_raw()).unwrap();
+        let n = normalize(sample_raw()).expect("unexpected None");
         assert!(!n.conversation_hash.is_empty());
         assert_eq!(
             n.conversation.content_hash.as_deref(),
@@ -227,8 +227,8 @@ mod tests {
     #[test]
     fn normalize_deterministic_hash() {
         // 相同输入两次标准化，hash 必须相同
-        let n1 = normalize(sample_raw()).unwrap();
-        let n2 = normalize(sample_raw()).unwrap();
+        let n1 = normalize(sample_raw()).expect("unexpected None");
+        let n2 = normalize(sample_raw()).expect("unexpected None");
         assert_eq!(n1.conversation_hash, n2.conversation_hash);
         for (a, b) in n1.messages.iter().zip(n2.messages.iter()) {
             assert_eq!(a.content_hash, b.content_hash);
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn completeness_reflects_events() {
         // 无事件 → 有限
-        let n = normalize(sample_raw()).unwrap();
+        let n = normalize(sample_raw()).expect("unexpected None");
         assert_eq!(n.completeness, Completeness::Limited);
 
         // 加一个 command → 部分
@@ -268,7 +268,7 @@ mod tests {
             source_event_id: None,
             created_at: None,
         });
-        let n2 = normalize(raw).unwrap();
+        let n2 = normalize(raw).expect("unexpected None");
         assert_eq!(n2.completeness, Completeness::Partial);
 
         // tool + diff + command + approval → 完整
@@ -303,7 +303,7 @@ mod tests {
                 created_at: None,
             },
         ];
-        let n3 = normalize(raw).unwrap();
+        let n3 = normalize(raw).expect("unexpected None");
         assert_eq!(n3.completeness, Completeness::Full);
         assert!((n3.completeness_score - 1.0).abs() < 1e-9);
     }
@@ -327,7 +327,7 @@ mod tests {
                 created_at: None,
             },
         ];
-        let n = normalize(raw).unwrap();
+        let n = normalize(raw).expect("unexpected None");
         assert_eq!(n.events.len(), 2);
         assert_eq!(n.events[0].sequence_number, 1);
         assert_eq!(n.events[1].sequence_number, 2);
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn conversation_carries_provider_and_source_id() {
-        let n = normalize(sample_raw()).unwrap();
+        let n = normalize(sample_raw()).expect("unexpected None");
         assert_eq!(n.conversation.provider, Provider::Codex);
         assert_eq!(n.conversation.source_conversation_id, "src-1");
     }

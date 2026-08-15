@@ -137,25 +137,25 @@ mod tests {
     use tempfile::TempDir;
 
     fn seeded_repo() -> (TempDir, Repository, String) {
-        let dir = TempDir::new().unwrap();
-        let repo = Repository::open(dir.path().join("hub.db")).unwrap();
-        repo.upsert_provider(Provider::Generic).unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
+        let repo = Repository::open(dir.path().join("hub.db")).expect("unexpected None");
+        repo.upsert_provider(Provider::Generic).expect("upsert failed");
         let mut c = Conversation::new(Provider::Generic, "src-export");
         c.title = Some("含 token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890 的会话".into());
-        let cid = repo.upsert_conversation(&c).unwrap();
+        let cid = repo.upsert_conversation(&c).expect("upsert failed");
         let mut m = Message::new(&cid, Role::User, 1);
         m.content_text = Some("联系 alice@corp.com".into());
-        repo.upsert_message(&m).unwrap();
+        repo.upsert_message(&m).expect("upsert failed");
         (dir, repo, cid)
     }
 
     #[test]
     fn export_markdown_writes_file_with_redaction() {
         let (_dir, repo, cid) = seeded_repo();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let out = outdir.path().join("conv.md");
-        export_conversation(&repo, &cid, out.to_str().unwrap(), ExportFormat::Markdown).unwrap();
-        let content = std::fs::read_to_string(&out).unwrap();
+        export_conversation(&repo, &cid, out.to_str().expect("unexpected None"), ExportFormat::Markdown).expect("unexpected None");
+        let content = std::fs::read_to_string(&out).expect("file I/O failed");
         assert!(content.contains("[REDACTED:github_token]"));
         assert!(content.contains("[REDACTED:email]"));
         assert!(!content.contains("ghp_aBcDeF"));
@@ -164,28 +164,28 @@ mod tests {
     #[test]
     fn export_json_writes_valid_json_with_redaction() {
         let (_dir, repo, cid) = seeded_repo();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let out = outdir.path().join("conv.json");
-        export_conversation(&repo, &cid, out.to_str().unwrap(), ExportFormat::Json).unwrap();
-        let content = std::fs::read_to_string(&out).unwrap();
-        let data: ch_export::ExportData = serde_json::from_str(&content).unwrap();
+        export_conversation(&repo, &cid, out.to_str().expect("unexpected None"), ExportFormat::Json).expect("unexpected None");
+        let content = std::fs::read_to_string(&out).expect("file I/O failed");
+        let data: ch_export::ExportData = serde_json::from_str(&content).expect("parse failed");
         assert!(data
             .conversation
             .title
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("[REDACTED:github_token]"));
     }
 
     #[test]
     fn export_nonexistent_conversation_errors() {
         let (_dir, repo, _cid) = seeded_repo();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let out = outdir.path().join("x.md");
         let err = export_conversation(
             &repo,
             "conv_nope",
-            out.to_str().unwrap(),
+            out.to_str().expect("unexpected None"),
             ExportFormat::Markdown,
         );
         assert!(err.is_err());
@@ -194,12 +194,12 @@ mod tests {
     // ── 批量导出 ──────────────────────────────────────────────────────────
 
     fn seeded_with_workspace() -> (TempDir, Repository, String, Vec<String>) {
-        let dir = TempDir::new().unwrap();
-        let repo = Repository::open(dir.path().join("hub.db")).unwrap();
-        repo.upsert_provider(ch_domain::Provider::Generic).unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
+        let repo = Repository::open(dir.path().join("hub.db")).expect("unexpected None");
+        repo.upsert_provider(ch_domain::Provider::Generic).expect("upsert failed");
         let ws_id = repo
             .upsert_workspace(&ch_domain::Workspace::new("batch-ws"))
-            .unwrap();
+            .expect("unexpected None");
 
         let mut conv_ids = Vec::new();
         for i in 0..3 {
@@ -207,15 +207,15 @@ mod tests {
                 ch_domain::Conversation::new(ch_domain::Provider::Generic, format!("src-{i}"));
             c.workspace_id = Some(ws_id.clone());
             c.title = Some(format!("会话 {i}"));
-            let cid = repo.upsert_conversation(&c).unwrap();
+            let cid = repo.upsert_conversation(&c).expect("upsert failed");
             let mut m = ch_domain::Message::new(&cid, ch_domain::Role::User, 1);
             m.content_text = Some(format!("消息 {i}"));
-            repo.upsert_message(&m).unwrap();
+            repo.upsert_message(&m).expect("upsert failed");
             conv_ids.push(cid);
         }
         // 另一个不在该 workspace 的会话
         let other = ch_domain::Conversation::new(ch_domain::Provider::Generic, "src-other");
-        repo.upsert_conversation(&other).unwrap();
+        repo.upsert_conversation(&other).expect("upsert failed");
 
         (dir, repo, ws_id, conv_ids)
     }
@@ -223,25 +223,25 @@ mod tests {
     #[test]
     fn export_workspace_writes_all_conversations() {
         let (_dir, repo, ws_id, conv_ids) = seeded_with_workspace();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
 
         let summary = export_workspace(
             &repo,
             &ws_id,
-            outdir.path().to_str().unwrap(),
+            outdir.path().to_str().expect("unexpected None"),
             ExportFormat::Markdown,
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(summary.conversations_exported, 3);
         assert_eq!(summary.files_written, 3);
 
         // 目录下应有 3 个 .md 文件
-        let entries: Vec<_> = std::fs::read_dir(outdir.path()).unwrap().collect();
+        let entries: Vec<_> = std::fs::read_dir(outdir.path()).expect("file I/O failed").collect();
         let md_count = entries
             .iter()
             .filter(|e| {
                 e.as_ref()
-                    .unwrap()
+                    .expect("unexpected None")
                     .path()
                     .extension()
                     .and_then(|x| x.to_str())
@@ -254,25 +254,25 @@ mod tests {
         for cid in &conv_ids {
             let _ = cid; // 文件名基于 id，验证至少有内容
         }
-        let first_file = entries[0].as_ref().unwrap().path();
-        let content = std::fs::read_to_string(&first_file).unwrap();
+        let first_file = entries[0].as_ref().expect("unexpected None").path();
+        let content = std::fs::read_to_string(&first_file).expect("file I/O failed");
         assert!(content.contains("# ") || content.contains("会话"));
     }
 
     #[test]
     fn export_workspace_json_format() {
         let (_dir, repo, ws_id, _conv_ids) = seeded_with_workspace();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let summary = export_workspace(
             &repo,
             &ws_id,
-            outdir.path().to_str().unwrap(),
+            outdir.path().to_str().expect("unexpected None"),
             ExportFormat::Json,
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(summary.files_written, 3);
         let json_files: Vec<_> = std::fs::read_dir(outdir.path())
-            .unwrap()
+            .expect("unexpected None")
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
             .collect();
@@ -282,11 +282,11 @@ mod tests {
     #[test]
     fn export_workspace_nonexistent_errors() {
         let (_dir, repo, _ws_id, _conv_ids) = seeded_with_workspace();
-        let outdir = TempDir::new().unwrap();
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let err = export_workspace(
             &repo,
             "ws_nope",
-            outdir.path().to_str().unwrap(),
+            outdir.path().to_str().expect("unexpected None"),
             ExportFormat::Markdown,
         );
         assert!(err.is_err());
@@ -294,20 +294,20 @@ mod tests {
 
     #[test]
     fn export_workspace_empty_workspace() {
-        let dir = TempDir::new().unwrap();
-        let repo = Repository::open(dir.path().join("h.db")).unwrap();
-        repo.upsert_provider(ch_domain::Provider::Generic).unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
+        let repo = Repository::open(dir.path().join("h.db")).expect("unexpected None");
+        repo.upsert_provider(ch_domain::Provider::Generic).expect("upsert failed");
         let ws_id = repo
             .upsert_workspace(&ch_domain::Workspace::new("empty-ws"))
-            .unwrap();
-        let outdir = TempDir::new().unwrap();
+            .expect("unexpected None");
+        let outdir = TempDir::new().expect("tempdir creation failed");
         let summary = export_workspace(
             &repo,
             &ws_id,
-            outdir.path().to_str().unwrap(),
+            outdir.path().to_str().expect("unexpected None"),
             ExportFormat::Markdown,
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(summary.conversations_exported, 0);
         assert_eq!(summary.files_written, 0);
     }

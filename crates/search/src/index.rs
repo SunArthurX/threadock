@@ -100,7 +100,7 @@ fn build_schema() -> (Schema, SchemaFields) {
 
 /// 注册 N-gram 分词器（min=2, max=2，覆盖中文双字召回）。
 fn register_tokenizers(index: &TantivyIndex) {
-    let ngram = TextAnalyzer::builder(NgramTokenizer::new(2, 2, false).unwrap())
+    let ngram = TextAnalyzer::builder(NgramTokenizer::new(2, 2, false).expect("unexpected None"))
         .filter(LowerCaser)
         .build();
     let tokenizers = index.tokenizers();
@@ -417,16 +417,16 @@ mod tests {
     }
 
     fn index_samples(idx: &SearchIndex, msgs: &[IndexableMessage]) {
-        let mut writer = idx.writer(15_000_000).unwrap();
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
         for m in msgs {
-            idx.index_message(&mut writer, m).unwrap();
+            idx.index_message(&mut writer, m).expect("file I/O failed");
         }
-        idx.commit(writer).unwrap();
+        idx.commit(writer).expect("file I/O failed");
     }
 
     #[test]
     fn index_and_search_basic() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(
             &idx,
             &[
@@ -435,7 +435,7 @@ mod tests {
             ],
         );
 
-        let hits = idx.search(&SearchQuery::new("tauri")).unwrap();
+        let hits = idx.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
         assert!(!hits.is_empty());
         assert_eq!(hits[0].conversation_id, "c1");
         assert!(hits[0].snippet.contains("»"));
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn search_chinese_keyword() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(
             &idx,
             &[msg(
@@ -454,22 +454,22 @@ mod tests {
             )],
         );
         // 中文双字查询
-        let hits = idx.search(&SearchQuery::new("后台任务")).unwrap();
+        let hits = idx.search(&SearchQuery::new("后台任务")).expect("SQL execution failed");
         assert!(!hits.is_empty());
     }
 
     #[test]
     fn search_no_match_returns_empty() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("m1", "c1", "x", "hello world")]);
-        let hits = idx.search(&SearchQuery::new("zzznotexist")).unwrap();
+        let hits = idx.search(&SearchQuery::new("zzznotexist")).expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
     #[test]
     fn filter_by_provider() {
-        let idx = SearchIndex::open_in_memory().unwrap();
-        let mut writer = idx.writer(15_000_000).unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
         idx.index_message(
             &mut writer,
             &IndexableMessage {
@@ -482,7 +482,7 @@ mod tests {
                 body: Some("search keyword here".into()),
             },
         )
-        .unwrap();
+        .expect("unexpected None");
         idx.index_message(
             &mut writer,
             &IndexableMessage {
@@ -495,75 +495,75 @@ mod tests {
                 body: Some("search keyword here".into()),
             },
         )
-        .unwrap();
-        idx.commit(writer).unwrap();
+        .expect("unexpected None");
+        idx.commit(writer).expect("file I/O failed");
 
         let only_codex = idx
             .search(&SearchQuery::new("keyword").with_provider(Provider::Codex))
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(only_codex.len(), 1);
         assert_eq!(only_codex[0].provider, Provider::Codex);
     }
 
     #[test]
     fn filter_by_workspace() {
-        let idx = SearchIndex::open_in_memory().unwrap();
-        let mut writer = idx.writer(15_000_000).unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
         let mut m1 = msg("m1", "c1", "t", "findme text");
         m1.workspace_id = Some("ws1".into());
         let mut m2 = msg("m2", "c2", "t", "findme text");
         m2.workspace_id = Some("ws2".into());
-        idx.index_message(&mut writer, &m1).unwrap();
-        idx.index_message(&mut writer, &m2).unwrap();
-        idx.commit(writer).unwrap();
+        idx.index_message(&mut writer, &m1).expect("file I/O failed");
+        idx.index_message(&mut writer, &m2).expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
 
         let in_ws1 = idx
             .search(&SearchQuery::new("findme").with_workspace("ws1"))
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(in_ws1.len(), 1);
         assert_eq!(in_ws1[0].workspace_id.as_deref(), Some("ws1"));
     }
 
     #[test]
     fn reindex_same_message_is_idempotent() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         let m = msg("m1", "c1", "t", "unique content");
         index_samples(&idx, std::slice::from_ref(&m));
         // 再次索引同 message_id（应替换而非重复）
         index_samples(&idx, std::slice::from_ref(&m));
-        let hits = idx.search(&SearchQuery::new("unique")).unwrap();
+        let hits = idx.search(&SearchQuery::new("unique")).expect("SQL execution failed");
         assert_eq!(hits.len(), 1, "reindex should replace not duplicate");
     }
 
     #[test]
     fn delete_removes_from_index() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("m1", "c1", "t", "deletable content")]);
 
-        let mut writer = idx.writer(15_000_000).unwrap();
-        idx.delete_message(&mut writer, "m1").unwrap();
-        idx.commit(writer).unwrap();
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        idx.delete_message(&mut writer, "m1").expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
 
-        let hits = idx.search(&SearchQuery::new("deletable")).unwrap();
+        let hits = idx.search(&SearchQuery::new("deletable")).expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
     #[test]
     fn rebuild_clears_and_refills() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("old1", "c1", "t", "old content")]);
 
-        let mut writer = idx.writer(15_000_000).unwrap();
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
         idx.rebuild(&mut writer, |w| {
             idx.index_message(w, &msg("new1", "c2", "t", "new content"))?;
             Ok(1)
         })
-        .unwrap();
-        idx.commit(writer).unwrap();
+        .expect("unexpected None");
+        idx.commit(writer).expect("file I/O failed");
 
-        let old_hits = idx.search(&SearchQuery::new("old")).unwrap();
+        let old_hits = idx.search(&SearchQuery::new("old")).expect("SQL execution failed");
         assert!(old_hits.is_empty(), "old docs should be cleared");
-        let new_hits = idx.search(&SearchQuery::new("new")).unwrap();
+        let new_hits = idx.search(&SearchQuery::new("new")).expect("SQL execution failed");
         assert_eq!(new_hits.len(), 1);
     }
 
@@ -575,40 +575,40 @@ mod tests {
 
     #[test]
     fn empty_query_returns_empty() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("m1", "c1", "t", "anything")]);
-        let hits = idx.search(&SearchQuery::new("")).unwrap();
+        let hits = idx.search(&SearchQuery::new("")).expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
     #[test]
     fn persistence_across_open() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let path = dir.path().join("idx");
 
         // 第一次：建索引
         {
-            let idx = SearchIndex::open(&path).unwrap();
+            let idx = SearchIndex::open(&path).expect("unexpected None");
             index_samples(&idx, &[msg("m1", "c1", "persist", "persistent content")]);
         }
         // 第二次：重新打开应能查到
         {
-            let idx = SearchIndex::open(&path).unwrap();
-            let hits = idx.search(&SearchQuery::new("persistent")).unwrap();
+            let idx = SearchIndex::open(&path).expect("unexpected None");
+            let hits = idx.search(&SearchQuery::new("persistent")).expect("SQL execution failed");
             assert_eq!(hits.len(), 1);
         }
     }
 
     #[test]
     fn limit_respected() {
-        let idx = SearchIndex::open_in_memory().unwrap();
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
         let msgs: Vec<_> = (0..10)
             .map(|i| msg(&format!("m{i}"), "c1", "t", "shared keyword"))
             .collect();
         index_samples(&idx, &msgs);
         let hits = idx
             .search(&SearchQuery::new("keyword").with_limit(3))
-            .unwrap();
+            .expect("unexpected None");
         assert!(hits.len() <= 3);
     }
 }

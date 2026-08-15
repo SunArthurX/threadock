@@ -311,18 +311,18 @@ mod tests {
 
     #[test]
     fn parses_user_and_assistant() {
-        let raw = parse_str(SAMPLE, "test-session").unwrap();
+        let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("PDF 添加书签"));
         // user + assistant(文字) + assistant(完成) = 3 条
         // 纯 tool_result 的 user 不计入消息
         assert_eq!(raw.messages.len(), 3);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("书签"));
+        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("书签"));
     }
 
     #[test]
     fn thinking_filtered_out() {
-        let raw = parse_str(SAMPLE, "test-session").unwrap();
+        let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
         // thinking 内容不应出现在任何消息中
         assert!(raw.messages.iter().all(|m| !m
             .text
@@ -333,7 +333,7 @@ mod tests {
 
     #[test]
     fn tool_result_user_filtered() {
-        let raw = parse_str(SAMPLE, "test-session").unwrap();
+        let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
         // 纯 tool_result 的 user 消息不应出现
         assert!(raw
             .messages
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn extracts_tool_use_and_result_as_events() {
-        let raw = parse_str(SAMPLE, "test-session").unwrap();
+        let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
         assert!(!raw.events.is_empty());
         assert!(raw
             .events
@@ -358,7 +358,7 @@ mod tests {
     #[test]
     fn extracts_model() {
         let with_model = r#"{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4","content":"hi"}}"#;
-        let raw = parse_str(with_model, "s").unwrap();
+        let raw = parse_str(with_model, "s").expect("parse failed");
         assert_eq!(raw.model.as_deref(), Some("claude-sonnet-4"));
     }
 
@@ -368,7 +368,7 @@ mod tests {
             r#"{"type":"user","message":{"role":"user","content":"hello"}}"#,
             "s",
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(raw.messages[0].text.as_deref(), Some("hello"));
     }
 
@@ -378,9 +378,9 @@ mod tests {
             r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"line1"},{"type":"text","text":"line2"}]}}"#,
             "s",
         )
-        .unwrap();
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("line1"));
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("line2"));
+        .expect("unexpected None");
+        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("line1"));
+        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("line2"));
     }
 
     #[test]
@@ -394,13 +394,13 @@ mod tests {
             "not json\n{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"ok\"}}\n",
             "s",
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(raw.messages.len(), 1);
     }
 
     #[test]
     fn provider_is_claude_code() {
-        let raw = parse_str(SAMPLE, "s").unwrap();
+        let raw = parse_str(SAMPLE, "s").expect("parse failed");
         assert_eq!(raw.provider, Provider::ClaudeCode);
     }
 }

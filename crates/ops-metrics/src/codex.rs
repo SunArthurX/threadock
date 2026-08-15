@@ -175,8 +175,8 @@ pub fn collect_codex(
                     }
                     match collect_codex_session(f, &session_id) {
                         Ok((u, t)) => {
-                            usage_ref.lock().unwrap().extend(u);
-                            tools_ref.lock().unwrap().extend(t);
+                            usage_ref.lock().expect("mutex poisoned").extend(u);
+                            tools_ref.lock().expect("mutex poisoned").extend(t);
                         }
                         Err(e) => tracing::warn!(file = %f.display(), error = %e, "codex ops collect failed"),
                     }
@@ -185,8 +185,8 @@ pub fn collect_codex(
         }
     });
     Ok((
-        all_usage.into_inner().unwrap(),
-        all_tools.into_inner().unwrap(),
+        all_usage.into_inner().expect("unexpected None"),
+        all_tools.into_inner().expect("unexpected None"),
     ))
 }
 
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn collects_snapshot_and_tools() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let f = dir.path().join("rollout-x.jsonl");
         std::fs::write(
             &f,
@@ -226,9 +226,9 @@ mod tests {
                 r#"{"timestamp":"2026-08-01T10:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"rm -rf /tmp/x\"}","call_id":"c1"}}"#,
             ),
         )
-        .unwrap();
+        .expect("unexpected None");
 
-        let (usage, tools) = collect_codex_session(&f, "x1").unwrap();
+        let (usage, tools) = collect_codex_session(&f, "x1").expect("unexpected None");
         // 取最后一条快照（累计值）
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].input_tokens, 300);
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn missing_file_empty() {
-        let (u, t) = collect_codex_session("/nonexistent/x.jsonl", "x").unwrap();
+        let (u, t) = collect_codex_session("/nonexistent/x.jsonl", "x").expect("unexpected None");
         assert!(u.is_empty());
         assert!(t.is_empty());
     }

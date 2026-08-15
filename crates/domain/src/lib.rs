@@ -632,7 +632,7 @@ mod tests {
             Provider::Unknown,
         ] {
             let s = p.as_str();
-            let back: Provider = s.parse().unwrap();
+            let back: Provider = s.parse().expect("parse failed");
             assert_eq!(p, back, "provider {s} should roundtrip");
         }
     }
@@ -686,9 +686,9 @@ mod tests {
 
     #[test]
     fn serde_provider_lowercase() {
-        let json = serde_json::to_string(&Provider::ClaudeCode).unwrap();
+        let json = serde_json::to_string(&Provider::ClaudeCode).expect("unexpected None");
         assert_eq!(json, "\"claude-code\"");
-        let back: Provider = serde_json::from_str(&json).unwrap();
+        let back: Provider = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back, Provider::ClaudeCode);
     }
 }

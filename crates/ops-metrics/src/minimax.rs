@@ -50,9 +50,9 @@ mod tests {
 
     #[test]
     fn collect_reads_token_usage() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("mm.db");
-        let conn = rusqlite::Connection::open(&db).unwrap();
+        let conn = rusqlite::Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE local_runtime_token_usage (
                 session_id TEXT, turn_id TEXT, model TEXT, ts INTEGER,
@@ -60,20 +60,20 @@ mod tests {
                 cache_read_tokens INTEGER, cache_write_tokens INTEGER, cost_usd REAL);
              CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT, updated_at_ms INTEGER);",
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO local_runtime_token_usage VALUES ('mvs_1','turn_1','MiniMax-M3',1784560908997,16705,370,0,242,0,0.02)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO local_runtime_sessions VALUES ('mvs_1','{\"workspaceDir\":\"/tmp/mmproj\"}',0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
 
-        let usage = collect_minimax(&db).unwrap();
+        let usage = collect_minimax(&db).expect("unexpected None");
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].input_tokens, 16705);
         assert_eq!(usage[0].cost_usd, Some(0.02));
@@ -83,6 +83,6 @@ mod tests {
 
     #[test]
     fn missing_db_empty() {
-        assert!(collect_minimax("/nonexistent/mm.db").unwrap().is_empty());
+        assert!(collect_minimax("/nonexistent/mm.db").expect("unexpected None").is_empty());
     }
 }

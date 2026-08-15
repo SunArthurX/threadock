@@ -304,9 +304,9 @@ mod tests {
     use super::*;
 
     fn create_test_db() -> tempfile::TempDir {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("test.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             r#"
             CREATE TABLE session (
@@ -350,7 +350,7 @@ mod tests {
             );
             "#,
         )
-        .unwrap();
+        .expect("unexpected None");
 
         // 插入测试数据
         conn.execute(
@@ -358,37 +358,37 @@ mod tests {
              VALUES ('sess1', '测试会话', '/tmp/proj', 1000, 2000)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO message (id, session_id, data, time_created)
              VALUES ('msg1', 'sess1', '{\"role\":\"user\"}', 1100)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO message (id, session_id, data, time_created)
              VALUES ('msg2', 'sess1', '{\"role\":\"assistant\"}', 1200)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO part (id, message_id, session_id, data, sequence)
              VALUES ('p1', 'msg1', 'sess1', '{\"type\":\"text\",\"text\":\"你好\"}', 0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO part (id, message_id, session_id, data, sequence)
              VALUES ('p2', 'msg2', 'sess1', '{\"type\":\"text\",\"text\":\"你好啊\"}', 0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO part (id, message_id, session_id, data, sequence)
              VALUES ('p3', 'msg2', 'sess1', '{\"type\":\"tool_use\",\"name\":\"Bash\"}', 1)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
         dir
     }
@@ -397,7 +397,7 @@ mod tests {
     fn discover_sessions() {
         let dir = create_test_db();
         let db = dir.path().join("test.db");
-        let sessions = super::discover_sessions(&db).unwrap();
+        let sessions = super::discover_sessions(&db).expect("unexpected None");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "sess1");
         assert_eq!(sessions[0].title, "测试会话");
@@ -408,46 +408,46 @@ mod tests {
     fn parse_session_with_messages_and_events() {
         let dir = create_test_db();
         let db = dir.path().join("test.db");
-        let raw = super::parse_session(&db, "sess1").unwrap();
+        let raw = super::parse_session(&db, "sess1").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("测试会话"));
         assert_eq!(raw.provider, Provider::ZCode);
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("你好"));
+        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("你好"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(!raw.events.is_empty());
-        assert!(raw.events[0].summary.as_deref().unwrap().contains("Bash"));
+        assert!(raw.events[0].summary.as_deref().expect("unexpected None").contains("Bash"));
     }
 
     #[test]
     fn filters_system_reminder() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("t.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT);
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
-        ).unwrap();
+        ).expect("unexpected None");
         conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
-            .unwrap();
+            .expect("unexpected None");
         conn.execute(
             "INSERT INTO message VALUES ('m','s',0,0,'{\"role\":\"user\"}',0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO part VALUES ('p1','m','s',0,0,'{\"type\":\"text\",\"text\":\"<system-reminder>noise</system-reminder>\"}',0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO part VALUES ('p2','m','s',0,0,'{\"type\":\"text\",\"text\":\"真实内容\"}',1)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
-        let raw = super::parse_session(&db, "s").unwrap();
+        let raw = super::parse_session(&db, "s").expect("parse failed");
         assert_eq!(raw.messages.len(), 1);
         assert_eq!(raw.messages[0].text.as_deref(), Some("真实内容"));
     }
@@ -464,16 +464,16 @@ mod tests {
 
     #[test]
     fn empty_session_errors() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("t.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT);
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
-        ).unwrap();
+        ).expect("unexpected None");
         conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
-            .unwrap();
+            .expect("unexpected None");
         drop(conn);
         assert!(matches!(
             super::parse_session(&db, "s"),
@@ -484,22 +484,22 @@ mod tests {
     #[test]
     fn discover_only_lists_root_sessions() {
         // 主任务 + 2 个子任务：discover 只应返回主任务
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("hier.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', directory TEXT NOT NULL DEFAULT '', time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, parent_id TEXT);
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, sequence INTEGER);",
         )
-        .unwrap();
+        .expect("unexpected None");
         // 主任务（updated 1000），下面挂 2 个子任务（updated 5000、6000）
-        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('parent', '主任务', 1000, NULL)", []).unwrap();
-        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('child1', '子任务1', 5000, 'parent')", []).unwrap();
-        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('child2', '子任务2', 6000, 'parent')", []).unwrap();
+        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('parent', '主任务', 1000, NULL)", []).expect("database connection failed");
+        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('child1', '子任务1', 5000, 'parent')", []).expect("database connection failed");
+        conn.execute("INSERT INTO session (id, title, time_updated, parent_id) VALUES ('child2', '子任务2', 6000, 'parent')", []).expect("database connection failed");
         drop(conn);
 
-        let sessions = super::discover_sessions(&db).unwrap();
+        let sessions = super::discover_sessions(&db).expect("unexpected None");
         assert_eq!(sessions.len(), 1, "只应返回主任务");
         assert_eq!(sessions[0].session_id, "parent");
         assert_eq!(sessions[0].title, "主任务");
@@ -510,22 +510,22 @@ mod tests {
 
     #[test]
     fn parse_session_extracts_parent_id() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("parent.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', directory TEXT NOT NULL DEFAULT '', time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, parent_id TEXT);
              CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, sequence INTEGER);
              CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL DEFAULT 0, time_updated INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, sequence INTEGER);",
         )
-        .unwrap();
+        .expect("unexpected None");
         // 子任务，parent_id 指向 'parent-session'
-        conn.execute("INSERT INTO session (id, title, parent_id) VALUES ('child', '子任务', 'parent-session')", []).unwrap();
-        conn.execute("INSERT INTO message (id, session_id, data) VALUES ('m1', 'child', '{\"role\":\"user\"}')", []).unwrap();
-        conn.execute("INSERT INTO part (id, message_id, session_id, data, sequence) VALUES ('p1', 'm1', 'child', '{\"type\":\"text\",\"text\":\"子任务内容\"}', 0)", []).unwrap();
+        conn.execute("INSERT INTO session (id, title, parent_id) VALUES ('child', '子任务', 'parent-session')", []).expect("database connection failed");
+        conn.execute("INSERT INTO message (id, session_id, data) VALUES ('m1', 'child', '{\"role\":\"user\"}')", []).expect("database connection failed");
+        conn.execute("INSERT INTO part (id, message_id, session_id, data, sequence) VALUES ('p1', 'm1', 'child', '{\"type\":\"text\",\"text\":\"子任务内容\"}', 0)", []).expect("database connection failed");
         drop(conn);
 
-        let raw = super::parse_session(&db, "child").unwrap();
+        let raw = super::parse_session(&db, "child").expect("parse failed");
         assert_eq!(raw.source_parent_id.as_deref(), Some("parent-session"));
     }
 }

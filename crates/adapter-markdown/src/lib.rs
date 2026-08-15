@@ -190,26 +190,26 @@ mod tests {
 
     #[test]
     fn parses_title_and_messages() {
-        let raw = parse_str(SAMPLE, "sample.md").unwrap();
+        let raw = parse_str(SAMPLE, "sample.md").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("关于 Tauri Android 后台任务"));
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
         assert!(raw.messages[0]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("Tauri Android"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(raw.messages[1]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("WorkManager"));
     }
 
     #[test]
     fn parses_events() {
-        let raw = parse_str(SAMPLE, "sample.md").unwrap();
+        let raw = parse_str(SAMPLE, "sample.md").expect("parse failed");
         assert_eq!(raw.events.len(), 2);
         assert!(raw
             .events
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn chinese_headings_recognized() {
         let md = "## 用户\n你好\n## 助手\n你好啊\n## 命令\ncargo build\n";
-        let raw = parse_str(md, "zh.md").unwrap();
+        let raw = parse_str(md, "zh.md").expect("parse failed");
         assert_eq!(raw.messages[0].role, Role::User);
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(raw
@@ -242,7 +242,7 @@ mod tests {
     #[test]
     fn no_title_still_works() {
         let md = "## User\nhi\n## Assistant\nhello\n";
-        let raw = parse_str(md, "notitle.md").unwrap();
+        let raw = parse_str(md, "notitle.md").expect("parse failed");
         assert!(raw.title.is_none());
         assert_eq!(raw.messages.len(), 2);
     }
@@ -250,35 +250,35 @@ mod tests {
     #[test]
     fn unknown_heading_becomes_system_message() {
         let md = "## Notes\n一些笔记\n## User\nhi\n";
-        let raw = parse_str(md, "u.md").unwrap();
+        let raw = parse_str(md, "u.md").expect("parse failed");
         assert_eq!(raw.messages[0].role, Role::System);
     }
 
     #[test]
     fn source_id_is_filename() {
-        let raw = parse_str("## User\nhi\n", "/tmp/conv.md").unwrap();
+        let raw = parse_str("## User\nhi\n", "/tmp/conv.md").expect("parse failed");
         assert_eq!(raw.source_conversation_id, "/tmp/conv.md");
     }
 
     #[test]
     fn file_roundtrip() {
         use tempfile::NamedTempFile;
-        let f = NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), "## User\nhi from file\n## Assistant\nyo\n").unwrap();
-        let raw = parse_file(f.path()).unwrap();
+        let f = NamedTempFile::new().expect("tempdir creation failed");
+        std::fs::write(f.path(), "## User\nhi from file\n## Assistant\nyo\n").expect("file I/O failed");
+        let raw = parse_file(f.path()).expect("parse failed");
         assert_eq!(raw.messages.len(), 2);
         assert!(raw.messages[0]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("hi from file"));
     }
 
     #[test]
     fn integrates_with_normalization() {
         // Adapter → Normalization 端到端
-        let raw = parse_str(SAMPLE, "sample.md").unwrap();
-        let n = normalize(raw).unwrap();
+        let raw = parse_str(SAMPLE, "sample.md").expect("parse failed");
+        let n = normalize(raw).expect("unexpected None");
         assert_eq!(n.messages.len(), 2);
         assert_eq!(n.events.len(), 2);
         assert!(!n.conversation_hash.is_empty());
@@ -290,8 +290,8 @@ mod tests {
     #[test]
     fn multiline_body_preserved() {
         let md = "## User\n第一行\n第二行\n第三行\n## Assistant\nok\n";
-        let raw = parse_str(md, "ml.md").unwrap();
-        let body = raw.messages[0].text.as_deref().unwrap();
+        let raw = parse_str(md, "ml.md").expect("parse failed");
+        let body = raw.messages[0].text.as_deref().expect("unexpected None");
         assert!(body.contains("第一行"));
         assert!(body.contains("第二行"));
         assert!(body.contains("第三行"));

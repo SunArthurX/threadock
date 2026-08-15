@@ -110,7 +110,7 @@ pub fn create_backup(
     if let Some(raw_root) = &source.raw_root {
         if raw_root.exists() {
             for path in walk_files(raw_root)? {
-                let rel = path.strip_prefix(raw_root).unwrap().to_path_buf();
+                let rel = path.strip_prefix(raw_root).expect("unexpected None").to_path_buf();
                 let data = std::fs::read(&path)?;
                 raw_files.push((rel, data));
             }
@@ -291,12 +291,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn seeded() -> (TempDir, PathBuf) {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("conversation-hub.db");
-        let repo = Repository::open(&db).unwrap();
-        repo.upsert_provider(Provider::Generic).unwrap();
+        let repo = Repository::open(&db).expect("unexpected None");
+        repo.upsert_provider(Provider::Generic).expect("upsert failed");
         let c = Conversation::new(Provider::Generic, "src-backup");
-        repo.upsert_conversation(&c).unwrap();
+        repo.upsert_conversation(&c).expect("upsert failed");
         (dir, db)
     }
 
@@ -308,15 +308,15 @@ mod tests {
 
     #[test]
     fn derive_key_deterministic() {
-        let k1 = derive_key("my-password-123").unwrap();
-        let k2 = derive_key("my-password-123").unwrap();
+        let k1 = derive_key("my-password-123").expect("unexpected None");
+        let k2 = derive_key("my-password-123").expect("unexpected None");
         assert_eq!(k1, k2);
     }
 
     #[test]
     fn backup_and_restore_roundtrip() {
         let (_dir, db) = seeded();
-        let backup_dir = TempDir::new().unwrap();
+        let backup_dir = TempDir::new().expect("tempdir creation failed");
         let backup_path = backup_dir.path().join("hub.chbak");
 
         // 备份（无 raw）
@@ -328,26 +328,26 @@ mod tests {
             "test-password-1",
             &backup_path,
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(meta.format_version, 1);
         assert!(meta.db_size > 0);
 
         // 恢复到新目录
-        let restore_dir = TempDir::new().unwrap();
-        let meta2 = restore_backup(&backup_path, "test-password-1", restore_dir.path()).unwrap();
+        let restore_dir = TempDir::new().expect("tempdir creation failed");
+        let meta2 = restore_backup(&backup_path, "test-password-1", restore_dir.path()).expect("unexpected None");
         assert_eq!(meta.db_size, meta2.db_size);
         assert!(backup_path.exists());
 
         // 恢复后的库应能打开且有数据
         let restored_db = restore_dir.path().join("conversation-hub.db");
-        let repo = Repository::open(&restored_db).unwrap();
-        assert_eq!(repo.count_conversations().unwrap(), 1);
+        let repo = Repository::open(&restored_db).expect("unexpected None");
+        assert_eq!(repo.count_conversations().expect("unexpected None"), 1);
     }
 
     #[test]
     fn wrong_password_fails_to_restore() {
         let (_dir, db) = seeded();
-        let backup_dir = TempDir::new().unwrap();
+        let backup_dir = TempDir::new().expect("tempdir creation failed");
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
             &BackupSource {
@@ -357,30 +357,30 @@ mod tests {
             "correct-pw-1",
             &backup_path,
         )
-        .unwrap();
+        .expect("unexpected None");
 
-        let restore_dir = TempDir::new().unwrap();
+        let restore_dir = TempDir::new().expect("tempdir creation failed");
         let err = restore_backup(&backup_path, "wrong-password", restore_dir.path());
         assert!(err.is_err(), "wrong password must fail");
     }
 
     #[test]
     fn backup_with_raw_store() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("conversation-hub.db");
         // 先创建一个有效数据库（不能备份不存在的文件）
-        let _repo = Repository::open(&db).unwrap();
+        let _repo = Repository::open(&db).expect("unexpected None");
         let raw_root = dir.path().join("raw");
-        std::fs::create_dir_all(&raw_root).unwrap();
+        std::fs::create_dir_all(&raw_root).expect("file I/O failed");
         // 放一个 raw 文件
-        std::fs::create_dir_all(raw_root.join("ab/cd")).unwrap();
+        std::fs::create_dir_all(raw_root.join("ab/cd")).expect("file I/O failed");
         std::fs::write(
             raw_root.join("ab/cd/abcd.json.zst"),
             b"fake compressed content",
         )
-        .unwrap();
+        .expect("unexpected None");
 
-        let backup_dir = TempDir::new().unwrap();
+        let backup_dir = TempDir::new().expect("tempdir creation failed");
         let backup_path = backup_dir.path().join("hub.chbak");
 
         let meta = create_backup(
@@ -391,18 +391,18 @@ mod tests {
             "pw-12345678",
             &backup_path,
         )
-        .unwrap();
+        .expect("unexpected None");
         assert_eq!(meta.raw_count, 1);
         assert!(meta.raw_bytes > 0);
 
         // 恢复
-        let restore_dir = TempDir::new().unwrap();
-        let meta2 = restore_backup(&backup_path, "pw-12345678", restore_dir.path()).unwrap();
+        let restore_dir = TempDir::new().expect("tempdir creation failed");
+        let meta2 = restore_backup(&backup_path, "pw-12345678", restore_dir.path()).expect("unexpected None");
         assert_eq!(meta2.raw_count, 1);
         let restored_raw = restore_dir.path().join("raw/ab/cd/abcd.json.zst");
         assert!(restored_raw.exists());
         assert_eq!(
-            std::fs::read(&restored_raw).unwrap(),
+            std::fs::read(&restored_raw).expect("file I/O failed"),
             b"fake compressed content"
         );
     }
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn backup_file_has_magic() {
         let (_dir, db) = seeded();
-        let backup_dir = TempDir::new().unwrap();
+        let backup_dir = TempDir::new().expect("tempdir creation failed");
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
             &BackupSource {
@@ -420,15 +420,15 @@ mod tests {
             "pw-12345678",
             &backup_path,
         )
-        .unwrap();
-        let bytes = std::fs::read(&backup_path).unwrap();
+        .expect("unexpected None");
+        let bytes = std::fs::read(&backup_path).expect("file I/O failed");
         assert_eq!(&bytes[..6], MAGIC);
     }
 
     #[test]
     fn corrupt_backup_rejected() {
         let (_dir, db) = seeded();
-        let backup_dir = TempDir::new().unwrap();
+        let backup_dir = TempDir::new().expect("tempdir creation failed");
         let backup_path = backup_dir.path().join("hub.chbak");
         create_backup(
             &BackupSource {
@@ -438,12 +438,12 @@ mod tests {
             "pw-12345678",
             &backup_path,
         )
-        .unwrap();
+        .expect("unexpected None");
         // 破坏魔数
-        let mut bytes = std::fs::read(&backup_path).unwrap();
+        let mut bytes = std::fs::read(&backup_path).expect("file I/O failed");
         bytes[0] = 0;
-        std::fs::write(&backup_path, &bytes).unwrap();
-        let restore_dir = TempDir::new().unwrap();
+        std::fs::write(&backup_path, &bytes).expect("file I/O failed");
+        let restore_dir = TempDir::new().expect("tempdir creation failed");
         assert!(restore_backup(&backup_path, "pw-12345678", restore_dir.path()).is_err());
     }
 }

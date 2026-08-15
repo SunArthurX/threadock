@@ -3,17 +3,17 @@ use ch_daemon::{DaemonState, DaemonStateConfig};
 use std::time::Instant;
 
 fn main() {
-    let home = std::env::var("HOME").unwrap();
+    let home = std::env::var("HOME").expect("write to String");
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
     let st = DaemonState::open(DaemonStateConfig {
         data_dir: dir.into(),
     })
-    .unwrap();
-    let repo = st.repo.lock().unwrap();
+    .expect("write to String");
+    let repo = st.repo.lock().expect("write to String");
 
     // ── M6 资产 ──
     let t = Instant::now();
-    let assets = ch_ops_metrics::collect_assets(&home).unwrap();
+    let assets = ch_ops_metrics::collect_assets(&home).expect("write to String");
     let by_agent: Vec<(String, usize)> = {
         let mut m = std::collections::BTreeMap::new();
         for a in &assets {
@@ -35,7 +35,7 @@ fn main() {
             .collect();
         let _ = repo.replace_provider_assets(&format!("prov_{p}"), &subset);
     }
-    let listed = repo.list_assets().unwrap();
+    let listed = repo.list_assets().expect("write to String");
     let risky = listed.iter().filter(|a| a.risky_hits > 0).count();
     println!(
         "   入库 {} 条，含危险模式 {} 条；样本: {:?} v{} [{}]",
@@ -59,7 +59,7 @@ fn main() {
 
     // ── M8 自动化 ──
     let t = Instant::now();
-    let autos = ch_ops_metrics::collect_automations(&home).unwrap();
+    let autos = ch_ops_metrics::collect_automations(&home).expect("write to String");
     println!("M8 自动化: {:?} 采集 {} 条", t.elapsed(), autos.len());
     for p in ["zcode", "codex", "minimax-code"] {
         let subset: Vec<_> = autos
@@ -69,7 +69,7 @@ fn main() {
             .collect();
         let _ = repo.replace_provider_automations(&format!("prov_{p}"), &subset);
     }
-    for a in repo.list_automations().unwrap().iter().take(5) {
+    for a in repo.list_automations().expect("write to String").iter().take(5) {
         println!(
             "   [{}] {} {} {} {}",
             a.provider,
@@ -82,22 +82,22 @@ fn main() {
 
     // ── M7 成本归因 + 缓存（需要 source_dir：先重灌 usage）──
     let t = Instant::now();
-    let (zu, _) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).unwrap();
-    let _ = repo.replace_provider_usage("prov_zcode", &zu).unwrap();
+    let (zu, _) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).expect("write to String");
+    let _ = repo.replace_provider_usage("prov_zcode", &zu).expect("write to String");
     println!(
         "M7 前置 zcode usage 重灌（带 source_dir）: {:?} {} 条",
         t.elapsed(),
         zu.len()
     );
     println!("── 按项目成本 Top5:");
-    for d in repo.ops_cost_by_dir(None, 5).unwrap() {
+    for d in repo.ops_cost_by_dir(None, 5).expect("write to String") {
         println!(
             "   {} tokens={} cost=${:.2} req={}",
             d.dir, d.tokens, d.cost_usd, d.requests
         );
     }
     println!("── 缓存命中率:");
-    for c in repo.ops_cache_stats(None).unwrap() {
+    for c in repo.ops_cache_stats(None).expect("write to String") {
         println!(
             "   {:14} cache={}/{} 命中 {:.1}%",
             c.provider,
@@ -108,7 +108,7 @@ fn main() {
     }
 
     // ── M9 异常 ──
-    let an = repo.ops_anomalies(None).unwrap();
+    let an = repo.ops_anomalies(None).expect("write to String");
     println!("M9 异常: {} 条", an.len());
     for a in an.iter().take(8) {
         println!("   [{}] {} {}", a.severity, a.kind, a.detail);

@@ -340,15 +340,15 @@ mod tests {
             r#"{"timestamp":"2026-08-01T10:00:06.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"ls\"}","call_id":"c1"}}"#,
             r##"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n环境注入"}]}}"##,
         ];
-        std::fs::write(&f, lines.join("\n")).unwrap();
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
         f
     }
 
     #[test]
     fn parse_extracts_messages_and_events() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let f = make_test_session(dir.path());
-        let raw = parse_session(&f).unwrap();
+        let raw = parse_session(&f).expect("parse failed");
         assert_eq!(raw.provider, Provider::Codex);
         assert_eq!(raw.source_conversation_id, "sess-codex-1");
         assert_eq!(raw.messages.len(), 2, "AGENTS.md 注入应被过滤");
@@ -356,19 +356,19 @@ mod tests {
         assert!(raw.messages[0]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("排序函数"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(raw.messages[1]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("快速排序"));
         assert_eq!(raw.events.len(), 1);
         assert!(raw.events[0]
             .summary
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("exec_command"));
         assert_eq!(raw.title.as_deref(), Some("帮我写个排序函数"));
         assert!(raw.started_at.is_some());
@@ -377,9 +377,9 @@ mod tests {
 
     #[test]
     fn empty_session_errors() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let f = dir.path().join("empty.jsonl");
-        std::fs::write(&f, r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"e1"}}"#).unwrap();
+        std::fs::write(&f, r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"e1"}}"#).expect("file I/O failed");
         assert!(matches!(parse_session(&f), Err(CodexError::Empty(_))));
     }
 
@@ -393,18 +393,18 @@ mod tests {
 
     #[test]
     fn discover_finds_sessions() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let sub = dir.path().join("sessions/2026/08/01");
-        std::fs::create_dir_all(&sub).unwrap();
-        std::fs::write(sub.join("rollout-a.jsonl"), "{\"timestamp\":\"2026-08-01T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"a1\"}}").unwrap();
-        let sessions = discover_sessions(dir.path()).unwrap();
+        std::fs::create_dir_all(&sub).expect("file I/O failed");
+        std::fs::write(sub.join("rollout-a.jsonl"), "{\"timestamp\":\"2026-08-01T10:00:00Z\",\"type\":\"session_meta\",\"payload\":{\"id\":\"a1\"}}").expect("file I/O failed");
+        let sessions = discover_sessions(dir.path()).expect("unexpected None");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "a1");
     }
 
     #[test]
     fn filters_xml_injection_blocks_and_title_fallback() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let f = dir.path().join("rollout-inject.jsonl");
         let lines = [
             r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"inj1"}}"#,
@@ -415,9 +415,9 @@ mod tests {
             // 真实对话
             r##"{"timestamp":"2026-08-01T10:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"好的，我先分析项目结构。"}]}}"##,
         ];
-        std::fs::write(&f, lines.join("\n")).unwrap();
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
 
-        let raw = parse_session(&f).unwrap();
+        let raw = parse_session(&f).expect("parse failed");
         assert_eq!(raw.messages.len(), 1, "三种注入块全被过滤");
         assert_eq!(raw.messages[0].role, Role::Assistant);
         // 无真实用户消息 → 标题回退到助手消息

@@ -270,9 +270,9 @@ mod tests {
     /// 构造一个模拟的 Cursor state.vscdb。
     fn make_test_db(dir: &Path) -> std::path::PathBuf {
         let db = dir.join("state.vscdb");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);")
-            .unwrap();
+            .expect("unexpected None");
 
         // 一个 composerData + 2 个 bubble（用户 + 助手）
         let composer = serde_json::json!({
@@ -284,9 +284,9 @@ mod tests {
         });
         conn.execute(
             "INSERT INTO cursorDiskKV (key, value) VALUES ('composerData:conv1', ?1)",
-            rusqlite::params![serde_json::to_vec(&composer).unwrap()],
+            rusqlite::params![serde_json::to_vec(&composer).expect("unexpected None")],
         )
-        .unwrap();
+        .expect("unexpected None");
 
         let b1 = serde_json::json!({
             "bubbleId": "b1",
@@ -296,9 +296,9 @@ mod tests {
         });
         conn.execute(
             "INSERT INTO cursorDiskKV (key, value) VALUES ('bubbleId:conv1:b1', ?1)",
-            rusqlite::params![serde_json::to_vec(&b1).unwrap()],
+            rusqlite::params![serde_json::to_vec(&b1).expect("unexpected None")],
         )
-        .unwrap();
+        .expect("unexpected None");
 
         let b2 = serde_json::json!({
             "bubbleId": "b2",
@@ -308,18 +308,18 @@ mod tests {
         });
         conn.execute(
             "INSERT INTO cursorDiskKV (key, value) VALUES ('bubbleId:conv1:b2', ?1)",
-            rusqlite::params![serde_json::to_vec(&b2).unwrap()],
+            rusqlite::params![serde_json::to_vec(&b2).expect("unexpected None")],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
         db
     }
 
     #[test]
     fn discover_finds_composer() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
-        let sessions = discover_sessions(&db).unwrap();
+        let sessions = discover_sessions(&db).expect("unexpected None");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "conv1");
         assert_eq!(sessions[0].message_count, 2);
@@ -327,16 +327,16 @@ mod tests {
 
     #[test]
     fn parse_extracts_messages_and_time() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
-        let raw = parse_session(&db, "conv1").unwrap();
+        let raw = parse_session(&db, "conv1").expect("parse failed");
         assert_eq!(raw.provider, Provider::Cursor);
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
         assert!(raw.messages[0]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("帮我写个函数"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(raw.started_at.is_some());
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn not_found_errors() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
         assert!(matches!(
             parse_session(&db, "nope"),

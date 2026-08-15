@@ -193,45 +193,45 @@ mod tests {
 
     #[test]
     fn collects_codex_automation_toml() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let au = dir.path().join(".codex/automations/mkt/hourly-build");
-        std::fs::create_dir_all(&au).unwrap();
+        std::fs::create_dir_all(&au).expect("file I/O failed");
         std::fs::write(
             au.join("automation.toml"),
             "name = \"hourly-build\"\nschedule = \"0 * * * *\"\nprompt = \"每小时跑一次构建\"",
         )
-        .unwrap();
-        let recs = collect_automations(dir.path()).unwrap();
-        let a = recs.iter().find(|r| r.name == "hourly-build").unwrap();
+        .expect("unexpected None");
+        let recs = collect_automations(dir.path()).expect("unexpected None");
+        let a = recs.iter().find(|r| r.name == "hourly-build").expect("unexpected None");
         assert_eq!(a.schedule.as_deref(), Some("0 * * * *"));
-        assert!(a.detail.as_deref().unwrap().contains("构建"));
+        assert!(a.detail.as_deref().expect("unexpected None").contains("构建"));
     }
 
     #[test]
     fn collects_zcode_workflows() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join(".zcode/cli/db/db.sqlite");
-        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
-        let conn = rusqlite::Connection::open(&db).unwrap();
+        std::fs::create_dir_all(db.parent().expect("file I/O failed")).expect("file I/O failed");
+        let conn = rusqlite::Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE workflow_definition (name TEXT, source TEXT, enabled INTEGER, trusted INTEGER);
              CREATE TABLE workflow_run (name TEXT, status TEXT, time_created INTEGER);",
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO workflow_definition VALUES ('daily','user',1,1)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO workflow_run VALUES ('daily','completed',1784560908997)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
-        let recs = collect_automations(dir.path()).unwrap();
-        let a = recs.iter().find(|r| r.name == "daily").unwrap();
+        let recs = collect_automations(dir.path()).expect("unexpected None");
+        let a = recs.iter().find(|r| r.name == "daily").expect("unexpected None");
         assert_eq!(a.status.as_deref(), Some("completed"));
-        assert!(a.schedule.as_deref().unwrap().contains("last:"));
+        assert!(a.schedule.as_deref().expect("unexpected None").contains("last:"));
     }
 }

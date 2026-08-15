@@ -56,14 +56,14 @@ impl Repository {
 
     /// 完整性检查，对应 plan §7.3 与上线清单。
     pub fn integrity_check(&self) -> StorageResult<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let result: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
         Ok(result == "ok")
     }
 
     /// 全文搜索，对应 plan §13。委托给 search 模块。
     pub fn search(&self, q: &search::SearchQuery) -> StorageResult<Vec<search::SearchResult>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         search::search(&conn, q)
     }
 
@@ -71,8 +71,8 @@ impl Repository {
 
     /// 写入或更新 provider 记录（按 name 去重）。
     pub fn upsert_provider(&self, p: Provider) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         let id = format!("prov_{}", p.as_str());
         conn.execute(
             "INSERT INTO providers (id, name, adapter_id, adapter_version, created_at, updated_at)
@@ -91,8 +91,8 @@ impl Repository {
 
     /// 写入 installation（幂等：相同 provider+device+path 则更新）。
     pub fn upsert_installation(&self, inst: &Installation) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         conn.execute(
             "INSERT INTO installations
                 (id, provider_id, device_id, app_version, executable_path, data_path,
@@ -122,8 +122,8 @@ impl Repository {
 
     /// 写入 workspace（幂等：相同 id 更新）。
     pub fn upsert_workspace(&self, ws: &Workspace) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         conn.execute(
             "INSERT INTO workspaces
                 (id, display_name, user_title, canonical_path, git_remote, git_common_dir,
@@ -147,7 +147,7 @@ impl Repository {
     }
 
     pub fn get_workspace(&self, id: &str) -> StorageResult<Option<Workspace>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let row = conn
             .query_row(
                 "SELECT id, display_name, user_title, canonical_path, git_remote, git_common_dir,
@@ -162,7 +162,7 @@ impl Repository {
 
     /// 按显示名查找 active workspace。用于导入时复用已有 workspace（幂等）。
     pub fn find_workspace_by_name(&self, name: &str) -> StorageResult<Option<Workspace>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let row = conn
             .query_row(
                 "SELECT id, display_name, user_title, canonical_path, git_remote, git_common_dir,
@@ -178,7 +178,7 @@ impl Repository {
     }
 
     pub fn list_workspaces(&self) -> StorageResult<Vec<Workspace>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, display_name, user_title, canonical_path, git_remote, git_common_dir,
                     status, created_at, updated_at
@@ -195,7 +195,7 @@ impl Repository {
     /// 列出所有 workspace，时间字段取自其下属对话的真实时间（而非导入时间），
     /// 并按对话最新更新时间倒序排列。用于左侧列表展示。
     pub fn list_workspaces_by_conv_time(&self) -> StorageResult<Vec<Workspace>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         // COALESCE：有对话时取对话时间，否则回退到 workspace 自身时间
         let mut stmt = conn.prepare(
             "SELECT w.id, w.display_name, w.user_title, w.canonical_path, w.git_remote,
@@ -234,7 +234,7 @@ impl Repository {
     /// 写入 conversation。幂等键：(provider_id, installation_id, source_conversation_id)。
     /// 重复写入更新内容字段，但保留 user_title（plan §11.5：用户数据优先）。
     pub fn upsert_conversation(&self, c: &Conversation) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let provider_id = format!("prov_{}", c.provider.as_str());
 
         // 先尝试按幂等键查找现有 id
@@ -290,7 +290,7 @@ impl Repository {
     }
 
     pub fn get_conversation(&self, id: &str) -> StorageResult<Option<Conversation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.query_row(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
                     c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
@@ -309,7 +309,7 @@ impl Repository {
         &self,
         workspace_id: Option<&str>,
     ) -> StorageResult<Vec<Conversation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut sql = String::from(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
                     c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
@@ -337,7 +337,7 @@ impl Repository {
         &self,
         filter: &ConversationFilter,
     ) -> StorageResult<Vec<Conversation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut where_clauses: Vec<String> = Vec::new();
         let mut args: Vec<SqlValue> = Vec::new();
         let mut next_idx = 1usize;
@@ -413,7 +413,7 @@ impl Repository {
 
     /// 统计 conversation 数量（基准测试用）。
     pub fn count_conversations(&self) -> StorageResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         Ok(conn.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?)
     }
 
@@ -424,7 +424,7 @@ impl Repository {
         parent_source_id: &str,
         provider_id: &str,
     ) -> StorageResult<Vec<Conversation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
                     c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
@@ -444,7 +444,7 @@ impl Repository {
 
     /// 统计指定父会话的子任务数量。
     pub fn count_children(&self, parent_source_id: &str, provider_id: &str) -> StorageResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         Ok(conn.query_row(
             "SELECT COUNT(*) FROM conversations
              WHERE source_parent_id = ?1 AND provider_id = ?2",
@@ -457,7 +457,7 @@ impl Repository {
     /// 保留 schema 和 redaction_rules（用户自定义规则）。
     /// 用于「重置数据」功能。
     pub fn clear_all(&self) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         // conversations 有 ON DELETE CASCADE，会自动清理 messages/events/turns/tags/knowledge
         conn.execute("DELETE FROM conversations", [])?;
         conn.execute("DELETE FROM workspaces", [])?;
@@ -473,7 +473,7 @@ impl Repository {
 
     /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
     pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let mut n = 0;
         // 分块事务：每 2000 条一个事务，避免长持主锁阻塞 UI 查询
         for records in records.chunks(2000) {
@@ -518,7 +518,7 @@ impl Repository {
         &self,
         records: &[ch_domain::ToolCallRecord],
     ) -> StorageResult<usize> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let mut n = 0;
         for records in records.chunks(2000) {
             let tx = conn.transaction()?;
@@ -564,7 +564,7 @@ impl Repository {
 
     /// 治理总览 KPI（单参数：全部子查询共用 ?1，cutoff=0 即全量）。
     pub fn ops_overview(&self, days: Option<i64>) -> StorageResult<OpsOverview> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let cutoff = match days {
             Some(d) => timestamp::to_millis(Some(now_utc())).unwrap_or(0) - d * 86_400_000,
             None => 0,
@@ -602,7 +602,7 @@ impl Repository {
 
     /// 按 provider 聚合。
     pub fn ops_by_provider(&self, days: Option<i64>) -> StorageResult<Vec<ProviderUsage>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name, COUNT(*),
@@ -634,7 +634,7 @@ impl Repository {
 
     /// 按模型聚合。
     pub fn ops_by_model(&self, days: Option<i64>) -> StorageResult<Vec<ModelUsage>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT COALESCE(model, '(unknown)'), u.provider_id, COUNT(*),
@@ -666,7 +666,7 @@ impl Repository {
 
     /// 每日用量时间序列。
     pub fn ops_timeseries_daily(&self, days: Option<i64>) -> StorageResult<Vec<DailyUsage>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT date(ts/1000, 'unixepoch', 'localtime') AS day,
@@ -694,7 +694,7 @@ impl Repository {
 
     /// 工具调用 Top N。
     pub fn ops_tool_toplist(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<ToolUsageRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT tool_name, COUNT(*),
@@ -733,7 +733,7 @@ impl Repository {
         days: Option<i64>,
         n: i64,
     ) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT t.id, p.name, source_session_id, tool_name, ts, read_only,
@@ -789,7 +789,7 @@ impl Repository {
         workspace_name: Option<&str>,
         observed_updated_ms: Option<i64>,
     ) -> StorageResult<String> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let tx = conn.transaction()?;
 
         // provider（幂等；adapter_id/adapter_version NOT NULL，与 upsert_provider 同口径）
@@ -989,7 +989,7 @@ impl Repository {
         if entries.is_empty() {
             return Ok(0);
         }
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let tx = conn.transaction()?;
         let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
         let mut n = 0;
@@ -1017,7 +1017,7 @@ impl Repository {
         &self,
         provider_id: &str,
     ) -> StorageResult<std::collections::HashMap<String, Option<i64>>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt =
             conn.prepare("SELECT source_id, observed_ms FROM import_state WHERE provider_id = ?1")?;
         let rows = stmt.query_map(params![provider_id], |r| {
@@ -1057,7 +1057,7 @@ impl Repository {
         source_conversation_id: &str,
         parent: Option<&str>,
     ) -> StorageResult<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let n = conn.execute(
             "UPDATE conversations SET source_parent_id = ?1
              WHERE provider_id = ?2 AND source_conversation_id = ?3
@@ -1077,7 +1077,7 @@ impl Repository {
         if pairs.is_empty() {
             return Ok(0);
         }
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let tx = conn.transaction()?;
         let mut n = 0;
         for (source_id, parent) in pairs {
@@ -1094,7 +1094,7 @@ impl Repository {
 
     /// 已导入会话的 (provider_id, source_id) 全集（auto_sync 幂等快速检查用）。
     pub fn list_conversation_sources(&self) -> StorageResult<Vec<(String, String)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt =
             conn.prepare("SELECT provider_id, source_conversation_id FROM conversations")?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
@@ -1111,7 +1111,7 @@ impl Repository {
         provider_id: &str,
         source_conversation_id: &str,
     ) -> StorageResult<Option<Conversation>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.query_row(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
                     c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
@@ -1128,7 +1128,7 @@ impl Repository {
 
     /// 本月（自 cutoff 毫秒起）用量：返回 (tokens, cost_usd)。
     pub fn ops_month_usage_since(&self, cutoff_ms: i64) -> StorageResult<(i64, f64)> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.query_row(
             "SELECT COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens), 0),
                     COALESCE(SUM(cost_usd), 0.0)
@@ -1141,7 +1141,7 @@ impl Repository {
 
     /// 模型 → (input_tokens, output_tokens) 汇总（成本重算用）。
     pub fn ops_model_token_totals(&self) -> StorageResult<Vec<(String, String, i64, i64)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT COALESCE(model, '(unknown)') AS m, u.provider_id,
                     SUM(input_tokens), SUM(output_tokens)
@@ -1169,7 +1169,7 @@ impl Repository {
         provider_id: &str,
         records: &[ch_domain::UsageRecord],
     ) -> StorageResult<usize> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let mut n = 0;
         let mut first = true;
         for chunk in records.chunks(2000) {
@@ -1223,7 +1223,7 @@ impl Repository {
         input_per_mtok: f64,
         output_per_mtok: f64,
     ) -> StorageResult<usize> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let n = conn.execute(
             "UPDATE usage_records SET cost_usd =
                 (input_tokens * ?1 + output_tokens * ?2) / 1e6
@@ -1235,7 +1235,7 @@ impl Repository {
 
     /// 读取通用设置（不存在返回 None）。
     pub fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.query_row(
             "SELECT value FROM app_settings WHERE key = ?1",
             params![key],
@@ -1247,7 +1247,7 @@ impl Repository {
 
     /// 写入通用设置（upsert）。
     pub fn set_setting(&self, key: &str, value: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.execute(
             "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
              ON CONFLICT(key) DO UPDATE SET value = ?2",
@@ -1264,7 +1264,7 @@ impl Repository {
         provider_id: &str,
         records: &[ch_domain::AssetRecord],
     ) -> StorageResult<usize> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let mut first = true;
         let mut n = 0;
         for chunk in records.chunks(2000) {
@@ -1301,7 +1301,7 @@ impl Repository {
 
     /// 列出全部资产（带 provider 名）。
     pub fn list_assets(&self) -> StorageResult<Vec<AssetRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT p.name, a.kind, a.name, a.version, a.description, a.risky_hits, a.installed_at, a.path
              FROM asset_records a JOIN providers p ON p.id = a.provider_id
@@ -1332,7 +1332,7 @@ impl Repository {
         provider_id: &str,
         records: &[ch_domain::AutomationRecord],
     ) -> StorageResult<usize> {
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().expect("mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
             "DELETE FROM automation_records WHERE provider_id = ?1",
@@ -1361,7 +1361,7 @@ impl Repository {
 
     /// 列出全部自动化任务。
     pub fn list_automations(&self) -> StorageResult<Vec<AutomationRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT p.name, a.name, a.kind, a.schedule, a.status, a.detail
              FROM automation_records a JOIN providers p ON p.id = a.provider_id
@@ -1386,7 +1386,7 @@ impl Repository {
 
     /// M7：按来源目录归因成本/用量（Top N）。
     pub fn ops_cost_by_dir(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<DirCost>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT COALESCE(source_dir, '(未记录目录)') AS d,
@@ -1420,7 +1420,7 @@ impl Repository {
 
     /// M7：缓存命中率（cache_read / (input + cache_read)）按 provider。
     pub fn ops_cache_stats(&self, days: Option<i64>) -> StorageResult<Vec<CacheStat>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name,
@@ -1457,7 +1457,7 @@ impl Repository {
 
     /// M9：异常检测（错误尖峰 / 重试风暴 / context 超限），全部基于已有数据。
     pub fn ops_anomalies(&self, days: Option<i64>) -> StorageResult<Vec<AnomalyRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let mut out = Vec::new();
 
@@ -1564,7 +1564,7 @@ impl Repository {
 
     /// M10：Agent 健康度（成功率/错误率/重试率/稳定性评分 0-100）。
     pub fn ops_agent_health(&self, days: Option<i64>) -> StorageResult<Vec<AgentHealth>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name, COUNT(*),
@@ -1624,7 +1624,7 @@ impl Repository {
 
     /// M11：延迟 P50/P95/平均值 per agent。
     pub fn ops_latency_stats(&self, days: Option<i64>) -> StorageResult<Vec<LatencyStat>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name, u.duration_ms FROM usage_records u
@@ -1664,7 +1664,7 @@ impl Repository {
 
     /// M12：Token 浪费检测（input/output > 10 = 上下文累积/全量重放模式）。
     pub fn ops_token_waste(&self, days: Option<i64>, n: i64) -> StorageResult<Vec<TokenWaste>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name, u.source_session_id,
@@ -1719,7 +1719,7 @@ impl Repository {
     /// M13：Agent 横向对比基准（全指标 side-by-side）。
     /// 聚合各 agent 的用量/成本/健康/延迟/缓存为一张对比表。
     pub fn ops_agent_benchmark(&self, days: Option<i64>) -> StorageResult<Vec<AgentBenchmark>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
         let sql = format!(
             "SELECT p.name,
@@ -1805,7 +1805,7 @@ impl Repository {
 
     /// 列出策略规则。
     pub fn list_policy_rules(&self) -> StorageResult<Vec<PolicyRuleRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, name, pattern, kind, severity, enabled FROM policy_rules
              ORDER BY created_at ASC",
@@ -1829,7 +1829,7 @@ impl Repository {
 
     /// 新增/更新策略规则（按 name 幂等）。
     pub fn upsert_policy_rule(&self, rule: &PolicyRuleRecord) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
         conn.execute(
             "INSERT INTO policy_rules (id, name, pattern, kind, severity, enabled, created_at, updated_at)
@@ -1843,14 +1843,14 @@ impl Repository {
 
     /// 删除策略规则。
     pub fn delete_policy_rule(&self, name: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.execute("DELETE FROM policy_rules WHERE name = ?1", params![name])?;
         Ok(())
     }
 
     /// 读取预算设置（无行返回默认值）。
     pub fn get_budget_settings(&self) -> StorageResult<BudgetSettings> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let row = conn
             .query_row(
                 "SELECT monthly_token_limit, monthly_cost_limit, notify_on_exceed FROM budget_settings WHERE id = 1",
@@ -1873,7 +1873,7 @@ impl Repository {
 
     /// 保存预算设置（单行 upsert）。
     pub fn set_budget_settings(&self, s: &BudgetSettings) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
         conn.execute(
             "INSERT INTO budget_settings (id, monthly_token_limit, monthly_cost_limit, notify_on_exceed, updated_at)
@@ -1891,7 +1891,7 @@ impl Repository {
         offset: i64,
         limit: i64,
     ) -> StorageResult<Vec<AuditMessageRow>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT m.id, p.name, c.source_conversation_id, c.title, m.content_text
              FROM messages m
@@ -1919,7 +1919,7 @@ impl Repository {
 
     /// 审计扫描用：所有含命令文本的工具调用记录。
     pub fn list_tool_calls_for_audit(&self) -> StorageResult<Vec<ch_domain::ToolCallRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT t.id, p.name, source_session_id, tool_name, ts, read_only,
                     destructive, approval_status, exit_code, duration_ms, status, command_text
@@ -1956,7 +1956,7 @@ impl Repository {
 
     /// 写入 message。幂等键：(conversation_id, sequence_number)。
     pub fn upsert_message(&self, m: &Message) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let existing: Option<String> = conn
             .query_row(
                 "SELECT id FROM messages WHERE conversation_id = ?1 AND sequence_number = ?2",
@@ -1992,7 +1992,7 @@ impl Repository {
     }
 
     pub fn list_messages(&self, conversation_id: &str) -> StorageResult<Vec<Message>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, turn_id, source_message_id, role, content_text,
                     content_json, sequence_number, created_at, content_hash, raw_payload_id
@@ -2009,7 +2009,7 @@ impl Repository {
     // ── Event（幂等：按 conversation_id + sequence_number） ───────────────
 
     pub fn upsert_event(&self, e: &Event) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let existing: Option<String> = conn
             .query_row(
                 "SELECT id FROM events WHERE conversation_id = ?1 AND sequence_number = ?2",
@@ -2046,7 +2046,7 @@ impl Repository {
     }
 
     pub fn list_events(&self, conversation_id: &str) -> StorageResult<Vec<Event>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, turn_id, source_event_id, event_type, status, summary,
                     payload_json, sequence_number, created_at, completed_at, raw_payload_id
@@ -2071,7 +2071,7 @@ impl Repository {
         value: &str,
         schema_fingerprint: Option<&str>,
     ) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let provider_id = format!("prov_{}", provider.as_str());
         conn.execute(
             "INSERT INTO sync_cursors
@@ -2086,7 +2086,7 @@ impl Repository {
                 cursor_type,
                 value,
                 schema_fingerprint,
-                timestamp::to_millis(Some(now_utc())).unwrap(),
+                timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed"),
             ],
         )?;
         Ok(())
@@ -2098,7 +2098,7 @@ impl Repository {
         installation_id: Option<&str>,
         cursor_type: &str,
     ) -> StorageResult<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let provider_id = format!("prov_{}", provider.as_str());
         let v: Option<String> = conn
             .query_row(
@@ -2115,7 +2115,7 @@ impl Repository {
 
     /// 设置会话收藏状态。
     pub fn set_favorite(&self, conversation_id: &str, favorite: bool) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET favorite = ?1 WHERE id = ?2",
             params![if favorite { 1 } else { 0 }, conversation_id],
@@ -2131,7 +2131,7 @@ impl Repository {
 
     /// 查询会话是否已收藏。
     pub fn is_favorite(&self, conversation_id: &str) -> StorageResult<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let v: i64 = conn
             .query_row(
                 "SELECT favorite FROM conversations WHERE id = ?",
@@ -2145,7 +2145,7 @@ impl Repository {
 
     /// 设置归档状态。
     pub fn set_archived(&self, conversation_id: &str, archived: bool) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET is_archived = ?1 WHERE id = ?2",
             params![if archived { 1 } else { 0 }, conversation_id],
@@ -2160,7 +2160,7 @@ impl Repository {
     }
 
     pub fn is_archived(&self, conversation_id: &str) -> StorageResult<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let v: i64 = conn
             .query_row(
                 "SELECT is_archived FROM conversations WHERE id = ?",
@@ -2174,8 +2174,8 @@ impl Repository {
 
     /// 给会话添加标签（幂等）。
     pub fn add_tag(&self, conversation_id: &str, tag: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         conn.execute(
             "INSERT INTO conversation_tags (conversation_id, tag, created_at)
              VALUES (?1, ?2, ?3)
@@ -2187,7 +2187,7 @@ impl Repository {
 
     /// 移除标签。
     pub fn remove_tag(&self, conversation_id: &str, tag: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.execute(
             "DELETE FROM conversation_tags WHERE conversation_id = ?1 AND tag = ?2",
             params![conversation_id, tag],
@@ -2197,7 +2197,7 @@ impl Repository {
 
     /// 列出会话的所有标签。
     pub fn list_tags(&self, conversation_id: &str) -> StorageResult<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn
             .prepare("SELECT tag FROM conversation_tags WHERE conversation_id = ? ORDER BY tag")?;
         let rows = stmt.query_map([conversation_id], |r| r.get::<_, String>(0))?;
@@ -2210,7 +2210,7 @@ impl Repository {
 
     /// 列出收藏的会话 ID。
     pub fn list_favorite_conversation_ids(&self) -> StorageResult<Vec<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn
             .prepare("SELECT id FROM conversations WHERE favorite = 1 ORDER BY updated_at DESC")?;
         let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
@@ -2233,8 +2233,8 @@ impl Repository {
         extractor: &str,
         result_json: &str,
     ) -> StorageResult<String> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         let id = ch_domain::new_id("know");
 
         // 旧版本取消 current
@@ -2263,7 +2263,7 @@ impl Repository {
 
     /// 获取某会话的当前知识提取结果（JSON 字符串 + 版本号）。
     pub fn get_knowledge(&self, conversation_id: &str) -> StorageResult<Option<KnowledgeRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let row = conn
             .query_row(
                 "SELECT id, conversation_id, version, extractor, result_json, created_at, updated_at
@@ -2291,7 +2291,7 @@ impl Repository {
         &self,
         conversation_id: &str,
     ) -> StorageResult<Vec<KnowledgeRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
             "SELECT id, conversation_id, version, extractor, result_json, created_at, updated_at
              FROM knowledge_extractions
@@ -2320,7 +2320,7 @@ impl Repository {
 
     /// 软删除：标记 source_status=deleted，保留数据（plan §11.4 默认行为）。
     pub fn soft_delete_conversation(&self, conversation_id: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET source_status = 'deleted' WHERE id = ?1",
             params![conversation_id],
@@ -2336,7 +2336,7 @@ impl Repository {
 
     /// 恢复软删除的会话。
     pub fn restore_conversation(&self, conversation_id: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET source_status = 'active' WHERE id = ?1",
             params![conversation_id],
@@ -2353,7 +2353,7 @@ impl Repository {
     /// 硬删除：物理移除会话及其所有消息、事件、标签、知识提取（级联）。
     /// plan §3「用户可完全删除数据」。
     pub fn hard_delete_conversation(&self, conversation_id: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         // 外键 CASCADE 会自动清理 messages/events（FK 定义含 ON DELETE CASCADE 的表）。
         // conversation_tags 和 knowledge_extractions 也定义了 CASCADE。
         // 但 SQLite 的 CASCADE 需要开启 foreign_keys pragma（已在 init_pragmas 开启）。
@@ -2374,8 +2374,8 @@ impl Repository {
 
     /// 添加自定义脱敏规则（幂等：按 name upsert）。
     pub fn add_redaction_rule(&self, name: &str, pattern: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
-        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         conn.execute(
             "INSERT INTO redaction_rules (id, name, pattern, enabled, created_at, updated_at)
              VALUES (?1, ?2, ?3, 1, ?4, ?4)
@@ -2387,7 +2387,7 @@ impl Repository {
 
     /// 列出所有已启用的脱敏规则。
     pub fn list_redaction_rules(&self) -> StorageResult<Vec<RedactionRuleRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt =
             conn.prepare("SELECT id, name, pattern, enabled FROM redaction_rules ORDER BY name")?;
         let rows = stmt.query_map([], |r| {
@@ -2407,7 +2407,7 @@ impl Repository {
 
     /// 按名称删除脱敏规则。
     pub fn remove_redaction_rule(&self, name: &str) -> StorageResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().expect("mutex poisoned");
         conn.execute("DELETE FROM redaction_rules WHERE name = ?1", params![name])?;
         Ok(())
     }
@@ -2447,8 +2447,8 @@ fn row_to_workspace(r: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
         git_common_dir: r.get(5)?,
         status: parse_status(&r.get::<_, String>(6)?),
         // workspaces.created_at/updated_at 均为 NOT NULL，直接取 i64。
-        created_at: timestamp::from_millis(Some(r.get::<_, i64>(7)?)).unwrap(),
-        updated_at: timestamp::from_millis(Some(r.get::<_, i64>(8)?)).unwrap(),
+        created_at: timestamp::from_millis(Some(r.get::<_, i64>(7)?)).expect("timestamp conversion failed"),
+        updated_at: timestamp::from_millis(Some(r.get::<_, i64>(8)?)).expect("timestamp conversion failed"),
     })
 }
 
@@ -2764,13 +2764,13 @@ mod tests {
     use time::OffsetDateTime;
 
     fn repo() -> Repository {
-        let r = Repository::open_in_memory().unwrap();
-        r.upsert_provider(Provider::Generic).unwrap();
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
         r
     }
 
     fn ts(s: i64) -> Timestamp {
-        OffsetDateTime::from_unix_timestamp(s).unwrap()
+        OffsetDateTime::from_unix_timestamp(s).expect("unexpected None")
     }
 
     #[test]
@@ -2778,8 +2778,8 @@ mod tests {
         let r = repo();
         let mut ws = Workspace::new("my-web-app");
         ws.canonical_path = Some("/tmp/my-web-app".into());
-        let id = r.upsert_workspace(&ws).unwrap();
-        let got = r.get_workspace(&id).unwrap().unwrap();
+        let id = r.upsert_workspace(&ws).expect("upsert failed");
+        let got = r.get_workspace(&id).expect("unexpected None").expect("unexpected None");
         assert_eq!(got.display_name, "my-web-app");
         assert_eq!(got.canonical_path.as_deref(), Some("/tmp/my-web-app"));
 
@@ -2787,8 +2787,8 @@ mod tests {
         let mut ws2 = ws.clone();
         ws2.user_title = Some("custom".into());
         ws2.id = id.clone();
-        r.upsert_workspace(&ws2).unwrap();
-        let got2 = r.get_workspace(&id).unwrap().unwrap();
+        r.upsert_workspace(&ws2).expect("upsert failed");
+        let got2 = r.get_workspace(&id).expect("unexpected None").expect("unexpected None");
         assert_eq!(got2.user_title.as_deref(), Some("custom"));
     }
 
@@ -2798,11 +2798,11 @@ mod tests {
         let mut c = Conversation::new(Provider::Generic, "src-conv-1");
         c.title = Some("hello".into());
         c.workspace_id = None;
-        let id1 = r.upsert_conversation(&c).unwrap();
+        let id1 = r.upsert_conversation(&c).expect("upsert failed");
         // 再次写入，不指定 workspace，应更新而非新建
-        let id2 = r.upsert_conversation(&c).unwrap();
+        let id2 = r.upsert_conversation(&c).expect("upsert failed");
         assert_eq!(id1, id2, "idempotent upsert should return same id");
-        assert_eq!(r.count_conversations().unwrap(), 1);
+        assert_eq!(r.count_conversations().expect("unexpected None"), 1);
     }
 
     #[test]
@@ -2811,17 +2811,17 @@ mod tests {
         let r = repo();
         let mut c = Conversation::new(Provider::Generic, "src-conv-2");
         c.user_title = Some("my custom title".into());
-        let id = r.upsert_conversation(&c).unwrap();
+        let id = r.upsert_conversation(&c).expect("upsert failed");
 
         // 模拟来源标题变化后再次同步
         let mut c2 = c.clone();
         c2.id = ch_domain::new_id("conv"); // 新对象，但幂等键相同
         c2.user_title = None; // 这次同步没带 user_title
         c2.title = Some("source changed".into());
-        let id2 = r.upsert_conversation(&c2).unwrap();
+        let id2 = r.upsert_conversation(&c2).expect("upsert failed");
         assert_eq!(id, id2);
 
-        let got = r.get_conversation(&id).unwrap().unwrap();
+        let got = r.get_conversation(&id).expect("unexpected None").expect("unexpected None");
         assert_eq!(got.user_title.as_deref(), Some("my custom title")); // 保留
         assert_eq!(got.title.as_deref(), Some("source changed")); // 更新
     }
@@ -2830,19 +2830,19 @@ mod tests {
     fn message_upsert_dedup_by_sequence() {
         let r = repo();
         let mut c = Conversation::new(Provider::Generic, "src-conv-m");
-        let cid = r.upsert_conversation(&c).unwrap();
+        let cid = r.upsert_conversation(&c).expect("upsert failed");
         c.id = cid.clone();
 
         let mut m1 = Message::new(&cid, Role::User, 1);
         m1.content_text = Some("hi".into());
-        r.upsert_message(&m1).unwrap();
+        r.upsert_message(&m1).expect("upsert failed");
 
         // 同序号再次写入 → 更新
         let mut m2 = Message::new(&cid, Role::User, 1);
         m2.content_text = Some("hi edited".into());
-        r.upsert_message(&m2).unwrap();
+        r.upsert_message(&m2).expect("upsert failed");
 
-        let msgs = r.list_messages(&cid).unwrap();
+        let msgs = r.list_messages(&cid).expect("unexpected None");
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].content_text.as_deref(), Some("hi edited"));
     }
@@ -2852,17 +2852,17 @@ mod tests {
         let r = repo();
         let cid = r
             .upsert_conversation(&Conversation::new(Provider::Generic, "src-conv-e"))
-            .unwrap();
+            .expect("unexpected None");
 
         let mut e1 = Event::new(&cid, EventType::CommandStarted, 1);
         e1.summary = Some("cargo build".into());
-        r.upsert_event(&e1).unwrap();
+        r.upsert_event(&e1).expect("upsert failed");
 
         let mut e2 = Event::new(&cid, EventType::CommandCompleted, 1);
         e2.summary = Some("cargo build done".into());
-        r.upsert_event(&e2).unwrap();
+        r.upsert_event(&e2).expect("upsert failed");
 
-        let events = r.list_events(&cid).unwrap();
+        let events = r.list_events(&cid).expect("unexpected None");
         assert_eq!(events.len(), 1);
         // 同序号被覆盖
         assert_eq!(events[0].event_type, EventType::CommandCompleted);
@@ -2871,20 +2871,20 @@ mod tests {
     #[test]
     fn list_conversations_by_workspace() {
         let r = repo();
-        let ws_id = r.upsert_workspace(&Workspace::new("ws-a")).unwrap();
+        let ws_id = r.upsert_workspace(&Workspace::new("ws-a")).expect("upsert failed");
 
         let mut c1 = Conversation::new(Provider::Generic, "c1");
         c1.workspace_id = Some(ws_id.clone());
         let mut c2 = Conversation::new(Provider::Generic, "c2");
         c2.workspace_id = Some(ws_id.clone());
         let c3 = Conversation::new(Provider::Generic, "c3"); // 无 workspace
-        r.upsert_conversation(&c1).unwrap();
-        r.upsert_conversation(&c2).unwrap();
-        r.upsert_conversation(&c3).unwrap();
+        r.upsert_conversation(&c1).expect("upsert failed");
+        r.upsert_conversation(&c2).expect("upsert failed");
+        r.upsert_conversation(&c3).expect("upsert failed");
 
-        let in_ws = r.list_conversations(Some(&ws_id)).unwrap();
+        let in_ws = r.list_conversations(Some(&ws_id)).expect("unexpected None");
         assert_eq!(in_ws.len(), 2);
-        let all = r.list_conversations(None).unwrap();
+        let all = r.list_conversations(None).expect("unexpected None");
         assert_eq!(all.len(), 3);
     }
 
@@ -2898,60 +2898,60 @@ mod tests {
             "2026-08-02T00:00:00Z",
             None,
         )
-        .unwrap();
-        let v = r.get_cursor(Provider::Generic, None, "default").unwrap();
+        .expect("unexpected None");
+        let v = r.get_cursor(Provider::Generic, None, "default").expect("unexpected None");
         assert_eq!(v.as_deref(), Some("2026-08-02T00:00:00Z"));
 
         // 更新
         r.upsert_cursor(Provider::Generic, None, "default", "v2", None)
-            .unwrap();
-        let v2 = r.get_cursor(Provider::Generic, None, "default").unwrap();
+            .expect("unexpected None");
+        let v2 = r.get_cursor(Provider::Generic, None, "default").expect("unexpected None");
         assert_eq!(v2.as_deref(), Some("v2"));
     }
 
     #[test]
     fn integrity_check_passes_on_fresh_db() {
         let r = repo();
-        assert!(r.integrity_check().unwrap());
+        assert!(r.integrity_check().expect("unexpected None"));
     }
 
     #[test]
     fn full_pipeline_import() {
         // 端到端：workspace → conversation → messages + events，重复导入幂等
         let r = repo();
-        let ws_id = r.upsert_workspace(&Workspace::new("proj")).unwrap();
+        let ws_id = r.upsert_workspace(&Workspace::new("proj")).expect("upsert failed");
 
         let mut conv = Conversation::new(Provider::Generic, "src-pipe");
         conv.workspace_id = Some(ws_id.clone());
         conv.title = Some("pipe test".into());
         conv.started_at = Some(ts(1_785_000_000));
-        let cid = r.upsert_conversation(&conv).unwrap();
+        let cid = r.upsert_conversation(&conv).expect("upsert failed");
 
         let mut m_user = Message::new(&cid, Role::User, 1);
         m_user.content_text = Some("please build".into());
         let mut m_asst = Message::new(&cid, Role::Assistant, 2);
         m_asst.content_text = Some("done".into());
-        r.upsert_message(&m_user).unwrap();
-        r.upsert_message(&m_asst).unwrap();
+        r.upsert_message(&m_user).expect("upsert failed");
+        r.upsert_message(&m_asst).expect("upsert failed");
 
         let mut ev = Event::new(&cid, EventType::CommandCompleted, 1);
         ev.summary = Some("cargo build".into());
-        r.upsert_event(&ev).unwrap();
+        r.upsert_event(&ev).expect("upsert failed");
 
         // 验证读回
-        let got = r.get_conversation(&cid).unwrap().unwrap();
+        let got = r.get_conversation(&cid).expect("unexpected None").expect("unexpected None");
         assert_eq!(got.title.as_deref(), Some("pipe test"));
-        assert_eq!(r.list_messages(&cid).unwrap().len(), 2);
-        assert_eq!(r.list_events(&cid).unwrap().len(), 1);
+        assert_eq!(r.list_messages(&cid).expect("unexpected None").len(), 2);
+        assert_eq!(r.list_events(&cid).expect("unexpected None").len(), 1);
 
         // 重复导入整套 → 数量不变
-        r.upsert_conversation(&conv).unwrap();
-        r.upsert_message(&m_user).unwrap();
-        r.upsert_message(&m_asst).unwrap();
-        r.upsert_event(&ev).unwrap();
-        assert_eq!(r.count_conversations().unwrap(), 1);
-        assert_eq!(r.list_messages(&cid).unwrap().len(), 2);
-        assert_eq!(r.list_events(&cid).unwrap().len(), 1);
+        r.upsert_conversation(&conv).expect("upsert failed");
+        r.upsert_message(&m_user).expect("upsert failed");
+        r.upsert_message(&m_asst).expect("upsert failed");
+        r.upsert_event(&ev).expect("upsert failed");
+        assert_eq!(r.count_conversations().expect("unexpected None"), 1);
+        assert_eq!(r.list_messages(&cid).expect("unexpected None").len(), 2);
+        assert_eq!(r.list_events(&cid).expect("unexpected None").len(), 1);
     }
 
     #[test]
@@ -2965,18 +2965,18 @@ mod tests {
 
     fn conv_id(repo: &Repository, src: &str) -> String {
         repo.upsert_conversation(&Conversation::new(Provider::Generic, src))
-            .unwrap()
+            .expect("unexpected None")
     }
 
     #[test]
     fn favorite_toggle_and_query() {
         let r = repo();
         let cid = conv_id(&r, "fav-1");
-        assert!(!r.is_favorite(&cid).unwrap());
-        r.set_favorite(&cid, true).unwrap();
-        assert!(r.is_favorite(&cid).unwrap());
-        r.set_favorite(&cid, false).unwrap();
-        assert!(!r.is_favorite(&cid).unwrap());
+        assert!(!r.is_favorite(&cid).expect("unexpected None"));
+        r.set_favorite(&cid, true).expect("unexpected None");
+        assert!(r.is_favorite(&cid).expect("unexpected None"));
+        r.set_favorite(&cid, false).expect("unexpected None");
+        assert!(!r.is_favorite(&cid).expect("unexpected None"));
     }
 
     #[test]
@@ -2985,9 +2985,9 @@ mod tests {
         let a = conv_id(&r, "fav-a");
         let b = conv_id(&r, "fav-b");
         let _c = conv_id(&r, "fav-c");
-        r.set_favorite(&a, true).unwrap();
-        r.set_favorite(&b, true).unwrap();
-        let favs = r.list_favorite_conversation_ids().unwrap();
+        r.set_favorite(&a, true).expect("unexpected None");
+        r.set_favorite(&b, true).expect("unexpected None");
+        let favs = r.list_favorite_conversation_ids().expect("unexpected None");
         assert_eq!(favs.len(), 2);
         assert!(favs.contains(&a));
         assert!(favs.contains(&b));
@@ -3003,26 +3003,26 @@ mod tests {
     fn archived_toggle_and_query() {
         let r = repo();
         let cid = conv_id(&r, "arch-1");
-        assert!(!r.is_archived(&cid).unwrap());
-        r.set_archived(&cid, true).unwrap();
-        assert!(r.is_archived(&cid).unwrap());
+        assert!(!r.is_archived(&cid).expect("unexpected None"));
+        r.set_archived(&cid, true).expect("unexpected None");
+        assert!(r.is_archived(&cid).expect("unexpected None"));
     }
 
     #[test]
     fn tags_add_remove_list() {
         let r = repo();
         let cid = conv_id(&r, "tag-1");
-        assert!(r.list_tags(&cid).unwrap().is_empty());
+        assert!(r.list_tags(&cid).expect("unexpected None").is_empty());
 
-        r.add_tag(&cid, "rust").unwrap();
-        r.add_tag(&cid, "tauri").unwrap();
-        r.add_tag(&cid, "rust").unwrap(); // 幂等：重复添加不报错
+        r.add_tag(&cid, "rust").expect("unexpected None");
+        r.add_tag(&cid, "tauri").expect("unexpected None");
+        r.add_tag(&cid, "rust").expect("unexpected None"); // 幂等：重复添加不报错
 
-        let tags = r.list_tags(&cid).unwrap();
+        let tags = r.list_tags(&cid).expect("unexpected None");
         assert_eq!(tags, vec!["rust".to_string(), "tauri".to_string()]);
 
-        r.remove_tag(&cid, "rust").unwrap();
-        let tags2 = r.list_tags(&cid).unwrap();
+        r.remove_tag(&cid, "rust").expect("unexpected None");
+        let tags2 = r.list_tags(&cid).expect("unexpected None");
         assert_eq!(tags2, vec!["tauri".to_string()]);
     }
 
@@ -3030,9 +3030,9 @@ mod tests {
     fn tags_chinese() {
         let r = repo();
         let cid = conv_id(&r, "tag-zh");
-        r.add_tag(&cid, "后端").unwrap();
-        r.add_tag(&cid, "架构").unwrap();
-        let tags = r.list_tags(&cid).unwrap();
+        r.add_tag(&cid, "后端").expect("unexpected None");
+        r.add_tag(&cid, "架构").expect("unexpected None");
+        let tags = r.list_tags(&cid).expect("unexpected None");
         assert_eq!(tags.len(), 2);
         assert!(tags.contains(&"后端".to_string()));
     }
@@ -3043,7 +3043,7 @@ mod tests {
         let cid = conv_id(&r, "tag-rm");
         // 删除不存在的标签不报错
         assert!(r.remove_tag(&cid, "nope").is_ok());
-        assert!(r.list_tags(&cid).unwrap().is_empty());
+        assert!(r.list_tags(&cid).expect("unexpected None").is_empty());
     }
 
     // ── 多维过滤（plan §6.4）─────────────────────────────────────────────
@@ -3053,14 +3053,14 @@ mod tests {
     #[test]
     fn filter_by_favorite() {
         let r = repo();
-        r.upsert_provider(Provider::Codex).unwrap();
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
         let a = conv_id(&r, "f-a");
         let _b = conv_id(&r, "f-b");
-        r.set_favorite(&a, true).unwrap();
+        r.set_favorite(&a, true).expect("unexpected None");
 
         let favs = r
             .list_conversations_filtered(&ConversationFilter::new().favorites_only())
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(favs.len(), 1);
         assert_eq!(favs[0].id, a);
     }
@@ -3070,17 +3070,17 @@ mod tests {
         let r = repo();
         let a = conv_id(&r, "ar-a");
         let b = conv_id(&r, "ar-b");
-        r.set_archived(&a, true).unwrap();
+        r.set_archived(&a, true).expect("unexpected None");
 
         let unarchived = r
             .list_conversations_filtered(&ConversationFilter::new().unarchived_only())
-            .unwrap();
+            .expect("unexpected None");
         assert!(unarchived.iter().all(|c| c.id != a));
         assert!(unarchived.iter().any(|c| c.id == b));
 
         let archived = r
             .list_conversations_filtered(&ConversationFilter::new().archived_only())
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].id, a);
     }
@@ -3088,15 +3088,15 @@ mod tests {
     #[test]
     fn filter_by_provider() {
         let r = repo();
-        r.upsert_provider(Provider::Codex).unwrap();
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
         let _generic_conv = conv_id(&r, "p-generic"); // Generic（由 repo() 创建）
         let codex_conv = r
             .upsert_conversation(&Conversation::new(Provider::Codex, "p-codex"))
-            .unwrap();
+            .expect("unexpected None");
 
         let codex_only = r
             .list_conversations_filtered(&ConversationFilter::new().with_provider(Provider::Codex))
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(codex_only.len(), 1);
         assert_eq!(codex_only[0].id, codex_conv);
     }
@@ -3104,15 +3104,15 @@ mod tests {
     #[test]
     fn filter_by_workspace() {
         let r = repo();
-        let ws_id = r.upsert_workspace(&Workspace::new("ws-f")).unwrap();
+        let ws_id = r.upsert_workspace(&Workspace::new("ws-f")).expect("upsert failed");
         let mut c = Conversation::new(Provider::Generic, "ws-conv");
         c.workspace_id = Some(ws_id.clone());
-        let in_ws = r.upsert_conversation(&c).unwrap();
+        let in_ws = r.upsert_conversation(&c).expect("upsert failed");
         let _other = conv_id(&r, "ws-other");
 
         let in_workspace = r
             .list_conversations_filtered(&ConversationFilter::new().with_workspace(ws_id.clone()))
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(in_workspace.len(), 1);
         assert_eq!(in_workspace[0].id, in_ws);
     }
@@ -3120,25 +3120,25 @@ mod tests {
     #[test]
     fn filter_combined() {
         let r = repo();
-        r.upsert_provider(Provider::Codex).unwrap();
-        let ws_id = r.upsert_workspace(&Workspace::new("ws-c")).unwrap();
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
+        let ws_id = r.upsert_workspace(&Workspace::new("ws-c")).expect("upsert failed");
 
         // 一个满足全部条件的
         let mut c = Conversation::new(Provider::Codex, "combined");
         c.workspace_id = Some(ws_id.clone());
-        let target = r.upsert_conversation(&c).unwrap();
-        r.set_favorite(&target, true).unwrap();
+        let target = r.upsert_conversation(&c).expect("upsert failed");
+        r.set_favorite(&target, true).expect("unexpected None");
 
         // 不满足 favorite 的
         let mut c2 = Conversation::new(Provider::Codex, "combined-nofav");
         c2.workspace_id = Some(ws_id.clone());
-        let _nofav = r.upsert_conversation(&c2).unwrap();
+        let _nofav = r.upsert_conversation(&c2).expect("upsert failed");
 
         let filter = ConversationFilter::new()
             .with_provider(Provider::Codex)
             .with_workspace(ws_id.clone())
             .favorites_only();
-        let result = r.list_conversations_filtered(&filter).unwrap();
+        let result = r.list_conversations_filtered(&filter).expect("unexpected None");
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, target);
     }
@@ -3150,7 +3150,7 @@ mod tests {
         let _b = conv_id(&r, "all-b");
         let all = r
             .list_conversations_filtered(&ConversationFilter::new())
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(all.len(), 2);
     }
 
@@ -3161,9 +3161,9 @@ mod tests {
         let r = repo();
         let cid = conv_id(&r, "del-soft");
         // 软删除
-        r.soft_delete_conversation(&cid).unwrap();
+        r.soft_delete_conversation(&cid).expect("unexpected None");
         // 仍存在，但 source_status=deleted
-        let conv = r.get_conversation(&cid).unwrap().unwrap();
+        let conv = r.get_conversation(&cid).expect("unexpected None").expect("unexpected None");
         assert_eq!(conv.source_status, Status::Deleted);
     }
 
@@ -3171,9 +3171,9 @@ mod tests {
     fn restore_soft_deleted() {
         let r = repo();
         let cid = conv_id(&r, "del-restore");
-        r.soft_delete_conversation(&cid).unwrap();
-        r.restore_conversation(&cid).unwrap();
-        let conv = r.get_conversation(&cid).unwrap().unwrap();
+        r.soft_delete_conversation(&cid).expect("unexpected None");
+        r.restore_conversation(&cid).expect("unexpected None");
+        let conv = r.get_conversation(&cid).expect("unexpected None").expect("unexpected None");
         assert_eq!(conv.source_status, Status::Active);
     }
 
@@ -3181,22 +3181,22 @@ mod tests {
     fn import_conversation_batch_works_after_clear_all() {
         // 回归：providers.adapter_id NOT NULL，批量导入曾绑 NULL 导致
         // 重置后所有导入静默失败（2026-08-14 真实事故）
-        let r = Repository::open_in_memory().unwrap();
-        r.clear_all().unwrap();
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.clear_all().expect("unexpected None");
         let conv = ch_domain::Conversation::new(Provider::ZCode, "src-batch-regress");
         let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
         let id = r
             .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
-            .unwrap();
-        let got = r.get_conversation(&id).unwrap().unwrap();
+            .expect("unexpected None");
+        let got = r.get_conversation(&id).expect("unexpected None").expect("unexpected None");
         assert_eq!(got.source_conversation_id, "src-batch-regress");
-        assert_eq!(r.list_messages(&id).unwrap().len(), 1);
+        assert_eq!(r.list_messages(&id).expect("unexpected None").len(), 1);
         // 幂等重放
         let id2 = r
             .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
-            .unwrap();
+            .expect("unexpected None");
         assert_eq!(id, id2);
-        assert_eq!(r.list_messages(&id).unwrap().len(), 1, "重放不产生重复消息");
+        assert_eq!(r.list_messages(&id).expect("unexpected None").len(), 1, "重放不产生重复消息");
     }
 
     #[test]
@@ -3264,18 +3264,18 @@ mod tests {
         // 加消息和标签
         let mut m = Message::new(&cid, Role::User, 1);
         m.content_text = Some("to be deleted".into());
-        r.upsert_message(&m).unwrap();
-        r.add_tag(&cid, "temp").unwrap();
+        r.upsert_message(&m).expect("upsert failed");
+        r.add_tag(&cid, "temp").expect("unexpected None");
 
-        r.hard_delete_conversation(&cid).unwrap();
+        r.hard_delete_conversation(&cid).expect("unexpected None");
         // 会话已不存在
-        assert!(r.get_conversation(&cid).unwrap().is_none());
+        assert!(r.get_conversation(&cid).expect("unexpected None").is_none());
         // 消息级联删除
-        assert!(r.list_messages(&cid).unwrap().is_empty());
+        assert!(r.list_messages(&cid).expect("unexpected None").is_empty());
         // 标签级联删除
-        assert!(r.list_tags(&cid).unwrap().is_empty());
+        assert!(r.list_tags(&cid).expect("unexpected None").is_empty());
         // 总数减少
-        assert_eq!(r.count_conversations().unwrap(), 0);
+        assert_eq!(r.count_conversations().expect("unexpected None"), 0);
     }
 
     #[test]
@@ -3291,17 +3291,17 @@ mod tests {
     #[test]
     fn redaction_rule_add_list_remove() {
         let r = repo();
-        r.add_redaction_rule("emp_id", r"EMP\d{6}").unwrap();
-        r.add_redaction_rule("id_card", r"\d{17}[\dXx]").unwrap();
+        r.add_redaction_rule("emp_id", r"EMP\d{6}").expect("unexpected None");
+        r.add_redaction_rule("id_card", r"\d{17}[\dXx]").expect("unexpected None");
 
-        let rules = r.list_redaction_rules().unwrap();
+        let rules = r.list_redaction_rules().expect("unexpected None");
         assert_eq!(rules.len(), 2);
         assert!(rules.iter().any(|x| x.name == "emp_id"));
         assert!(rules.iter().any(|x| x.name == "id_card"));
         assert!(rules.iter().all(|x| x.enabled));
 
-        r.remove_redaction_rule("emp_id").unwrap();
-        let rules2 = r.list_redaction_rules().unwrap();
+        r.remove_redaction_rule("emp_id").expect("unexpected None");
+        let rules2 = r.list_redaction_rules().expect("unexpected None");
         assert_eq!(rules2.len(), 1);
         assert_eq!(rules2[0].name, "id_card");
     }
@@ -3309,9 +3309,9 @@ mod tests {
     #[test]
     fn redaction_rule_upsert_by_name() {
         let r = repo();
-        r.add_redaction_rule("test", r"v1").unwrap();
-        r.add_redaction_rule("test", r"v2").unwrap(); // 更新 pattern
-        let rules = r.list_redaction_rules().unwrap();
+        r.add_redaction_rule("test", r"v1").expect("unexpected None");
+        r.add_redaction_rule("test", r"v2").expect("unexpected None"); // 更新 pattern
+        let rules = r.list_redaction_rules().expect("unexpected None");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].pattern, "v2");
     }
@@ -3320,7 +3320,7 @@ mod tests {
     fn redaction_rule_remove_nonexistent_no_error() {
         let r = repo();
         assert!(r.remove_redaction_rule("nope").is_ok());
-        assert!(r.list_redaction_rules().unwrap().is_empty());
+        assert!(r.list_redaction_rules().expect("unexpected None").is_empty());
     }
 
     // ── 知识提取持久化（plan §13.5）──────────────────────────────────────
@@ -3330,9 +3330,9 @@ mod tests {
         let r = repo();
         let cid = conv_id(&r, "know-1");
         let json = r#"{"summary":"测试摘要","decisions":[],"todos":[],"errors":[],"commands":[],"files":[],"extractor":"rule-v1"}"#;
-        let kid = r.save_knowledge(&cid, "rule-v1", json).unwrap();
+        let kid = r.save_knowledge(&cid, "rule-v1", json).expect("unexpected None");
 
-        let rec = r.get_knowledge(&cid).unwrap().unwrap();
+        let rec = r.get_knowledge(&cid).expect("unexpected None").expect("unexpected None");
         assert_eq!(rec.id, kid);
         assert_eq!(rec.version, 1);
         assert_eq!(rec.extractor, "rule-v1");
@@ -3344,17 +3344,17 @@ mod tests {
         let r = repo();
         let cid = conv_id(&r, "know-2");
 
-        r.save_knowledge(&cid, "rule-v1", "{\"v\":1}").unwrap();
-        r.save_knowledge(&cid, "rule-v1", "{\"v\":2}").unwrap();
-        r.save_knowledge(&cid, "rule-v1", "{\"v\":3}").unwrap();
+        r.save_knowledge(&cid, "rule-v1", "{\"v\":1}").expect("unexpected None");
+        r.save_knowledge(&cid, "rule-v1", "{\"v\":2}").expect("unexpected None");
+        r.save_knowledge(&cid, "rule-v1", "{\"v\":3}").expect("unexpected None");
 
         // 当前版本应是 3
-        let current = r.get_knowledge(&cid).unwrap().unwrap();
+        let current = r.get_knowledge(&cid).expect("unexpected None").expect("unexpected None");
         assert_eq!(current.version, 3);
         assert!(current.result_json.contains("\"v\":3"));
 
         // 历史应有 3 个版本
-        let versions = r.list_knowledge_versions(&cid).unwrap();
+        let versions = r.list_knowledge_versions(&cid).expect("unexpected None");
         assert_eq!(versions.len(), 3);
         // 降序：第一个是最新
         assert_eq!(versions[0].version, 3);
@@ -3365,7 +3365,7 @@ mod tests {
     fn get_knowledge_none_when_not_saved() {
         let r = repo();
         let cid = conv_id(&r, "know-empty");
-        assert!(r.get_knowledge(&cid).unwrap().is_none());
+        assert!(r.get_knowledge(&cid).expect("unexpected None").is_none());
     }
 
     #[test]
@@ -3373,11 +3373,11 @@ mod tests {
         let r = repo();
         let a = conv_id(&r, "know-a");
         let b = conv_id(&r, "know-b");
-        r.save_knowledge(&a, "rule-v1", "{\"conv\":\"a\"}").unwrap();
-        r.save_knowledge(&b, "rule-v1", "{\"conv\":\"b\"}").unwrap();
+        r.save_knowledge(&a, "rule-v1", "{\"conv\":\"a\"}").expect("unexpected None");
+        r.save_knowledge(&b, "rule-v1", "{\"conv\":\"b\"}").expect("unexpected None");
 
-        let rec_a = r.get_knowledge(&a).unwrap().unwrap();
-        let rec_b = r.get_knowledge(&b).unwrap().unwrap();
+        let rec_a = r.get_knowledge(&a).expect("unexpected None").expect("unexpected None");
+        let rec_b = r.get_knowledge(&b).expect("unexpected None").expect("unexpected None");
         assert!(rec_a.result_json.contains("\"a\""));
         assert!(rec_b.result_json.contains("\"b\""));
         assert_eq!(rec_a.version, 1);

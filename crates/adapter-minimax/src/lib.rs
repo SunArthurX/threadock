@@ -347,7 +347,7 @@ mod tests {
 
     fn make_test_db(dir: &Path) -> std::path::PathBuf {
         let db = dir.join("runtime-state.sqlite");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             r#"CREATE TABLE local_runtime_sessions (
                 session_id TEXT PRIMARY KEY,
@@ -365,7 +365,7 @@ mod tests {
                 UNIQUE(session_id, msg_id)
             );"#,
         )
-        .unwrap();
+        .expect("unexpected None");
 
         let sess = serde_json::json!({
             "sessionId": "mvs_test1",
@@ -379,7 +379,7 @@ mod tests {
             "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('mvs_test1', ?1, 1785594356394)",
             params![sess.to_string()],
         )
-        .unwrap();
+        .expect("unexpected None");
 
         let m1 = serde_json::json!({
             "msg_id": "msg-1",
@@ -393,7 +393,7 @@ mod tests {
              VALUES ('mvs_test1', 'msg-1', 'user', 1784560910000, ?1)",
             params![m1.to_string()],
         )
-        .unwrap();
+        .expect("unexpected None");
 
         let m2 = serde_json::json!({
             "msg_id": "msg-2",
@@ -408,16 +408,16 @@ mod tests {
              VALUES ('mvs_test1', 'msg-2', 'assistant', 1784560912000, ?1)",
             params![m2.to_string()],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
         db
     }
 
     #[test]
     fn discover_lists_session() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
-        let sessions = discover_sessions(&db).unwrap();
+        let sessions = discover_sessions(&db).expect("unexpected None");
         assert_eq!(sessions.len(), 1);
         assert_eq!(sessions[0].session_id, "mvs_test1");
         assert_eq!(sessions[0].title, "测试会话");
@@ -429,20 +429,20 @@ mod tests {
     fn discover_keeps_hidden_titled_drops_untitled_stubs() {
         // MiniMax 子任务 visibility=hidden 是正常形态（有标题，保留）；
         // 仅排除无 title 的 runtime 残根（__local_runtime_v2__）
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("h.db");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
-        ).unwrap();
+        ).expect("unexpected None");
         // 有标题的隐藏子任务 → 保留
-        conn.execute("INSERT INTO local_runtime_sessions VALUES ('c1', '{\"sessionId\":\"c1\",\"title\":\"真实子任务\",\"parentSessionId\":\"p1\",\"visibility\":\"hidden\"}', 1000)", []).unwrap();
+        conn.execute("INSERT INTO local_runtime_sessions VALUES ('c1', '{\"sessionId\":\"c1\",\"title\":\"真实子任务\",\"parentSessionId\":\"p1\",\"visibility\":\"hidden\"}', 1000)", []).expect("database connection failed");
         // 无标题残根 → 排除
-        conn.execute("INSERT INTO local_runtime_sessions VALUES ('s1', '{\"sessionId\":\"s1\",\"parentSessionId\":null,\"visibility\":\"hidden\",\"archived\":true}', 2000)", []).unwrap();
+        conn.execute("INSERT INTO local_runtime_sessions VALUES ('s1', '{\"sessionId\":\"s1\",\"parentSessionId\":null,\"visibility\":\"hidden\",\"archived\":true}', 2000)", []).expect("database connection failed");
         drop(conn);
 
-        let all = discover_all_sessions(&db).unwrap();
+        let all = discover_all_sessions(&db).expect("unexpected None");
         assert!(
             all.iter().any(|s| s.session_id == "c1"),
             "隐藏但有标题的子任务应保留"
@@ -456,9 +456,9 @@ mod tests {
 
     #[test]
     fn parse_extracts_messages() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
-        let raw = parse_session(&db, "mvs_test1").unwrap();
+        let raw = parse_session(&db, "mvs_test1").expect("parse failed");
         assert_eq!(raw.provider, Provider::MinimaxCode);
         assert_eq!(raw.title.as_deref(), Some("测试会话"));
         assert_eq!(raw.model.as_deref(), Some("coder"));
@@ -467,19 +467,19 @@ mod tests {
         assert!(raw.messages[0]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("排序算法"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         // greeting 装饰被清理掉
         assert!(!raw.messages[1]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("<greeting"));
         assert!(raw.messages[1]
             .text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("快速排序"));
         assert!(raw.started_at.is_some());
         assert!(raw.messages[0].created_at.is_some());
@@ -487,7 +487,7 @@ mod tests {
 
     #[test]
     fn not_found_errors() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = make_test_db(dir.path());
         assert!(matches!(
             parse_session(&db, "nope"),
@@ -497,18 +497,18 @@ mod tests {
 
     #[test]
     fn empty_session_errors() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("empty.sqlite");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT, updated_at_ms INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
-        ).unwrap();
+        ).expect("unexpected None");
         conn.execute(
             "INSERT INTO local_runtime_sessions VALUES ('s', '{\"title\":\"x\"}', 0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
         assert!(matches!(
             parse_session(&db, "s"),
@@ -519,33 +519,33 @@ mod tests {
     #[test]
     fn discover_only_lists_root_sessions() {
         // 主任务 + 2 个子任务：discover 只应返回主任务
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("hier.sqlite");
-        let conn = Connection::open(&db).unwrap();
+        let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         )
-        .unwrap();
+        .expect("unexpected None");
         // 主任务（updated 1000），下面挂 2 个子任务（updated 5000、6000）
         conn.execute(
             "INSERT INTO local_runtime_sessions VALUES ('parent', '{\"sessionId\":\"parent\",\"title\":\"主任务\",\"parentSessionId\":null}', 1000)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO local_runtime_sessions VALUES ('child1', '{\"sessionId\":\"child1\",\"title\":\"子任务1\",\"parentSessionId\":\"parent\"}', 5000)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO local_runtime_sessions VALUES ('child2', '{\"sessionId\":\"child2\",\"title\":\"子任务2\",\"parentSessionId\":\"parent\"}', 6000)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
 
-        let sessions = discover_sessions(&db).unwrap();
+        let sessions = discover_sessions(&db).expect("unexpected None");
         assert_eq!(sessions.len(), 1, "只应返回主任务");
         assert_eq!(sessions[0].session_id, "parent");
         assert_eq!(sessions[0].title, "主任务");

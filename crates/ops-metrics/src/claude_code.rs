@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn collects_usage_and_tool_calls() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let f = dir.path().join("abc.jsonl");
         std::fs::write(
             &f,
@@ -182,9 +182,9 @@ mod tests {
                 r#"{"timestamp":"2026-08-01T10:00:06.000Z","type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"rm -rf /tmp/x"}}]}}"#,
             ),
         )
-        .unwrap();
+        .expect("unexpected None");
 
-        let (usage, tools) = collect_claude_code_session(&f, "abc").unwrap();
+        let (usage, tools) = collect_claude_code_session(&f, "abc").expect("unexpected None");
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].input_tokens, 100);
         assert_eq!(usage[0].cache_read_tokens, 200);
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn missing_file_empty() {
-        let (u, t) = collect_claude_code_session("/nonexistent/x.jsonl", "x").unwrap();
+        let (u, t) = collect_claude_code_session("/nonexistent/x.jsonl", "x").expect("unexpected None");
         assert!(u.is_empty());
         assert!(t.is_empty());
     }

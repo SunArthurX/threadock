@@ -234,8 +234,8 @@ mod tests {
     use tempfile::TempDir;
 
     fn store() -> (TempDir, RawStore) {
-        let dir = TempDir::new().unwrap();
-        let store = RawStore::new(dir.path()).unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
+        let store = RawStore::new(dir.path()).expect("unexpected None");
         (dir, store)
     }
 
@@ -243,7 +243,7 @@ mod tests {
     fn put_returns_correct_hash() {
         let (_dir, store) = store();
         let data = b"hello world";
-        let payload = store.put(data).unwrap();
+        let payload = store.put(data).expect("unexpected None");
         // 与 crate 内部算法独立计算对比，保证一致性
         let expected = blake3::hash(data).to_hex().to_string();
         assert_eq!(payload.hash, expected);
@@ -259,30 +259,30 @@ mod tests {
     fn put_then_get_roundtrips() {
         let (_dir, store) = store();
         let data = b"some raw conversation content \xe4\xb8\xad\xe6\x96\x87";
-        let payload = store.put(data).unwrap();
-        let back = store.get(&payload.hash).unwrap();
+        let payload = store.put(data).expect("unexpected None");
+        let back = store.get(&payload.hash).expect("unexpected None");
         assert_eq!(back, data);
     }
 
     #[test]
     fn identical_content_deduped() {
         let (_dir, store) = store();
-        let p1 = store.put(b"same content").unwrap();
-        let p2 = store.put(b"same content").unwrap();
+        let p1 = store.put(b"same content").expect("unexpected None");
+        let p2 = store.put(b"same content").expect("unexpected None");
         assert_eq!(p1.hash, p2.hash);
         assert_eq!(p1.rel_path, p2.rel_path);
         // 物理上只有一个文件
-        assert_eq!(store.stats().unwrap().count, 1);
+        assert_eq!(store.stats().expect("unexpected None").count, 1);
     }
 
     #[test]
     fn different_content_different_hash_and_path() {
         let (_dir, store) = store();
-        let p1 = store.put(b"aaa").unwrap();
-        let p2 = store.put(b"bbb").unwrap();
+        let p1 = store.put(b"aaa").expect("unexpected None");
+        let p2 = store.put(b"bbb").expect("unexpected None");
         assert_ne!(p1.hash, p2.hash);
         assert_ne!(p1.rel_path, p2.rel_path);
-        assert_eq!(store.stats().unwrap().count, 2);
+        assert_eq!(store.stats().expect("unexpected None").count, 2);
     }
 
     #[test]
@@ -297,19 +297,19 @@ mod tests {
             title: "test".into(),
             messages: vec!["hi".into(), "bye".into()],
         };
-        let payload = store.put_json(&v).unwrap();
-        let back: Conv = store.get_json(&payload.hash).unwrap();
+        let payload = store.put_json(&v).expect("unexpected None");
+        let back: Conv = store.get_json(&payload.hash).expect("unexpected None");
         assert_eq!(back, v);
     }
 
     #[test]
     fn exists_works() {
         let (_dir, store) = store();
-        let p = store.put(b"data").unwrap();
-        assert!(store.exists(&p.hash).unwrap());
+        let p = store.put(b"data").expect("unexpected None");
+        assert!(store.exists(&p.hash).expect("unexpected None"));
         assert!(!store
             .exists("0000000000000000000000000000000000000000000000000000000000000000")
-            .unwrap());
+            .expect("unexpected None"));
     }
 
     #[test]
@@ -341,7 +341,7 @@ mod tests {
         let (_dir, store) = store();
         // 高重复数据应被显著压缩
         let data: Vec<u8> = vec![b'A'; 10_000];
-        let payload = store.put(&data).unwrap();
+        let payload = store.put(&data).expect("unexpected None");
         assert_eq!(payload.original_size, 10_000);
         assert!(
             payload.stored_size < 200,
@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn stats_on_empty_store() {
         let (_dir, store) = store();
-        let s = store.stats().unwrap();
+        let s = store.stats().expect("unexpected None");
         assert_eq!(s.count, 0);
         assert_eq!(s.bytes, 0);
     }
@@ -361,8 +361,8 @@ mod tests {
     #[test]
     fn path_of_returns_existing_layout() {
         let (_dir, store) = store();
-        let p = store.put(b"x").unwrap();
-        let path = store.path_of(&p.hash).unwrap();
+        let p = store.put(b"x").expect("unexpected None");
+        let path = store.path_of(&p.hash).expect("unexpected None");
         assert!(path.exists());
         assert!(path.to_string_lossy().ends_with(".json.zst"));
     }
@@ -373,8 +373,8 @@ mod tests {
         let (_dir, store) = store();
         let data = b"concurrent-test";
         for _ in 0..5 {
-            store.put(data).unwrap();
+            store.put(data).expect("unexpected None");
         }
-        assert_eq!(store.stats().unwrap().count, 1);
+        assert_eq!(store.stats().expect("unexpected None").count, 1);
     }
 }

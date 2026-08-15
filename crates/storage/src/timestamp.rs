@@ -39,37 +39,37 @@ mod tests {
     #[test]
     fn known_instant_roundtrip() {
         // 2026-08-02T12:00:00Z = 1785230400000 ms
-        let t = OffsetDateTime::from_unix_timestamp(1_785_230_400).unwrap();
-        let ms = to_millis(Some(t)).unwrap();
+        let t = OffsetDateTime::from_unix_timestamp(1_785_230_400).expect("unexpected None");
+        let ms = to_millis(Some(t)).expect("timestamp conversion failed");
         assert_eq!(ms, 1_785_230_400_000);
-        let back = from_millis(Some(ms)).unwrap();
+        let back = from_millis(Some(ms)).expect("timestamp conversion failed");
         assert_eq!(back, t);
     }
 
     #[test]
     fn subsecond_precision_preserved() {
         // 毫秒级精度：1.5 秒（1500 毫秒）能精确往返
-        let t = OffsetDateTime::from_unix_timestamp_nanos(1_500_000_000).unwrap();
-        let ms = to_millis(Some(t)).unwrap();
+        let t = OffsetDateTime::from_unix_timestamp_nanos(1_500_000_000).expect("unexpected None");
+        let ms = to_millis(Some(t)).expect("timestamp conversion failed");
         assert_eq!(ms, 1500);
-        let back = from_millis(Some(ms)).unwrap();
+        let back = from_millis(Some(ms)).expect("timestamp conversion failed");
         assert_eq!(back, t);
     }
 
     #[test]
     fn sub_millisecond_precision_is_truncated() {
         // 500 纳秒 < 1 毫秒，会被截断到整毫秒——这是预期的存储精度
-        let t = OffsetDateTime::from_unix_timestamp_nanos(1_000_500_000).unwrap();
-        let ms = to_millis(Some(t)).unwrap();
+        let t = OffsetDateTime::from_unix_timestamp_nanos(1_000_500_000).expect("unexpected None");
+        let ms = to_millis(Some(t)).expect("timestamp conversion failed");
         assert_eq!(ms, 1000);
     }
 
     #[test]
     fn negative_millis_handled() {
         // 1969 年（负时间戳）应能往返
-        let t = OffsetDateTime::from_unix_timestamp(-1).unwrap();
-        let ms = to_millis(Some(t)).unwrap();
-        let back = from_millis(Some(ms)).unwrap();
+        let t = OffsetDateTime::from_unix_timestamp(-1).expect("unexpected None");
+        let ms = to_millis(Some(t)).expect("timestamp conversion failed");
+        let back = from_millis(Some(ms)).expect("timestamp conversion failed");
         assert_eq!(back, t);
     }
 }

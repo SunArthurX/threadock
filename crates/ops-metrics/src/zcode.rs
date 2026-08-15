@@ -101,16 +101,16 @@ mod tests {
 
     #[test]
     fn collect_from_missing_db_returns_empty() {
-        let (u, t) = collect_zcode("/nonexistent/zcode.db").unwrap();
+        let (u, t) = collect_zcode("/nonexistent/zcode.db").expect("unexpected None");
         assert!(u.is_empty());
         assert!(t.is_empty());
     }
 
     #[test]
     fn collect_reads_turn_and_tool_usage() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let db = dir.path().join("zc.db");
-        let conn = rusqlite::Connection::open(&db).unwrap();
+        let conn = rusqlite::Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
             "CREATE TABLE model_usage (id TEXT, session_id TEXT, turn_id TEXT, model_id TEXT,
                 started_at INTEGER, status TEXT, duration_ms INTEGER, retry_count INTEGER,
@@ -122,22 +122,22 @@ mod tests {
                 read_only INTEGER, destructive INTEGER, approval_status TEXT,
                 exit_code INTEGER, duration_ms INTEGER, status TEXT);",
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute(
             "INSERT INTO model_usage VALUES ('mu1','s1','t1','GLM-5.2',1000000,'completed',5000,0,100,50,10,200,0,0)",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         conn.execute("INSERT INTO session VALUES ('s1','/tmp/proj')", [])
-            .unwrap();
+            .expect("unexpected None");
         conn.execute(
             "INSERT INTO tool_usage VALUES ('s1','Bash',1000000,0,1,'none',0,300,'completed')",
             [],
         )
-        .unwrap();
+        .expect("unexpected None");
         drop(conn);
 
-        let (usage, tools) = collect_zcode(&db).unwrap();
+        let (usage, tools) = collect_zcode(&db).expect("unexpected None");
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].id, "zmu_mu1");
         assert_eq!(usage[0].model.as_deref(), Some("GLM-5.2"));

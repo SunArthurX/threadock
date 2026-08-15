@@ -145,7 +145,7 @@ impl RuleExtractor {
         }
 
         // 来自消息中的反引号代码块（`xxx`）
-        let backtick = Regex::new(r"`([^`]{3,})`").unwrap();
+        let backtick = Regex::new(r"`([^`]{3,})`").expect("invalid regex");
         for m in &input.messages {
             if let Some(text) = &m.content_text {
                 for cap in backtick.captures_iter(text) {
@@ -282,7 +282,7 @@ impl RuleExtractor {
         // 消息中的路径模式（src/xxx 或 *.ext）
         let path_re =
             Regex::new(r"[\w\-./]+/[ \w\-./]+\.\w+|[\w\-]+\.(rs|ts|js|py|go|md|toml|json)")
-                .unwrap();
+                .expect("unexpected None");
         for m in &input.messages {
             if let Some(text) = &m.content_text {
                 for cap in path_re.captures_iter(text) {
@@ -335,7 +335,7 @@ fn looks_like_command(s: &str) -> bool {
 /// 从文本提取第一个看起来像路径的片段。
 fn extract_path(s: &str) -> Option<String> {
     // 取第一个含 / 或已知扩展名的 token
-    let re = Regex::new(r"[\w\-./]+/[ \w\-./]+|[\w\-]+\.\w+").unwrap();
+    let re = Regex::new(r"[\w\-./]+/[ \w\-./]+|[\w\-]+\.\w+").expect("invalid regex");
     re.captures(s)
         .and_then(|c| c.get(0))
         .map(|m| m.as_str().to_string())
@@ -565,8 +565,8 @@ mod tests {
             vec![msg("m1", Role::User, "TODO something")],
             vec![],
         ));
-        let json = serde_json::to_string(&r).unwrap();
-        let back: ExtractionResult = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&r).expect("unexpected None");
+        let back: ExtractionResult = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(r, back);
     }
 }

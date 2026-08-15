@@ -314,8 +314,8 @@ pub fn render_html(report: &AuditReport) -> String {
         html,
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
     )
-    .unwrap();
-    writeln!(html, "<title>Conversation Hub 安全审计报告</title>").unwrap();
+    .expect("unexpected None");
+    writeln!(html, "<title>Conversation Hub 安全审计报告</title>").expect("file I/O failed");
     writeln!(
         html,
         "<style>
@@ -333,25 +333,25 @@ pub fn render_html(report: &AuditReport) -> String {
         code{{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:#f5f5f5;padding:1px 4px;border-radius:3px;}}
         </style></head><body>"
     )
-    .unwrap();
-    writeln!(html, "<h1>🛡 Conversation Hub 安全审计报告</h1>").unwrap();
+    .expect("unexpected None");
+    writeln!(html, "<h1>🛡 Conversation Hub 安全审计报告</h1>").expect("file I/O failed");
     writeln!(
         html,
         "<div class='meta'>生成时间 {} · 扫描 {} 条消息 / {} 条工具调用</div>",
         report.generated_at, report.scanned_messages, report.scanned_tool_calls
     )
-    .unwrap();
+    .expect("unexpected None");
     writeln!(
         html,
         "<div class='stats'><div class='stat'><b>{}</b>高危</div><div class='stat medium'><b>{}</b>中危</div><div class='stat low'><b>{}</b>低危</div></div>",
         report.high, report.medium, report.low
     )
-    .unwrap();
+    .expect("unexpected None");
     writeln!(
         html,
         "<table><tr><th>级别</th><th>类型</th><th>规则</th><th>来源</th><th>上下文</th></tr>"
     )
-    .unwrap();
+    .expect("unexpected None");
     for f in report.findings.iter().take(500) {
         let title_disp = html_escape(&f.conversation_title.clone().unwrap_or_else(|| {
             f.source_conversation_id
@@ -366,9 +366,9 @@ pub fn render_html(report: &AuditReport) -> String {
             title_disp,
             html_escape(&f.snippet)
         )
-        .unwrap();
+        .expect("unexpected None");
     }
-    writeln!(html, "</table></body></html>").unwrap();
+    writeln!(html, "</table></body></html>").expect("file I/O failed");
     html
 }
 
@@ -384,7 +384,7 @@ mod tests {
     use ch_domain::Provider;
 
     fn scanner() -> AuditScanner {
-        AuditScanner::build(&[]).unwrap()
+        AuditScanner::build(&[]).expect("unexpected None")
     }
 
     #[test]
@@ -403,7 +403,7 @@ mod tests {
             "应命中 github_token: {f:?}"
         );
         // 片段必须脱敏
-        let gh = f.iter().find(|x| x.rule == "github_token").unwrap();
+        let gh = f.iter().find(|x| x.rule == "github_token").expect("unexpected None");
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
         assert!(!gh
             .snippet
@@ -425,7 +425,7 @@ mod tests {
         };
         let findings = sc.scan_message(&row); // 修复前此处 panic
         assert!(findings.iter().any(|f| f.rule == "github_token"));
-        let gh = findings.iter().find(|f| f.rule == "github_token").unwrap();
+        let gh = findings.iter().find(|f| f.rule == "github_token").expect("unexpected None");
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
         // 片段不应包含损坏的 UTF-8（已是 String，天然安全）
         assert!(gh.snippet.chars().count() > 0);
@@ -473,7 +473,7 @@ mod tests {
             severity: "high".into(),
             enabled: true,
         }];
-        let sc = AuditScanner::build(&custom).unwrap();
+        let sc = AuditScanner::build(&custom).expect("unexpected None");
         let tc = ToolCallRecord {
             id: "t2".into(),
             provider: Provider::Codex,

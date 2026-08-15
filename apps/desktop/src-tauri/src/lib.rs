@@ -1047,36 +1047,36 @@ async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<Strin
     let s = repo.ops_weekly_summary().map_err(|e| internal_err(e))?;
     let mut html = String::new();
     use std::fmt::Write;
-    writeln!(html, "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>Conversation Hub 周报</title>").unwrap();
-    writeln!(html, "<style>body{{font-family:-apple-system,'PingFang SC',sans-serif;margin:40px;background:#f7f8fa;color:#1a1e2e;}}").unwrap();
-    writeln!(html, "h1{{font-size:20px;}} .meta{{color:#666;font-size:13px;margin-bottom:24px;}}").unwrap();
-    writeln!(html, ".grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;}}").unwrap();
-    writeln!(html, ".card{{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;}}").unwrap();
-    writeln!(html, ".card b{{display:block;font-size:24px;margin-bottom:4px;}}").unwrap();
-    writeln!(html, "table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;font-size:13px;}}").unwrap();
-    writeln!(html, "th,td{{padding:10px 14px;border-bottom:1px solid #f0f0f0;text-align:left;}}").unwrap();
-    writeln!(html, "th{{background:#f9fafb;font-size:11px;color:#6b7280;text-transform:uppercase;}}").unwrap();
-    writeln!(html, ".good{{color:#059669;}} .warn{{color:#d97706;}} .bad{{color:#dc2626;}}").unwrap();
-    writeln!(html, "</style></head><body>").unwrap();
-    writeln!(html, "<h1>📊 Conversation Hub 治理周报</h1>").unwrap();
+    writeln!(html, "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>Conversation Hub 周报</title>").expect("write to String");
+    writeln!(html, "<style>body{{font-family:-apple-system,'PingFang SC',sans-serif;margin:40px;background:#f7f8fa;color:#1a1e2e;}}").expect("write to String");
+    writeln!(html, "h1{{font-size:20px;}} .meta{{color:#666;font-size:13px;margin-bottom:24px;}}").expect("write to String");
+    writeln!(html, ".grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px;}}").expect("write to String");
+    writeln!(html, ".card{{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px;}}").expect("write to String");
+    writeln!(html, ".card b{{display:block;font-size:24px;margin-bottom:4px;}}").expect("write to String");
+    writeln!(html, "table{{width:100%;border-collapse:collapse;background:#fff;border-radius:10px;font-size:13px;}}").expect("write to String");
+    writeln!(html, "th,td{{padding:10px 14px;border-bottom:1px solid #f0f0f0;text-align:left;}}").expect("write to String");
+    writeln!(html, "th{{background:#f9fafb;font-size:11px;color:#6b7280;text-transform:uppercase;}}").expect("write to String");
+    writeln!(html, ".good{{color:#059669;}} .warn{{color:#d97706;}} .bad{{color:#dc2626;}}").expect("write to String");
+    writeln!(html, "</style></head><body>").expect("write to String");
+    writeln!(html, "<h1>📊 Conversation Hub 治理周报</h1>").expect("write to String");
     writeln!(html, "<div class='meta'>{} · 覆盖最近 7 天 · {} 个 Agent</div>",
         ch_domain::now_utc().format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
-        s.benchmark.len()).unwrap();
+        s.benchmark.len()).expect("write to String");
 
     // KPI
-    writeln!(html, "<div class='grid'>").unwrap();
-    writeln!(html, "<div class='card'><b>{}</b>模型请求</div>", s.overview.total_requests).unwrap();
+    writeln!(html, "<div class='grid'>").expect("write to String");
+    writeln!(html, "<div class='card'><b>{}</b>模型请求</div>", s.overview.total_requests).expect("write to String");
     writeln!(html, "<div class='card'><b>{}</b>总 Tokens</div>",
         if s.overview.total_tokens >= 1_000_000_000 { format!("{:.2}B", s.overview.total_tokens as f64 / 1e9) }
         else if s.overview.total_tokens >= 1_000_000 { format!("{:.2}M", s.overview.total_tokens as f64 / 1e6) }
-        else { s.overview.total_tokens.to_string() }).unwrap();
-    writeln!(html, "<div class='card'><b>${:.2}</b>估算成本</div>", s.overview.cost_usd).unwrap();
-    writeln!(html, "<div class='card'><b>{}</b>危险操作</div>", s.overview.destructive_calls).unwrap();
-    writeln!(html, "<div class='card'><b>{}</b>浪费会话</div>", s.waste_sessions).unwrap();
-    writeln!(html, "</div>").unwrap();
+        else { s.overview.total_tokens.to_string() }).expect("write to String");
+    writeln!(html, "<div class='card'><b>${:.2}</b>估算成本</div>", s.overview.cost_usd).expect("write to String");
+    writeln!(html, "<div class='card'><b>{}</b>危险操作</div>", s.overview.destructive_calls).expect("write to String");
+    writeln!(html, "<div class='card'><b>{}</b>浪费会话</div>", s.waste_sessions).expect("write to String");
+    writeln!(html, "</div>").expect("write to String");
 
     // Agent 对比
-    writeln!(html, "<h2>Agent 横向对比</h2><table><tr><th>Agent</th><th>请求</th><th>Tokens</th><th>成本</th><th>成功率</th><th>缓存命中</th><th>会话</th></tr>").unwrap();
+    writeln!(html, "<h2>Agent 横向对比</h2><table><tr><th>Agent</th><th>请求</th><th>Tokens</th><th>成本</th><th>成功率</th><th>缓存命中</th><th>会话</th></tr>").expect("write to String");
     for b in &s.benchmark {
         writeln!(html, "<tr><td><b>{}</b></td><td>{}</td><td>{}</td><td>${:.2}</td><td class='{}'>{:.1}%</td><td>{:.1}%</td><td>{}</td></tr>",
             b.provider, b.total_requests,
@@ -1085,26 +1085,26 @@ async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<Strin
             else { b.total_tokens.to_string() },
             b.cost_usd,
             if b.success_rate > 95.0 {"good"} else if b.success_rate > 80.0 {"warn"} else {"bad"},
-            b.success_rate, b.cache_hit_rate, b.sessions).unwrap();
+            b.success_rate, b.cache_hit_rate, b.sessions).expect("write to String");
     }
-    writeln!(html, "</table>").unwrap();
+    writeln!(html, "</table>").expect("write to String");
 
     // 健康度
     if !s.health.is_empty() {
-        writeln!(html, "<h2 style='margin-top:24px;'>Agent 健康度</h2><table><tr><th>Agent</th><th>请求</th><th>错误</th><th>重试</th><th>稳定性</th></tr>").unwrap();
+        writeln!(html, "<h2 style='margin-top:24px;'>Agent 健康度</h2><table><tr><th>Agent</th><th>请求</th><th>错误</th><th>重试</th><th>稳定性</th></tr>").expect("write to String");
         for h in &s.health {
             writeln!(html, "<tr><td>{}</td><td>{}</td><td class='{}'>{}</td><td>{}</td><td class='{}'>{:.0}</td></tr>",
                 h.provider, h.total_requests, h.errors,
                 if h.errors == 0 {"good"} else {"warn"},
                 h.retries,
                 if h.stability_score > 80.0 {"good"} else if h.stability_score > 50.0 {"warn"} else {"bad"},
-                h.stability_score).unwrap();
+                h.stability_score).expect("write to String");
         }
-        writeln!(html, "</table>").unwrap();
+        writeln!(html, "</table>").expect("write to String");
     }
 
-    writeln!(html, "<p style='margin-top:24px;color:#aaa;font-size:11px;'>由 Conversation Hub 自动生成 · 数据口径: input + output + reasoning (cache 不计费)</p>").unwrap();
-    writeln!(html, "</body></html>").unwrap();
+    writeln!(html, "<p style='margin-top:24px;color:#aaa;font-size:11px;'>由 Conversation Hub 自动生成 · 数据口径: input + output + reasoning (cache 不计费)</p>").expect("write to String");
+    writeln!(html, "</body></html>").expect("write to String");
     Ok(html)
 }
 

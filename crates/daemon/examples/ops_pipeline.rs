@@ -3,30 +3,30 @@ use ch_daemon::{DaemonState, DaemonStateConfig};
 use std::time::Instant;
 
 fn main() {
-    let home = std::env::var("HOME").unwrap();
+    let home = std::env::var("HOME").expect("write to String");
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
     let t0 = Instant::now();
     let st = DaemonState::open(DaemonStateConfig {
         data_dir: dir.into(),
     })
-    .unwrap();
+    .expect("write to String");
     println!("DaemonState::open: {:?}", t0.elapsed());
 
     // 1. 采集（4 源）
     let t = Instant::now();
     let (mut u_all, mut t_all) =
-        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).unwrap();
+        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).expect("write to String");
     println!("zcode: usage={} tools={}", u_all.len(), t_all.len());
     let u =
         ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite"))
-            .unwrap();
+            .expect("write to String");
     println!("minimax: usage={}", u.len());
     u_all.extend(u);
-    let (u, tc) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).unwrap();
+    let (u, tc) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).expect("write to String");
     println!("claude: usage={} tools={}", u.len(), tc.len());
     u_all.extend(u);
     t_all.extend(tc);
-    let (u, tc) = ch_ops_metrics::collect_codex(format!("{home}/.codex")).unwrap();
+    let (u, tc) = ch_ops_metrics::collect_codex(format!("{home}/.codex")).expect("write to String");
     println!("codex: usage={} tools={}", u.len(), tc.len());
     u_all.extend(u);
     t_all.extend(tc);
@@ -39,7 +39,7 @@ fn main() {
 
     // 2. 分块入库
     let t = Instant::now();
-    let repo = st.repo.lock().unwrap();
+    let repo = st.repo.lock().expect("write to String");
     let zc_usage: Vec<_> = u_all
         .iter()
         .filter(|r| r.provider == ch_domain::Provider::ZCode)
@@ -52,9 +52,9 @@ fn main() {
         .collect();
     let nz = repo
         .replace_provider_usage("prov_zcode", &zc_usage)
-        .unwrap();
-    let n1 = repo.upsert_usage_batch(&others).unwrap() + nz;
-    let n2 = repo.upsert_tool_call_batch(&t_all).unwrap();
+        .expect("write to String");
+    let n1 = repo.upsert_usage_batch(&others).expect("write to String") + nz;
+    let n2 = repo.upsert_tool_call_batch(&t_all).expect("write to String");
     println!(
         "── 入库: {:?}  usage 新增 {n1} tools 新增 {n2}",
         t.elapsed()
@@ -75,7 +75,7 @@ fn main() {
         ("prov_codex", "codex"),
     ];
     let mut cost_total = 0f64;
-    for (model, pid, i, o) in repo.ops_model_token_totals().unwrap() {
+    for (model, pid, i, o) in repo.ops_model_token_totals().expect("write to String") {
         let m = model.to_lowercase();
         let key = ["glm-5.2", "minimax-m3", "codex", "claude", "zcode"]
             .iter()
@@ -89,8 +89,8 @@ fn main() {
             });
         if let Some(k) = key {
             let v = &pricing[&k];
-            let pin = v["input_per_mtok"].as_f64().unwrap();
-            let pout = v["output_per_mtok"].as_f64().unwrap();
+            let pin = v["input_per_mtok"].as_f64().expect("write to String");
+            let pout = v["output_per_mtok"].as_f64().expect("write to String");
             let _ = repo.update_model_pricing(&model, &pid, pin, pout);
             let c = (i as f64 / 1e6) * pin + (o as f64 / 1e6) * pout;
             cost_total += c;
@@ -100,18 +100,18 @@ fn main() {
     println!("── 总成本: ${cost_total:.2}");
 
     // 4. 聚合（治理页口径）
-    let ov = repo.ops_overview(None).unwrap();
+    let ov = repo.ops_overview(None).expect("write to String");
     println!(
         "── Overview: 请求={} tokens={} 成本=${:.2} 危险={} 工具={}",
         ov.total_requests, ov.total_tokens, ov.cost_usd, ov.destructive_calls, ov.total_tool_calls
     );
-    for p in repo.ops_by_provider(None).unwrap() {
+    for p in repo.ops_by_provider(None).expect("write to String") {
         println!(
             "   {:14} req={:>6} tokens={:>14} err={}",
             p.provider, p.requests, p.total_tokens, p.errors
         );
     }
-    let ts = repo.ops_timeseries_daily(Some(7)).unwrap();
+    let ts = repo.ops_timeseries_daily(Some(7)).expect("write to String");
     println!("── 近7天趋势: {} 天", ts.len());
     for d in ts.iter() {
         println!("   {} tokens={}", d.day, d.total_tokens);

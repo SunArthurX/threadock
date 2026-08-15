@@ -147,7 +147,7 @@ fn apply_migration(conn: &mut Connection, m: &Migration) -> StorageResult<()> {
         "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
         rusqlite::params![
             m.version as i64,
-            crate::timestamp::to_millis(Some(now_utc())).unwrap()
+            crate::timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed")
         ],
     )
     .map_err(|e| StorageError::Migration {
@@ -275,22 +275,22 @@ mod tests {
     use rusqlite::Connection;
 
     fn fresh_conn() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        let conn = Connection::open_in_memory().expect("database connection failed");
+        conn.pragma_update(None, "foreign_keys", "ON").expect("database connection failed");
         conn
     }
 
     #[test]
     fn empty_db_has_version_zero() {
         let conn = fresh_conn();
-        assert_eq!(current_version(&conn).unwrap(), 0);
+        assert_eq!(current_version(&conn).expect("database connection failed"), 0);
     }
 
     #[test]
     fn migrate_creates_tables_and_sets_version() {
         let mut conn = fresh_conn();
-        migrate_to_latest(&mut conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), LATEST_VERSION);
+        migrate_to_latest(&mut conn).expect("database connection failed");
+        assert_eq!(current_version(&conn).expect("database connection failed"), LATEST_VERSION);
 
         // 抽查几张关键表存在
         for table in [
@@ -314,7 +314,7 @@ mod tests {
                     [table],
                     |r| r.get(0),
                 )
-                .unwrap();
+                .expect("unexpected None");
             assert_eq!(n, 1, "table {table} should exist");
         }
 
@@ -336,7 +336,7 @@ mod tests {
                     rusqlite::params![kind, obj],
                     |r| r.get(0),
                 )
-                .unwrap();
+                .expect("unexpected None");
             assert_eq!(n, 1, "{kind} {obj} should exist");
         }
     }
@@ -344,16 +344,16 @@ mod tests {
     #[test]
     fn migrate_is_idempotent() {
         let mut conn = fresh_conn();
-        migrate_to_latest(&mut conn).unwrap();
+        migrate_to_latest(&mut conn).expect("database connection failed");
         // 再跑一次不应报错
-        migrate_to_latest(&mut conn).unwrap();
-        assert_eq!(current_version(&conn).unwrap(), LATEST_VERSION);
+        migrate_to_latest(&mut conn).expect("database connection failed");
+        assert_eq!(current_version(&conn).expect("database connection failed"), LATEST_VERSION);
     }
 
     #[test]
     fn downgrade_is_rejected() {
         let mut conn = fresh_conn();
-        migrate_to_latest(&mut conn).unwrap();
+        migrate_to_latest(&mut conn).expect("database connection failed");
         let err = migrate_to(&mut conn, 0).unwrap_err();
         assert!(matches!(err, StorageError::Migration { .. }));
     }

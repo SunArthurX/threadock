@@ -18,8 +18,8 @@ pub fn seed_conversations(
     n_conversations: usize,
     messages_per_conv: usize,
 ) -> (u128, usize, usize) {
-    repo.upsert_provider(Provider::Generic).unwrap();
-    let ws_id = repo.upsert_workspace(&Workspace::new("bench-ws")).unwrap();
+    repo.upsert_provider(Provider::Generic).expect("upsert failed");
+    let ws_id = repo.upsert_workspace(&Workspace::new("bench-ws")).expect("upsert failed");
 
     let start = std::time::Instant::now();
     let mut total_messages = 0;
@@ -27,7 +27,7 @@ pub fn seed_conversations(
         let mut conv = Conversation::new(Provider::Generic, format!("bench-conv-{i}"));
         conv.workspace_id = Some(ws_id.clone());
         conv.title = Some(format!("会话 {i}：Rust Tauri Android 性能测试"));
-        let cid = repo.upsert_conversation(&conv).unwrap();
+        let cid = repo.upsert_conversation(&conv).expect("upsert failed");
 
         for j in 0..messages_per_conv {
             let role = if j % 2 == 0 {
@@ -39,7 +39,7 @@ pub fn seed_conversations(
             m.content_text = Some(format!(
                 "消息 {i}-{j}：这是一段用于性能测试的内容，讨论 Tauri Android 后台任务和 Rust 错误处理。关键词：WorkManager、thiserror、cargo build。"
             ));
-            repo.upsert_message(&m).unwrap();
+            repo.upsert_message(&m).expect("upsert failed");
             total_messages += 1;
         }
     }
@@ -57,7 +57,7 @@ pub fn bench_fts5_search(repo: &Repository, queries: &[&str], rounds: usize) -> 
     for _ in 0..rounds {
         for q in queries {
             let start = std::time::Instant::now();
-            let _ = repo.search(&SearchQuery::new(*q)).unwrap();
+            let _ = repo.search(&SearchQuery::new(*q)).expect("SQL execution failed");
             latencies.push(start.elapsed().as_secs_f64() * 1000.0);
             count += 1;
         }
@@ -93,7 +93,7 @@ pub fn percentile(data: &[f64], p: f64) -> f64 {
         return 0.0;
     }
     let mut sorted = data.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.partial_cmp(b).expect("unexpected None"));
     let idx = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx.min(sorted.len() - 1)]
 }

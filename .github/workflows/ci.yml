@@ -30,7 +30,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings -W clippy::unwrap_used
 
       - name: Clippy (tauri)
         working-directory: apps/desktop/src-tauri

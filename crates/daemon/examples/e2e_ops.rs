@@ -2,13 +2,13 @@
 use ch_daemon::{DaemonState, DaemonStateConfig};
 
 fn main() {
-    let home = std::env::var("HOME").unwrap();
+    let home = std::env::var("HOME").expect("write to String");
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
     let st = DaemonState::open(DaemonStateConfig {
         data_dir: dir.into(),
     })
-    .unwrap();
-    let repo = st.repo.lock().unwrap();
+    .expect("write to String");
+    let repo = st.repo.lock().expect("write to String");
 
     // ── 前端治理页同参（range=30 / 全部=60 …）──
     for days in [Some(30i64), Some(7), None] {
@@ -16,11 +16,11 @@ fn main() {
         let ov = repo
             .ops_overview(days)
             .unwrap_or_else(|e| panic!("overview({label}) 失败: {e}"));
-        let bp = repo.ops_by_provider(days).unwrap();
-        let bm = repo.ops_by_model(days).unwrap();
-        let ts = repo.ops_timeseries_daily(days).unwrap();
-        let tt = repo.ops_tool_toplist(days, 10).unwrap();
-        let rc = repo.ops_risky_calls(days, 50).unwrap();
+        let bp = repo.ops_by_provider(days).expect("write to String");
+        let bm = repo.ops_by_model(days).expect("write to String");
+        let ts = repo.ops_timeseries_daily(days).expect("write to String");
+        let tt = repo.ops_tool_toplist(days, 10).expect("write to String");
+        let rc = repo.ops_risky_calls(days, 50).expect("write to String");
         println!("days={label}: 请求={} tokens={} 成本=${:.2} | providers={} models={} 天数={} top工具={} 风险={}",
             ov.total_requests, ov.total_tokens, ov.cost_usd, bp.len(), bm.len(), ts.len(), tt.len(), rc.len());
         assert!(ov.total_requests > 0, "overview({label}) 不应为空");
@@ -30,14 +30,14 @@ fn main() {
         );
     }
     println!("── 模型明细样本:");
-    for m in repo.ops_by_model(Some(30)).unwrap().iter().take(6) {
+    for m in repo.ops_by_model(Some(30)).expect("write to String").iter().take(6) {
         println!(
             "   {} [{}] in={} out={} err={}",
             m.model, m.provider_id, m.input_tokens, m.output_tokens, m.errors
         );
     }
     println!("── 工具 Top3:");
-    for t in repo.ops_tool_toplist(Some(30), 3).unwrap() {
+    for t in repo.ops_tool_toplist(Some(30), 3).expect("write to String") {
         println!(
             "   {} calls={} destructive={}",
             t.tool_name, t.calls, t.destructive
@@ -46,7 +46,7 @@ fn main() {
     drop(repo);
 
     // ── 真实库全量审计（多字节消息回归 + 完整跑通）──
-    let repo = st.repo.lock().unwrap();
+    let repo = st.repo.lock().expect("write to String");
     let t = std::time::Instant::now();
     let report = ch_audit::run_audit(&repo).expect("审计不应 panic");
     println!(

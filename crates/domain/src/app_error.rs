@@ -91,7 +91,7 @@ mod tests {
     #[test]
     fn error_codes_serialize_snake_case() {
         let e = AppError::storage("test");
-        let json = serde_json::to_string(&e).unwrap();
+        let json = serde_json::to_string(&e).expect("unexpected None");
         assert!(json.contains("\"storage\""), "code 应为 snake_case: {json}");
         assert!(json.contains("\"message\""));
     }

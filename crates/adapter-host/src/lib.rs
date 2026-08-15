@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn inproc_client_hello() {
         let client = InProcClient::new(EchoAdapter);
-        let meta = client.hello().unwrap();
+        let meta = client.hello().expect("unexpected None");
         assert_eq!(meta.id, "echo");
         assert_eq!(meta.protocol_version, PROTOCOL_VERSION);
     }
@@ -269,7 +269,7 @@ mod tests {
     #[test]
     fn inproc_client_parse() {
         let client = InProcClient::new(EchoAdapter);
-        let conv = client.parse("src.md", b"hello").unwrap();
+        let conv = client.parse("src.md", b"hello").expect("parse failed");
         assert_eq!(conv.source_conversation_id, "src.md");
         assert_eq!(conv.messages.len(), 1);
         assert_eq!(conv.messages[0].text.as_deref(), Some("hello"));
@@ -278,14 +278,14 @@ mod tests {
     #[test]
     fn inproc_client_health() {
         let client = InProcClient::new(EchoAdapter);
-        assert!(client.health().unwrap().healthy);
+        assert!(client.health().expect("unexpected None").healthy);
     }
 
     #[test]
     fn encode_decode_bytes_roundtrip() {
         let original = b"\x00\x01\x02 binary";
         let encoded = encode_bytes(original);
-        let decoded = decode_bytes(&encoded).unwrap();
+        let decoded = decode_bytes(&encoded).expect("unexpected None");
         assert_eq!(decoded, original);
     }
 
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn spawn_cat_as_adapter_reports_crash_on_handshake() {
         // 用 `false` 命令（永远失败立即退出）可靠地验证「子进程崩溃被检测」。
-        let mut proc = AdapterProcess::spawn("false").unwrap();
+        let mut proc = AdapterProcess::spawn("false").expect("unexpected None");
         // false 立即退出，handshake 应报 ProcessExited 或 Io
         let result = proc.handshake();
         let is_expected = matches!(

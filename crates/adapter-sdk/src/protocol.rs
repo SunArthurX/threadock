@@ -76,8 +76,8 @@ mod tests {
             protocol_version: PROTOCOL_VERSION,
             provider: Provider::Generic,
         };
-        let json = serde_json::to_string(&m).unwrap();
-        let back: AdapterMetadata = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&m).expect("unexpected None");
+        let back: AdapterMetadata = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(m, back);
     }
 
@@ -87,11 +87,11 @@ mod tests {
             source_id: "test.md".into(),
             content_base64: encode_bytes(b"## User\nhello"),
         };
-        let json = serde_json::to_string(&req).unwrap();
-        let back: ParseRequest = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&req).expect("unexpected None");
+        let back: ParseRequest = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back.source_id, "test.md");
         assert_eq!(
-            decode_bytes(&back.content_base64).unwrap(),
+            decode_bytes(&back.content_base64).expect("unexpected None"),
             b"## User\nhello"
         );
     }
@@ -100,7 +100,7 @@ mod tests {
     fn encode_decode_roundtrip() {
         let original = b"binary\x00data\xff\xfe";
         let encoded = encode_bytes(original);
-        let decoded = decode_bytes(&encoded).unwrap();
+        let decoded = decode_bytes(&encoded).expect("unexpected None");
         assert_eq!(decoded, original);
     }
 }

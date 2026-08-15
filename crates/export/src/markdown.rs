@@ -199,9 +199,9 @@ mod tests {
         use ch_adapter_markdown::parse_str;
         let (c, msgs, evs) = sample();
         let md = to_markdown(&c, &msgs, &evs, &ExportOptions::everything());
-        let raw = parse_str(&md, "exported.md").unwrap();
+        let raw = parse_str(&md, "exported.md").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("测试导出"));
         assert_eq!(raw.messages.len(), 2);
-        assert!(raw.messages[0].text.as_deref().unwrap().contains("你好"));
+        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("你好"));
     }
 }

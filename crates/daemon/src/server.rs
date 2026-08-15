@@ -543,7 +543,7 @@ mod tests {
         let stdin = Cursor::new(input);
         let mut stdout = Vec::new();
         serve_stdio(state, stdin, &mut stdout);
-        String::from_utf8(stdout).unwrap()
+        String::from_utf8(stdout).expect("unexpected None")
     }
 
     fn send(state: &DaemonState, method: &str, params: serde_json::Value) -> JsonRpcResponse {
@@ -555,23 +555,23 @@ mod tests {
         })
         .to_string();
         let out = run(state, &line);
-        serde_json::from_str(out.trim()).unwrap()
+        serde_json::from_str(out.trim()).expect("parse failed")
     }
 
     fn seeded_state() -> DaemonState {
-        let state = DaemonState::open_in_memory().unwrap();
-        let repo = state.repo.lock().unwrap();
-        repo.upsert_provider(Provider::Generic).unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
+        let repo = state.repo.lock().expect("mutex poisoned");
+        repo.upsert_provider(Provider::Generic).expect("upsert failed");
         let mut c = Conversation::new(Provider::Generic, "daemon-src");
         c.title = Some("Daemon 测试".into());
-        let cid = repo.upsert_conversation(&c).unwrap();
+        let cid = repo.upsert_conversation(&c).expect("upsert failed");
         let mut m = Message::new(&cid, Role::User, 1);
         m.content_text = Some("搜索关键词 tauri".into());
-        repo.upsert_message(&m).unwrap();
+        repo.upsert_message(&m).expect("upsert failed");
 
         // 索引到 Tantivy
-        let idx = state.search_index.lock().unwrap();
-        let mut writer = idx.writer(15_000_000).unwrap();
+        let idx = state.search_index.lock().expect("mutex poisoned");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
         idx.index_message(
             &mut writer,
             &ch_search::index::IndexableMessage {
@@ -584,8 +584,8 @@ mod tests {
                 body: Some("搜索关键词 tauri".into()),
             },
         )
-        .unwrap();
-        idx.commit(writer).unwrap();
+        .expect("unexpected None");
+        idx.commit(writer).expect("file I/O failed");
         drop(idx);
         drop(repo);
         state
@@ -593,22 +593,22 @@ mod tests {
 
     #[test]
     fn system_get_info() {
-        let state = DaemonState::open_in_memory().unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
         let resp = send(&state, "system.getInfo", serde_json::json!({}));
         assert!(resp.result.is_some());
-        let info = resp.result.unwrap();
+        let info = resp.result.expect("unexpected None");
         assert_eq!(info["protocol_version"], PROTOCOL_VERSION);
     }
 
     #[test]
     fn workspace_list() {
-        let state = DaemonState::open_in_memory().unwrap();
-        let repo = state.repo.lock().unwrap();
-        repo.upsert_workspace(&Workspace::new("ws-daemon")).unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
+        let repo = state.repo.lock().expect("mutex poisoned");
+        repo.upsert_workspace(&Workspace::new("ws-daemon")).expect("upsert failed");
         drop(repo);
         let resp = send(&state, "workspace.list", serde_json::json!({}));
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert_eq!(arr.len(), 1);
     }
 
@@ -616,8 +616,8 @@ mod tests {
     fn conversation_list() {
         let state = seeded_state();
         let resp = send(&state, "conversation.list", serde_json::json!({}));
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["title"], "Daemon 测试");
     }
@@ -625,11 +625,11 @@ mod tests {
     #[test]
     fn conversation_get() {
         let state = seeded_state();
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         drop(repo);
         let resp = send(&state, "conversation.get", serde_json::json!({"id": cid}));
-        let result = resp.result.unwrap();
+        let result = resp.result.expect("unexpected None");
         assert_eq!(result["title"], "Daemon 测试");
     }
 
@@ -647,16 +647,16 @@ mod tests {
     #[test]
     fn message_list() {
         let state = seeded_state();
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         drop(repo);
         let resp = send(
             &state,
             "message.list",
             serde_json::json!({"conversation_id": cid}),
         );
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert_eq!(arr.len(), 1);
     }
 
@@ -668,8 +668,8 @@ mod tests {
             "search.query",
             serde_json::json!({"query": "tauri", "engine": "tantivy"}),
         );
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert!(!arr.is_empty());
     }
 
@@ -677,11 +677,11 @@ mod tests {
     fn event_list() {
         let state = seeded_state();
         // 给 seeded 会话加一个事件
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         let mut e = ch_domain::Event::new(&cid, ch_domain::EventType::CommandStarted, 1);
         e.summary = Some("cargo build".into());
-        repo.upsert_event(&e).unwrap();
+        repo.upsert_event(&e).expect("upsert failed");
         drop(repo);
 
         let resp = send(
@@ -689,8 +689,8 @@ mod tests {
             "event.list",
             serde_json::json!({"conversation_id": cid}),
         );
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["event_type"], "command_started");
         assert_eq!(arr[0]["summary"], "cargo build");
@@ -700,11 +700,11 @@ mod tests {
     fn knowledge_extract() {
         let state = seeded_state();
         // 给会话补一条含 TODO/决策的消息
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         let mut m = ch_domain::Message::new(&cid, ch_domain::Role::Assistant, 2);
         m.content_text = Some("决定用 WorkManager\nTODO 处理 Android 14 限制".into());
-        repo.upsert_message(&m).unwrap();
+        repo.upsert_message(&m).expect("upsert failed");
         drop(repo);
 
         let resp = send(
@@ -712,16 +712,16 @@ mod tests {
             "knowledge.extract",
             serde_json::json!({"conversation_id": cid}),
         );
-        let result = resp.result.unwrap();
-        assert!(result["extractor"].as_str().unwrap().contains("rule"));
+        let result = resp.result.expect("unexpected None");
+        assert!(result["extractor"].as_str().expect("unexpected None").contains("rule"));
         assert!(result["decisions"]
             .as_array()
-            .unwrap()
+            .expect("unexpected None")
             .iter()
             .any(|d| { d["decision"].as_str().unwrap_or("").contains("WorkManager") }));
         assert!(result["todos"]
             .as_array()
-            .unwrap()
+            .expect("unexpected None")
             .iter()
             .any(|t| { t["text"].as_str().unwrap_or("").contains("Android 14") }));
     }
@@ -729,8 +729,8 @@ mod tests {
     #[test]
     fn knowledge_save_and_get() {
         let state = seeded_state();
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         drop(repo);
 
         // 先提取
@@ -739,7 +739,7 @@ mod tests {
             "knowledge.extract",
             serde_json::json!({"conversation_id": cid}),
         );
-        let extracted = extract_resp.result.unwrap();
+        let extracted = extract_resp.result.expect("unexpected None");
 
         // 保存
         let save_resp = send(
@@ -747,7 +747,7 @@ mod tests {
             "knowledge.save",
             serde_json::json!({"conversation_id": cid, "result": extracted}),
         );
-        assert!(save_resp.result.unwrap()["saved"].as_bool().unwrap());
+        assert!(save_resp.result.expect("unexpected None")["saved"].as_bool().expect("unexpected None"));
 
         // 读取
         let get_resp = send(
@@ -755,9 +755,9 @@ mod tests {
             "knowledge.get",
             serde_json::json!({"conversation_id": cid}),
         );
-        let got = get_resp.result.unwrap();
+        let got = get_resp.result.expect("unexpected None");
         assert_eq!(got["version"], 1);
-        assert!(got["extractor"].as_str().unwrap().contains("rule"));
+        assert!(got["extractor"].as_str().expect("unexpected None").contains("rule"));
     }
 
     #[test]
@@ -774,8 +774,8 @@ mod tests {
     #[test]
     fn conversation_soft_delete_and_restore() {
         let state = seeded_state();
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         drop(repo);
 
         // 软删除
@@ -784,12 +784,12 @@ mod tests {
             "conversation.delete",
             serde_json::json!({"id": cid}),
         );
-        let result = resp.result.unwrap();
+        let result = resp.result.expect("unexpected None");
         assert_eq!(result["hard"], false);
 
         // 仍存在但 status=deleted
         let get_resp = send(&state, "conversation.get", serde_json::json!({"id": cid}));
-        let conv = get_resp.result.unwrap();
+        let conv = get_resp.result.expect("unexpected None");
         assert_eq!(conv["source_status"], "deleted");
 
         // 恢复
@@ -798,14 +798,14 @@ mod tests {
             "conversation.restore",
             serde_json::json!({"id": cid}),
         );
-        assert_eq!(restore_resp.result.unwrap()["restored"], true);
+        assert_eq!(restore_resp.result.expect("unexpected None")["restored"], true);
     }
 
     #[test]
     fn conversation_hard_delete() {
         let state = seeded_state();
-        let repo = state.repo.lock().unwrap();
-        let cid = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let cid = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         drop(repo);
 
         let resp = send(
@@ -813,7 +813,7 @@ mod tests {
             "conversation.delete",
             serde_json::json!({"id": cid, "hard": true}),
         );
-        assert_eq!(resp.result.unwrap()["hard"], true);
+        assert_eq!(resp.result.expect("unexpected None")["hard"], true);
 
         // 再查应报错
         let get_resp = send(&state, "conversation.get", serde_json::json!({"id": cid}));
@@ -825,20 +825,20 @@ mod tests {
         let state = seeded_state();
         // seeded 已有一条「搜索关键词 tauri」的会话
         // 加一条内容相似的
-        let repo = state.repo.lock().unwrap();
-        let target_id = repo.list_conversations(None).unwrap()[0].id.clone();
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let target_id = repo.list_conversations(None).expect("unexpected None")[0].id.clone();
         let mut c2 = ch_domain::Conversation::new(Provider::Generic, "similar-src");
         c2.title = Some("Tauri 相关".into());
-        let cid2 = repo.upsert_conversation(&c2).unwrap();
+        let cid2 = repo.upsert_conversation(&c2).expect("upsert failed");
         let mut m = ch_domain::Message::new(&cid2, ch_domain::Role::User, 1);
         m.content_text = Some("tauri android 后台任务 搜索".into());
-        repo.upsert_message(&m).unwrap();
+        repo.upsert_message(&m).expect("upsert failed");
         // 加一条无关的
         let c3 = ch_domain::Conversation::new(Provider::Generic, "unrelated");
-        let cid3 = repo.upsert_conversation(&c3).unwrap();
+        let cid3 = repo.upsert_conversation(&c3).expect("upsert failed");
         let mut m3 = ch_domain::Message::new(&cid3, ch_domain::Role::User, 1);
         m3.content_text = Some("python pandas 数据分析".into());
-        repo.upsert_message(&m3).unwrap();
+        repo.upsert_message(&m3).expect("upsert failed");
         drop(repo);
 
         let resp = send(
@@ -846,11 +846,11 @@ mod tests {
             "conversation.similar",
             serde_json::json!({"conversation_id": target_id}),
         );
-        let result = resp.result.unwrap();
-        let arr = result.as_array().unwrap();
+        let result = resp.result.expect("unexpected None");
+        let arr = result.as_array().expect("unexpected None");
         assert!(!arr.is_empty(), "should find similar conversations");
         // 相似的应排在前面
-        assert_eq!(arr[0]["conversation_id"].as_str().unwrap(), cid2);
+        assert_eq!(arr[0]["conversation_id"].as_str().expect("unexpected None"), cid2);
     }
 
     #[test]
@@ -866,22 +866,22 @@ mod tests {
 
     #[test]
     fn unknown_method_errors() {
-        let state = DaemonState::open_in_memory().unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
         let resp = send(&state, "nope", serde_json::json!({}));
-        assert_eq!(resp.error.unwrap().code, -32601);
+        assert_eq!(resp.error.expect("unexpected None").code, -32601);
     }
 
     #[test]
     fn invalid_json_errors() {
-        let state = DaemonState::open_in_memory().unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
         let out = run(&state, "not json");
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
-        assert_eq!(resp.error.unwrap().code, -32700);
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
+        assert_eq!(resp.error.expect("unexpected None").code, -32700);
     }
 
     #[test]
     fn eof_terminates_cleanly() {
-        let state = DaemonState::open_in_memory().unwrap();
+        let state = DaemonState::open_in_memory().expect("unexpected None");
         let input = format!(
             "{}\n{}\n",
             r#"{"jsonrpc":"2.0","id":1,"method":"system.getInfo","params":{}}"#,
@@ -894,8 +894,8 @@ mod tests {
     #[test]
     fn provider_sync_imports_file() {
         let state = seeded_state();
-        let tmp = tempfile::NamedTempFile::with_suffix(".md").unwrap();
-        std::fs::write(tmp.path(), "## User\nhello sync\n## Assistant\nworld\n").unwrap();
+        let tmp = tempfile::NamedTempFile::with_suffix(".md").expect("tempdir creation failed");
+        std::fs::write(tmp.path(), "## User\nhello sync\n## Assistant\nworld\n").expect("file I/O failed");
         let path_str = tmp.path().to_string_lossy().into_owned();
 
         let resp = send(
@@ -903,16 +903,16 @@ mod tests {
             "provider.sync",
             serde_json::json!({"path": path_str, "workspace_name": "sync-ws"}),
         );
-        let result = resp.result.unwrap();
+        let result = resp.result.expect("unexpected None");
         assert!(result["conversation_id"]
             .as_str()
-            .unwrap()
+            .expect("unexpected None")
             .starts_with("conv_"));
         assert_eq!(result["messages"], 2);
-        assert!(result["raw_payload_id"].as_str().unwrap().len() == 64);
+        assert!(result["raw_payload_id"].as_str().expect("unexpected None").len() == 64);
 
         // 导入后能搜到
-        let repo = state.repo.lock().unwrap();
-        assert_eq!(repo.count_conversations().unwrap(), 2); // seeded 1 + new 1
+        let repo = state.repo.lock().expect("mutex poisoned");
+        assert_eq!(repo.count_conversations().expect("unexpected None"), 2); // seeded 1 + new 1
     }
 }

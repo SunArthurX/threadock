@@ -165,34 +165,34 @@ mod tests {
     use ch_domain::{Conversation, Message, Provider, Role};
 
     fn seed() -> Repository {
-        let r = Repository::open_in_memory().unwrap();
-        r.upsert_provider(Provider::Generic).unwrap();
-        r.upsert_provider(Provider::Codex).unwrap();
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
 
         // workspace
         let mut ws = ch_domain::Workspace::new("tauri-project");
-        let wid = r.upsert_workspace(&ws).unwrap();
+        let wid = r.upsert_workspace(&ws).expect("upsert failed");
         ws.id = wid.clone();
 
         // conversation 1 (Generic) — 谈 Tauri Android
         let mut c1 = Conversation::new(Provider::Generic, "src-1");
         c1.workspace_id = Some(wid.clone());
         c1.title = Some("Tauri Android 后台任务".into());
-        let cid1 = r.upsert_conversation(&c1).unwrap();
+        let cid1 = r.upsert_conversation(&c1).expect("upsert failed");
         let mut m1 = Message::new(&cid1, Role::User, 1);
         m1.content_text = Some("如何实现 Tauri 的 Android 后台任务？".into());
-        r.upsert_message(&m1).unwrap();
+        r.upsert_message(&m1).expect("upsert failed");
         let mut m2 = Message::new(&cid1, Role::Assistant, 2);
         m2.content_text = Some("用 WorkManager，不要用 Foreground Service。".into());
-        r.upsert_message(&m2).unwrap();
+        r.upsert_message(&m2).expect("upsert failed");
 
         // conversation 2 (Codex) — 谈 Rust 错误处理
         let mut c2 = Conversation::new(Provider::Codex, "src-2");
         c2.title = Some("Rust 错误处理".into());
-        let cid2 = r.upsert_conversation(&c2).unwrap();
+        let cid2 = r.upsert_conversation(&c2).expect("upsert failed");
         let mut m3 = Message::new(&cid2, Role::User, 1);
         m3.content_text = Some("thiserror 和 anyhow 怎么选？".into());
-        r.upsert_message(&m3).unwrap();
+        r.upsert_message(&m3).expect("upsert failed");
 
         r
     }
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn search_finds_by_keyword() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("tauri")).unwrap();
+        let results = r.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
         assert!(!results.is_empty(), "should find tauri matches");
         assert!(results
             .iter()
@@ -215,7 +215,7 @@ mod tests {
         // 用 Codex 那条消息里真实存在的词
         let results = r
             .search(&SearchQuery::new("thiserror").with_provider(Provider::Codex))
-            .unwrap();
+            .expect("unexpected None");
         assert!(!results.is_empty());
         assert!(results.iter().all(|sr| sr.provider == Provider::Codex));
     }
@@ -223,10 +223,10 @@ mod tests {
     #[test]
     fn search_filters_by_workspace() {
         let r = seed();
-        let wid = r.list_workspaces().unwrap()[0].id.clone();
+        let wid = r.list_workspaces().expect("unexpected None")[0].id.clone();
         let results = r
             .search(&SearchQuery::new("android").with_workspace(&wid))
-            .unwrap();
+            .expect("unexpected None");
         assert!(!results.is_empty());
         assert!(results
             .iter()
@@ -236,7 +236,7 @@ mod tests {
     #[test]
     fn search_returns_snippet() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("workmanager")).unwrap();
+        let results = r.search(&SearchQuery::new("workmanager")).expect("SQL execution failed");
         assert!(!results.is_empty());
         // snippet 非空
         assert!(!results[0].snippet.is_empty());
@@ -245,14 +245,14 @@ mod tests {
     #[test]
     fn search_no_match_returns_empty() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("zzznotfound")).unwrap();
+        let results = r.search(&SearchQuery::new("zzznotfound")).expect("SQL execution failed");
         assert!(results.is_empty());
     }
 
     #[test]
     fn search_chinese_keyword() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("后台任务")).unwrap();
+        let results = r.search(&SearchQuery::new("后台任务")).expect("SQL execution failed");
         assert!(!results.is_empty());
     }
 

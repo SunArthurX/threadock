@@ -14,8 +14,8 @@ use tempfile::TempDir;
 #[test]
 #[ignore]
 fn import_throughput() {
-    let dir = TempDir::new().unwrap();
-    let repo = Repository::open(dir.path().join("bench.db")).unwrap();
+    let dir = TempDir::new().expect("tempdir creation failed");
+    let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
 
     // 500 会话 × 10 消息 = 5000 消息
     let (elapsed_ms, total_msgs, n_conv) = seed_conversations(&repo, 500, 10);
@@ -49,8 +49,8 @@ fn import_throughput() {
 #[test]
 #[ignore]
 fn fts5_search_latency() {
-    let dir = TempDir::new().unwrap();
-    let repo = Repository::open(dir.path().join("bench.db")).unwrap();
+    let dir = TempDir::new().expect("tempdir creation failed");
+    let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
 
     // 生成 1000 会话 × 5 消息 = 5000 消息
     seed_conversations(&repo, 1000, 5);
@@ -77,16 +77,16 @@ fn fts5_search_latency() {
 #[test]
 #[ignore]
 fn tantivy_search_latency() {
-    let dir = TempDir::new().unwrap();
-    let repo = Repository::open(dir.path().join("bench.db")).unwrap();
-    let index = ch_search::SearchIndex::open(dir.path().join("idx")).unwrap();
+    let dir = TempDir::new().expect("tempdir creation failed");
+    let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
+    let index = ch_search::SearchIndex::open(dir.path().join("idx")).expect("unexpected None");
 
     // 生成数据 + 索引
     seed_conversations(&repo, 500, 5);
-    let convs = repo.list_conversations(None).unwrap();
-    let mut writer = index.writer(50_000_000).unwrap();
+    let convs = repo.list_conversations(None).expect("unexpected None");
+    let mut writer = index.writer(50_000_000).expect("file I/O failed");
     for c in &convs {
-        let msgs = repo.list_messages(&c.id).unwrap();
+        let msgs = repo.list_messages(&c.id).expect("unexpected None");
         for m in &msgs {
             index
                 .index_message(
@@ -101,10 +101,10 @@ fn tantivy_search_latency() {
                         body: m.content_text.clone(),
                     },
                 )
-                .unwrap();
+                .expect("unexpected None");
         }
     }
-    index.commit(writer).unwrap();
+    index.commit(writer).expect("file I/O failed");
 
     let queries = ["tauri", "android", "WorkManager", "错误"];
     let (p95, count) = bench_tantivy_search(&index, &queries, 10);
@@ -121,15 +121,15 @@ fn tantivy_search_latency() {
 #[test]
 #[ignore]
 fn cold_start() {
-    let dir = TempDir::new().unwrap();
+    let dir = TempDir::new().expect("tempdir creation failed");
     // 先建库
-    let _ = Repository::open(dir.path().join("bench.db")).unwrap();
+    let _ = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
 
     // 测量重新打开的冷启动时间
     let mut latencies = Vec::new();
     for _ in 0..10 {
         let start = std::time::Instant::now();
-        let _repo = Repository::open(dir.path().join("bench.db")).unwrap();
+        let _repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
         latencies.push(start.elapsed().as_secs_f64() * 1000.0);
     }
     let p95 = percentile(&latencies, 95.0);
@@ -151,8 +151,8 @@ fn cold_start() {
 /// 非忽略的快速冒烟测试：验证基准设施可用
 #[test]
 fn bench_smoke() {
-    let dir = TempDir::new().unwrap();
-    let repo = Repository::open(dir.path().join("smoke.db")).unwrap();
+    let dir = TempDir::new().expect("tempdir creation failed");
+    let repo = Repository::open(dir.path().join("smoke.db")).expect("unexpected None");
     let (elapsed, msgs, convs) = seed_conversations(&repo, 5, 2);
     assert_eq!(convs, 5);
     assert_eq!(msgs, 10);
@@ -160,7 +160,7 @@ fn bench_smoke() {
 
     // FTS5 能搜到
     use ch_storage::SearchQuery;
-    let results = repo.search(&SearchQuery::new("tauri")).unwrap();
+    let results = repo.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
     assert!(!results.is_empty());
 
     let p = percentile(&[1.0, 2.0, 3.0, 4.0, 5.0], 50.0);

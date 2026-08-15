@@ -200,19 +200,19 @@ mod tests {
             .conversation
             .title
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("[REDACTED:github_token]"));
         // 消息里的邮箱和 AWS key 应被脱敏
         let m0 = &data.messages[0];
         assert!(m0
             .content_text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("[REDACTED:email]"));
         assert!(m0
             .content_text
             .as_deref()
-            .unwrap()
+            .expect("unexpected None")
             .contains("[REDACTED:aws_access_key]"));
         // 应有脱敏统计
         let stats = data.redaction.expect("should have redaction stats");
@@ -231,16 +231,16 @@ mod tests {
             redact_secrets: false,
         };
         let data = build_export_data(None, &c, &msgs, &evs, &opts);
-        assert!(data.conversation.title.as_deref().unwrap().contains("ghp_"));
+        assert!(data.conversation.title.as_deref().expect("unexpected None").contains("ghp_"));
         assert!(data.redaction.is_none());
     }
 
     #[test]
     fn to_json_produces_valid_json() {
         let (c, msgs, evs) = sample();
-        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).unwrap();
+        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
         // 可重新反序列化（数据可移植性，plan §6.6）
-        let back: ExportData = serde_json::from_str(&json).unwrap();
+        let back: ExportData = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back.format_version, 1);
         assert_eq!(back.messages.len(), 2);
     }
@@ -248,8 +248,8 @@ mod tests {
     #[test]
     fn export_roundtrips_through_json() {
         let (c, msgs, evs) = sample();
-        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).unwrap();
-        let back: ExportData = serde_json::from_str(&json).unwrap();
+        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
+        let back: ExportData = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back.conversation.provider, Provider::Codex);
         assert_eq!(back.conversation.source_conversation_id, "src-1");
     }

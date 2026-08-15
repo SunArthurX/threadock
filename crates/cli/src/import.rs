@@ -188,25 +188,25 @@ mod tests {
     use tempfile::{NamedTempFile, TempDir};
 
     fn write_md(content: &str) -> NamedTempFile {
-        let f = NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), content).unwrap();
+        let f = NamedTempFile::new().expect("tempdir creation failed");
+        std::fs::write(f.path(), content).expect("file I/O failed");
         f
     }
 
     /// 构造一个临时 RawStore 用于测试。
     fn raw_store() -> (TempDir, RawStore) {
-        let dir = TempDir::new().unwrap();
-        let store = RawStore::new(dir.path()).unwrap();
+        let dir = TempDir::new().expect("tempdir creation failed");
+        let store = RawStore::new(dir.path()).expect("unexpected None");
         (dir, store)
     }
 
     #[test]
     fn import_single_markdown() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md(
             "# 测试会话\n\n## User\n你好\n## Assistant\n你好啊\n## Command\ncargo build\n",
         );
-        let summary = import_markdown(&repo, None, f.path(), Some("my-web-app")).unwrap();
+        let summary = import_markdown(&repo, None, f.path(), Some("my-web-app")).expect("unexpected None");
         assert!(summary.conversation_id.starts_with("conv_"));
         assert_eq!(summary.messages_imported, 2);
         assert_eq!(summary.events_imported, 1);
@@ -216,104 +216,104 @@ mod tests {
         // 数据真的进库了
         let conv = repo
             .get_conversation(&summary.conversation_id)
-            .unwrap()
-            .unwrap();
+            .expect("unexpected None")
+            .expect("unexpected None");
         assert_eq!(conv.title.as_deref(), Some("测试会话"));
         assert_eq!(
-            repo.list_messages(&summary.conversation_id).unwrap().len(),
+            repo.list_messages(&summary.conversation_id).expect("unexpected None").len(),
             2
         );
-        assert_eq!(repo.list_events(&summary.conversation_id).unwrap().len(), 1);
+        assert_eq!(repo.list_events(&summary.conversation_id).expect("unexpected None").len(), 1);
     }
 
     #[test]
     fn import_is_idempotent_on_repeat() {
         // plan §11.3：重复导入不产生重复
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md("## User\nhi\n## Assistant\nhello\n");
 
-        let s1 = import_markdown(&repo, None, f.path(), None).unwrap();
-        let s2 = import_markdown(&repo, None, f.path(), None).unwrap();
+        let s1 = import_markdown(&repo, None, f.path(), None).expect("unexpected None");
+        let s2 = import_markdown(&repo, None, f.path(), None).expect("unexpected None");
 
         assert_eq!(
             s1.conversation_id, s2.conversation_id,
             "same conversation id"
         );
-        assert_eq!(repo.count_conversations().unwrap(), 1);
-        assert_eq!(repo.list_messages(&s1.conversation_id).unwrap().len(), 2);
+        assert_eq!(repo.count_conversations().expect("unexpected None"), 1);
+        assert_eq!(repo.list_messages(&s1.conversation_id).expect("unexpected None").len(), 2);
     }
 
     #[test]
     fn import_reuses_workspace_on_repeat() {
         // 重复导入同名 workspace 不应产生重复 workspace 记录
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md("## User\nhi\n## Assistant\nhello\n");
 
-        let s1 = import_markdown(&repo, None, f.path(), Some("proj-x")).unwrap();
-        let s2 = import_markdown(&repo, None, f.path(), Some("proj-x")).unwrap();
+        let s1 = import_markdown(&repo, None, f.path(), Some("proj-x")).expect("unexpected None");
+        let s2 = import_markdown(&repo, None, f.path(), Some("proj-x")).expect("unexpected None");
 
         assert_eq!(s1.workspace_id, s2.workspace_id, "workspace must be reused");
-        assert_eq!(repo.list_workspaces().unwrap().len(), 1);
+        assert_eq!(repo.list_workspaces().expect("unexpected None").len(), 1);
     }
 
     #[test]
     fn import_without_workspace() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md("## User\nhi\n## Assistant\nyo\n");
-        let summary = import_markdown(&repo, None, f.path(), None).unwrap();
+        let summary = import_markdown(&repo, None, f.path(), None).expect("unexpected None");
         assert!(summary.workspace_id.is_none());
 
         let conv = repo
             .get_conversation(&summary.conversation_id)
-            .unwrap()
-            .unwrap();
+            .expect("unexpected None")
+            .expect("unexpected None");
         assert!(conv.workspace_id.is_none());
     }
 
     #[test]
     fn import_records_cursor() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md("## User\nhi\n## Assistant\nyo\n");
-        import_markdown(&repo, None, f.path(), None).unwrap();
+        import_markdown(&repo, None, f.path(), None).expect("unexpected None");
         let cursor = repo
             .get_cursor(Provider::Generic, None, "markdown-file")
-            .unwrap();
+            .expect("unexpected None");
         assert!(cursor.is_some());
-        assert!(cursor.unwrap().contains("tmp"));
+        assert!(cursor.expect("unexpected None").contains("tmp"));
     }
 
     #[test]
     fn multiple_imports_dont_collide() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f1 = write_md("## User\nAAA\n## Assistant\naaa\n");
         let f2 = write_md("## User\nBBB\n## Assistant\nbbb\n");
 
-        let s1 = import_markdown(&repo, None, f1.path(), Some("proj-a")).unwrap();
-        let s2 = import_markdown(&repo, None, f2.path(), Some("proj-b")).unwrap();
+        let s1 = import_markdown(&repo, None, f1.path(), Some("proj-a")).expect("unexpected None");
+        let s2 = import_markdown(&repo, None, f2.path(), Some("proj-b")).expect("unexpected None");
 
         assert_ne!(s1.conversation_id, s2.conversation_id);
-        assert_eq!(repo.count_conversations().unwrap(), 2);
+        assert_eq!(repo.count_conversations().expect("unexpected None"), 2);
         assert_ne!(s1.conversation_hash, s2.conversation_hash);
     }
 
     #[test]
     fn completeness_full_when_all_event_types() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md(
             "## User\nhi\n## Assistant\ndone\n## Tool\nbash\n## Command\ncargo build\n## Diff\nfoo.rs\n## Command\ncargo build done\n",
         );
-        let s = import_markdown(&repo, None, f.path(), None).unwrap();
+        let s = import_markdown(&repo, None, f.path(), None).expect("unexpected None");
         assert_eq!(s.completeness, "完整");
     }
 
     #[test]
     fn import_archives_raw_payload() {
         // plan §2.3 Raw + Normalized 双存储：原始文件应归档到 Raw Store
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let (_raw_dir, raw_store) = raw_store();
         let f = write_md("## User\n原始内容\n## Assistant\n回复\n");
 
-        let summary = import_markdown(&repo, Some(&raw_store), f.path(), None).unwrap();
+        let summary = import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
 
         // raw_payload_id 非空且是 64 hex
         let hash = summary.raw_payload_id.expect("raw should be archived");
@@ -322,32 +322,32 @@ mod tests {
         // conversation 入库后 raw_payload_id 指回 Raw Store
         let conv = repo
             .get_conversation(&summary.conversation_id)
-            .unwrap()
-            .unwrap();
+            .expect("unexpected None")
+            .expect("unexpected None");
         assert_eq!(conv.raw_payload_id.as_deref(), Some(hash.as_str()));
 
         // Raw Store 里能读回原始内容
-        assert!(raw_store.exists(&hash).unwrap());
-        let back = raw_store.get(&hash).unwrap();
-        let back_str = std::str::from_utf8(&back).unwrap();
+        assert!(raw_store.exists(&hash).expect("unexpected None"));
+        let back = raw_store.get(&hash).expect("unexpected None");
+        let back_str = std::str::from_utf8(&back).expect("unexpected None");
         assert!(back_str.contains("原始内容"));
     }
 
     #[test]
     fn import_without_raw_store_still_works() {
         // 不传 Raw Store 时，raw_payload_id 为空，但标准化数据正常入库
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_md("## User\nhi\n## Assistant\nyo\n");
-        let summary = import_markdown(&repo, None, f.path(), None).unwrap();
+        let summary = import_markdown(&repo, None, f.path(), None).expect("unexpected None");
         assert!(summary.raw_payload_id.is_none());
 
         let conv = repo
             .get_conversation(&summary.conversation_id)
-            .unwrap()
-            .unwrap();
+            .expect("unexpected None")
+            .expect("unexpected None");
         assert!(conv.raw_payload_id.is_none());
         assert_eq!(
-            repo.list_messages(&summary.conversation_id).unwrap().len(),
+            repo.list_messages(&summary.conversation_id).expect("unexpected None").len(),
             2
         );
     }
@@ -355,26 +355,26 @@ mod tests {
     #[test]
     fn raw_archive_is_idempotent() {
         // 重复导入同一文件：Raw Store 只存一份（内容寻址去重）
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let (_raw_dir, raw_store) = raw_store();
         let f = write_md("## User\nsame\n## Assistant\ncontent\n");
 
-        let s1 = import_markdown(&repo, Some(&raw_store), f.path(), None).unwrap();
-        let s2 = import_markdown(&repo, Some(&raw_store), f.path(), None).unwrap();
+        let s1 = import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
+        let s2 = import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
 
         assert_eq!(s1.raw_payload_id, s2.raw_payload_id, "same raw hash");
-        assert_eq!(raw_store.stats().unwrap().count, 1, "only one raw object");
+        assert_eq!(raw_store.stats().expect("unexpected None").count, 1, "only one raw object");
     }
 
     fn write_jsonl(content: &str) -> NamedTempFile {
-        let f = NamedTempFile::with_suffix(".jsonl").unwrap();
-        std::fs::write(f.path(), content).unwrap();
+        let f = NamedTempFile::with_suffix(".jsonl").expect("tempdir creation failed");
+        std::fs::write(f.path(), content).expect("file I/O failed");
         f
     }
 
     #[test]
     fn import_jsonl_file() {
-        let repo = Repository::open_in_memory().unwrap();
+        let repo = Repository::open_in_memory().expect("unexpected None");
         let f = write_jsonl(
             r#"{"type":"meta","title":"JSONL 会话","model":"gpt-test"}
 {"type":"message","role":"user","text":"你好"}
@@ -382,14 +382,14 @@ mod tests {
 {"type":"event","event_type":"command_started","summary":"cargo build"}
 "#,
         );
-        let summary = import_markdown(&repo, None, f.path(), Some("jsonl-proj")).unwrap();
+        let summary = import_markdown(&repo, None, f.path(), Some("jsonl-proj")).expect("unexpected None");
         assert_eq!(summary.messages_imported, 2);
         assert_eq!(summary.events_imported, 1);
 
         let conv = repo
             .get_conversation(&summary.conversation_id)
-            .unwrap()
-            .unwrap();
+            .expect("unexpected None")
+            .expect("unexpected None");
         assert_eq!(conv.title.as_deref(), Some("JSONL 会话"));
         assert_eq!(conv.model.as_deref(), Some("gpt-test"));
     }
@@ -400,8 +400,8 @@ mod tests {
         let md = write_md("## User\nhi\n## Assistant\nyo\n");
         let jl = write_jsonl("{\"type\":\"message\",\"role\":\"user\",\"text\":\"hi\"}\n");
 
-        let md_raw = parse_by_extension(md.path()).unwrap();
-        let jl_raw: RawConversation = parse_by_extension(jl.path()).unwrap();
+        let md_raw = parse_by_extension(md.path()).expect("parse failed");
+        let jl_raw: RawConversation = parse_by_extension(jl.path()).expect("parse failed");
 
         // 都应解析出消息，但来源不同 adapter
         assert!(!md_raw.messages.is_empty());

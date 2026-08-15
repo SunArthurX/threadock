@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn parses_meta_and_messages() {
-        let raw = parse_str(SAMPLE, "test.jsonl").unwrap();
+        let raw = parse_str(SAMPLE, "test.jsonl").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("JSONL 测试"));
         assert_eq!(raw.model.as_deref(), Some("gpt-test"));
         assert_eq!(raw.messages.len(), 2);
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn parses_events() {
-        let raw = parse_str(SAMPLE, "test.jsonl").unwrap();
+        let raw = parse_str(SAMPLE, "test.jsonl").expect("parse failed");
         assert_eq!(raw.events.len(), 2);
         assert!(raw
             .events
@@ -233,14 +233,14 @@ mod tests {
     #[test]
     fn empty_lines_skipped() {
         let s = "{\"type\":\"message\",\"role\":\"user\",\"text\":\"hi\"}\n\n   \n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert_eq!(raw.messages.len(), 1);
     }
 
     #[test]
     fn no_meta_still_works() {
         let s = "{\"type\":\"message\",\"role\":\"user\",\"text\":\"hi\"}\n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert!(raw.title.is_none());
         assert_eq!(raw.messages.len(), 1);
     }
@@ -248,14 +248,14 @@ mod tests {
     #[test]
     fn default_role_is_user() {
         let s = "{\"type\":\"message\",\"text\":\"no role\"}\n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert_eq!(raw.messages[0].role, Role::User);
     }
 
     #[test]
     fn unknown_type_ignored() {
         let s = "{\"type\":\"weird\",\"data\":1}\n{\"type\":\"message\",\"role\":\"user\",\"text\":\"hi\"}\n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert_eq!(raw.messages.len(), 1);
     }
 
@@ -268,9 +268,9 @@ mod tests {
     #[test]
     fn content_json_preserved() {
         let s = "{\"type\":\"message\",\"role\":\"tool\",\"text\":\"result\",\"content_json\":{\"tool\":\"bash\",\"code\":0}}\n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert!(raw.messages[0].content_json.is_some());
-        let json = raw.messages[0].content_json.as_ref().unwrap();
+        let json = raw.messages[0].content_json.as_ref().expect("unexpected None");
         assert_eq!(json["tool"], "bash");
     }
 
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn only_events_ok() {
         let s = "{\"type\":\"event\",\"event_type\":\"error\",\"summary\":\"boom\"}\n";
-        let raw = parse_str(s, "x").unwrap();
+        let raw = parse_str(s, "x").expect("parse failed");
         assert_eq!(raw.events.len(), 1);
         assert!(raw.messages.is_empty());
     }
@@ -291,16 +291,16 @@ mod tests {
     #[test]
     fn file_roundtrip() {
         use tempfile::NamedTempFile;
-        let f = NamedTempFile::new().unwrap();
-        std::fs::write(f.path(), SAMPLE).unwrap();
-        let raw = parse_file(f.path()).unwrap();
+        let f = NamedTempFile::new().expect("tempdir creation failed");
+        std::fs::write(f.path(), SAMPLE).expect("file I/O failed");
+        let raw = parse_file(f.path()).expect("parse failed");
         assert_eq!(raw.messages.len(), 2);
     }
 
     #[test]
     fn integrates_with_normalization() {
-        let raw = parse_str(SAMPLE, "test.jsonl").unwrap();
-        let n = normalize(raw).unwrap();
+        let raw = parse_str(SAMPLE, "test.jsonl").expect("parse failed");
+        let n = normalize(raw).expect("unexpected None");
         assert_eq!(n.messages.len(), 2);
         assert_eq!(n.events.len(), 2);
         // 有 command + diff → 至少 Partial

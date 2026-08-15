@@ -51,27 +51,27 @@ pub fn builtin_rules() -> Vec<RedactionRule> {
         RedactionRule {
             name: "aws_access_key",
             // AKIA 开头 + 16 位大写字母数字
-            pattern: Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(),
+            pattern: Regex::new(r"AKIA[0-9A-Z]{16}").expect("invalid regex"),
         },
         RedactionRule {
             name: "github_token",
             // ghp_/gho_/ghu_/ghs_/ghr_ + 36 位
-            pattern: Regex::new(r"gh[posur]_[A-Za-z0-9]{36}").unwrap(),
+            pattern: Regex::new(r"gh[posur]_[A-Za-z0-9]{36}").expect("invalid regex"),
         },
         RedactionRule {
             name: "bearer_token",
             // Bearer <token>，至少 8 位
-            pattern: Regex::new(r"(?i)bearer\s+[A-Za-z0-9\-_.=]{8,}").unwrap(),
+            pattern: Regex::new(r"(?i)bearer\s+[A-Za-z0-9\-_.=]{8,}").expect("invalid regex"),
         },
         RedactionRule {
             name: "api_key",
             // sk- (OpenAI 风格) 或 api_key=/apikey= 后跟值
             pattern: Regex::new(r"(sk-[A-Za-z0-9]{20,}|(?i)api_?key\s*[:=]\s*[A-Za-z0-9\-_]{8,})")
-                .unwrap(),
+                .expect("unexpected None"),
         },
         RedactionRule {
             name: "email",
-            pattern: Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").unwrap(),
+            pattern: Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").expect("invalid regex"),
         },
         RedactionRule {
             name: "private_ip",
@@ -79,13 +79,13 @@ pub fn builtin_rules() -> Vec<RedactionRule> {
             pattern: Regex::new(
                 r"\b(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.\d{1,3}\.\d{1,3})\b",
             )
-            .unwrap(),
+            .expect("unexpected None"),
         },
         // AWS Secret Key 单列：靠 key=value 上下文判断，避免误伤普通 40 位串
         RedactionRule {
             name: "aws_secret_key",
             pattern: Regex::new(r"(?i)(aws_secret|secret_access_key)\s*[:=]\s*[A-Za-z0-9/+=]{40}")
-                .unwrap(),
+                .expect("unexpected None"),
         },
     ]
 }

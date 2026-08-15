@@ -175,17 +175,17 @@ mod tests {
         let mut buf = Vec::new();
         let cap = 32;
 
-        let l1 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        let l1 = read_line_capped(&mut r, &mut buf, cap).expect("unexpected None");
         assert!(l1.complete && !l1.oversized);
         assert_eq!(buf.as_slice().trim_ascii_end(), b"a");
 
-        let _ = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        let _ = read_line_capped(&mut r, &mut buf, cap).expect("unexpected None");
         assert_eq!(buf.as_slice().trim_ascii_end(), b"b");
 
-        let l3 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        let l3 = read_line_capped(&mut r, &mut buf, cap).expect("unexpected None");
         assert!(l3.complete && l3.oversized, "超限行应标记 oversized");
 
-        let l4 = read_line_capped(&mut r, &mut buf, cap).unwrap();
+        let l4 = read_line_capped(&mut r, &mut buf, cap).expect("unexpected None");
         assert!(!l4.complete, "EOF 且无更多内容");
         assert_eq!(
             buf.as_slice().trim_ascii_end(),

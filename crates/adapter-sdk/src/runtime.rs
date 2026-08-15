@@ -213,15 +213,15 @@ mod tests {
         let stdin = Cursor::new(input);
         let mut stdout = Vec::new();
         serve_stdio(&adapter, stdin, &mut stdout);
-        String::from_utf8(stdout).unwrap()
+        String::from_utf8(stdout).expect("unexpected None")
     }
 
     #[test]
     fn hello_returns_metadata() {
         let out = run(r#"{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}"#);
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
         assert_eq!(resp.id, serde_json::json!(1));
-        let hello: HelloResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
+        let hello: HelloResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert_eq!(hello.metadata.id, "fake");
         assert_eq!(hello.metadata.protocol_version, PROTOCOL_VERSION);
     }
@@ -233,8 +233,8 @@ mod tests {
             r#"{{"jsonrpc":"2.0","id":2,"method":"parse","params":{{"source_id":"x.md","content_base64":"{content_b64}"}}}}"#
         );
         let out = run(&req);
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
-        let presp: ParseResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
+        let presp: ParseResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert_eq!(presp.conversation.source_conversation_id, "x.md");
         assert_eq!(presp.conversation.messages.len(), 1);
     }
@@ -242,24 +242,24 @@ mod tests {
     #[test]
     fn health_returns_healthy() {
         let out = run(r#"{"jsonrpc":"2.0","id":3,"method":"health","params":{}}"#);
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
-        let h: HealthResponse = serde_json::from_value(resp.result.unwrap()).unwrap();
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
+        let h: HealthResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert!(h.healthy);
     }
 
     #[test]
     fn unknown_method_returns_error() {
         let out = run(r#"{"jsonrpc":"2.0","id":4,"method":"nope","params":{}}"#);
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
         assert!(resp.error.is_some());
-        assert_eq!(resp.error.unwrap().code, -32601);
+        assert_eq!(resp.error.expect("unexpected None").code, -32601);
     }
 
     #[test]
     fn invalid_json_returns_parse_error() {
         let out = run("not json");
-        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).unwrap();
-        assert_eq!(resp.error.unwrap().code, -32700);
+        let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
+        assert_eq!(resp.error.expect("unexpected None").code, -32700);
     }
 
     #[test]

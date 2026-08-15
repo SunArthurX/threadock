@@ -237,16 +237,16 @@ mod tests {
 
     #[test]
     fn collects_skill_with_frontmatter_and_risky() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let sk = dir.path().join(".zcode/skills/demo-skill");
-        std::fs::create_dir_all(&sk).unwrap();
+        std::fs::create_dir_all(&sk).expect("file I/O failed");
         std::fs::write(
             sk.join("SKILL.md"),
             "---\nname: demo\ndescription: \"一个演示\"\n---\n\n运行 rm -rf /tmp/x 清理",
         )
-        .unwrap();
-        let recs = collect_agent_assets(dir.path(), Provider::ZCode).unwrap();
-        let s = recs.iter().find(|r| r.name == "demo").unwrap();
+        .expect("unexpected None");
+        let recs = collect_agent_assets(dir.path(), Provider::ZCode).expect("unexpected None");
+        let s = recs.iter().find(|r| r.name == "demo").expect("unexpected None");
         assert_eq!(s.kind, "skill");
         assert_eq!(s.description.as_deref(), Some("一个演示"));
         assert!(s.risky_hits >= 1, "rm -rf 应命中危险模式");
@@ -254,16 +254,16 @@ mod tests {
 
     #[test]
     fn collects_claude_plugins_from_json() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let pd = dir.path().join(".claude/plugins");
-        std::fs::create_dir_all(&pd).unwrap();
+        std::fs::create_dir_all(&pd).expect("file I/O failed");
         std::fs::write(
             pd.join("installed_plugins.json"),
             r#"{"version":2,"plugins":{"foo@market":[{"version":"1.2.0","installedAt":"2026-08-01T00:00:00Z","installPath":"/x"}]}}"#,
         )
-        .unwrap();
-        let recs = collect_agent_assets(dir.path(), Provider::ClaudeCode).unwrap();
-        let p = recs.iter().find(|r| r.name == "foo").unwrap();
+        .expect("unexpected None");
+        let recs = collect_agent_assets(dir.path(), Provider::ClaudeCode).expect("unexpected None");
+        let p = recs.iter().find(|r| r.name == "foo").expect("unexpected None");
         assert_eq!(p.kind, "plugin");
         assert_eq!(p.version.as_deref(), Some("1.2.0"));
         assert_eq!(p.installed_at.as_deref(), Some("2026-08-01T00:00:00Z"));
@@ -271,11 +271,11 @@ mod tests {
 
     #[test]
     fn minimax_builtin_kind() {
-        let dir = tempfile::TempDir::new().unwrap();
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let sk = dir.path().join(".minimax/.builtin-skills/docx");
-        std::fs::create_dir_all(&sk).unwrap();
-        std::fs::write(sk.join("SKILL.md"), "---\nname: docx\n---\n内容").unwrap();
-        let recs = collect_agent_assets(dir.path(), Provider::MinimaxCode).unwrap();
+        std::fs::create_dir_all(&sk).expect("file I/O failed");
+        std::fs::write(sk.join("SKILL.md"), "---\nname: docx\n---\n内容").expect("file I/O failed");
+        let recs = collect_agent_assets(dir.path(), Provider::MinimaxCode).expect("unexpected None");
         assert!(recs
             .iter()
             .any(|r| r.kind == "builtin_skill" && r.name == "docx"));
