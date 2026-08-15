@@ -21,6 +21,8 @@ pub struct SearchQuery {
     pub query: String,
     pub provider: Option<Provider>,
     pub workspace_id: Option<String>,
+    /// 角色过滤（"user" = 仅用户提问；空 query + role = 全量该角色）。
+    pub role: Option<String>,
     pub limit: usize,
 }
 
@@ -30,6 +32,7 @@ impl SearchQuery {
             query: query.into(),
             provider: None,
             workspace_id: None,
+            role: None,
             limit: 50,
         }
     }
@@ -41,6 +44,12 @@ impl SearchQuery {
     #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
+        self
+    }
+    /// 角色过滤（"user" = 仅我的提问）。
+    #[must_use]
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
         self
     }
     #[must_use]
@@ -106,6 +115,10 @@ pub(super) fn search(
     if let Some(wsid) = &q.workspace_id {
         where_clauses.push("workspace_id = ?".to_string());
         args.push(wsid.clone().into());
+    }
+    if let Some(role) = &q.role {
+        where_clauses.push("role = ?".to_string());
+        args.push(role.clone().into());
     }
 
     let where_sql = if where_clauses.is_empty() {
@@ -312,5 +325,33 @@ mod tests {
         let snip = &results[0].snippet;
         assert!(!snip.contains("<img"), "raw HTML must not survive: {snip}");
         assert!(snip.contains("&lt;img"), "HTML must be escaped: {snip}");
+    }
+
+    #[test]
+    fn search_filters_by_role_user_only() {
+        // 「仅我的提问」：role=user 只返回用户消息
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let c = Conversation::new(Provider::Generic, "src-role");
+        let cid = r.upsert_conversation(&c).expect("upsert failed");
+        let mut mu = Message::new(&cid, Role::User, 1);
+        mu.content_text = Some("用户问 rust role 过滤".into());
+        r.upsert_message(&mu).expect("upsert failed");
+        let mut ma = Message::new(&cid, Role::Assistant, 2);
+        ma.content_text = Some("助手答 rust role 过滤".into());
+        r.upsert_message(&ma).expect("upsert failed");
+
+        let hits = r
+            .search(&SearchQuery::new("rust").with_role("user"))
+            .expect("SQL execution failed");
+        assert!(!hits.is_empty());
+        assert!(hits.iter().all(|h| h.role == Role::User));
+
+        // 空 query + role = 全量该角色（所有我的提问）
+        let all = r
+            .search(&SearchQuery::new("").with_role("user"))
+            .expect("SQL execution failed");
+        assert!(!all.is_empty(), "空关键词也应返回用户消息");
+        assert!(all.iter().all(|h| h.role == Role::User));
     }
 }

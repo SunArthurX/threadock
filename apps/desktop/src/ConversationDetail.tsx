@@ -19,15 +19,10 @@ interface Props {
   onToggleCollapse: (id: string) => void;
   onToggleFavorite: () => void;
   onToggleArchive: () => void;
-  onSoftDelete: () => void;
-  onHardDelete: () => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onRescanAudit: () => void;
 }
-
-/** 彻底删除确认词。 */
-export const HARD_DELETE_CONFIRM = "删除";
 
 import { useState } from "react";
 
@@ -35,12 +30,11 @@ export default function ConversationDetail({
   conv, messages, events, completenessLabel, knowledge, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
   onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
-  onToggleFavorite, onToggleArchive, onSoftDelete, onHardDelete,
+  onToggleFavorite, onToggleArchive,
   onAddTag, onRemoveTag, onRescanAudit,
 }: Props) {
   const [tagInput, setTagInput] = useState("");
-  const [hardArmed, setHardArmed] = useState(false);
-  const [hardText, setHardText] = useState("");
+  const [downloadOpen, setDownloadOpen] = useState(false);
   const renderContent = (m: Message) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
@@ -114,35 +108,26 @@ export default function ConversationDetail({
         <button className={`action-btn ${timelineMode ? "active" : ""}`} onClick={onToggleTimeline}>
           {timelineMode ? "💬 消息" : "🕐 时间线"}
         </button>
-        <button className="action-btn" disabled={exporting} onClick={() => onExport("markdown")}>
-          {exporting ? "导出中…" : "⤓ Markdown"}
+        <button className="action-btn" onClick={onExtractKnowledge} disabled={loading || messages.length === 0}>
+          {loading ? "提取中…" : knowledge ? "✨ 重新提取" : "✨ 知识"}
         </button>
-        <button className="action-btn" disabled={exporting} onClick={() => onExport("json")}>⤓ JSON</button>
-        <button className="action-btn" onClick={onExtractKnowledge}>✨ 知识</button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
-      </div>
-      <div className="detail-actions gov-actions">
         <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
         <button className="action-btn" onClick={onToggleArchive}>{conv.archived ? "📤 取消归档" : "🗄 归档"}</button>
-        <button className="action-btn" onClick={onSoftDelete} title="移入回收站（可恢复）">🗑 删除</button>
-        {!hardArmed ? (
-          <button className="action-btn danger" onClick={() => { setHardArmed(true); setHardText(""); }}>⚡ 彻底删除…</button>
-        ) : (
-          <span className="hard-delete-confirm">
-            <input
-              value={hardText}
-              placeholder={`输入「${HARD_DELETE_CONFIRM}」确认`}
-              onChange={(e) => setHardText(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && hardText === HARD_DELETE_CONFIRM) { onHardDelete(); setHardArmed(false); } }}
-            />
-            <button
-              className="action-btn danger"
-              disabled={hardText !== HARD_DELETE_CONFIRM}
-              onClick={() => { onHardDelete(); setHardArmed(false); }}
-            >确认彻底删除</button>
-            <button className="action-btn" onClick={() => setHardArmed(false)}>取消</button>
-          </span>
-        )}
+        <div className="download-dropdown">
+          <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
+            {exporting ? "导出中…" : "⤓ 下载 ▾"}
+          </button>
+          {downloadOpen && (
+            <>
+              <div className="import-backdrop" onClick={() => setDownloadOpen(false)} />
+              <div className="import-menu download-menu">
+                <button onClick={() => { setDownloadOpen(false); onExport("markdown"); }}>📄 Markdown（.md）</button>
+                <button onClick={() => { setDownloadOpen(false); onExport("json"); }}>🧾 JSON（.json）</button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
       {/* 标签行始终显示（含输入框） */}
       {(
@@ -185,45 +170,50 @@ export default function ConversationDetail({
         ))}
       </>)}
       <div className="knowledge-section">
-        <button className="knowledge-btn" onClick={onExtractKnowledge}>
-          {knowledge ? "↻ 重新提取" : "🧠 知识提取"}
-        </button>
         {knowledge && (
           <div className="knowledge-result">
+            {(knowledge.summary ?? "").length === 0
+              && (knowledge.decisions ?? []).length === 0
+              && (knowledge.todos ?? []).length === 0
+              && (knowledge.errors ?? []).length === 0
+              && (knowledge.commands ?? []).length === 0
+              && (knowledge.files ?? []).length === 0 && (
+              <div className="knowledge-empty">本会话未提取到知识要点</div>
+            )}
             {knowledge.summary && (
               <div className="knowledge-block summary">
                 <div className="knowledge-label">📖 摘要</div>
                 <div className="knowledge-text">{knowledge.summary}</div>
               </div>
             )}
-            {knowledge.decisions.length > 0 && (
+            {(knowledge.decisions ?? []).length > 0 && (
               <div className="knowledge-block decisions">
                 <div className="knowledge-label">🎯 决策（{knowledge.decisions.length}）</div>
-                {knowledge.decisions.map((d, i) => <div key={i} className="knowledge-item">• {d.decision}</div>)}
+                {(knowledge.decisions ?? []).map((d, i) => <div key={i} className="knowledge-item">• {d.decision}</div>)}
               </div>
             )}
-            {knowledge.todos.length > 0 && (
+            {(knowledge.todos ?? []).length > 0 && (
               <div className="knowledge-block todos">
                 <div className="knowledge-label">📋 TODO（{knowledge.todos.length}）</div>
-                {knowledge.todos.map((t, i) => <div key={i} className="knowledge-item">• {t.text}</div>)}
+                {(knowledge.todos ?? []).map((t, i) => <div key={i} className="knowledge-item">• {t.text}</div>)}
               </div>
             )}
-            {knowledge.errors.length > 0 && (
+            {(knowledge.errors ?? []).length > 0 && (
               <div className="knowledge-block errors">
                 <div className="knowledge-label">❌ 错误（{knowledge.errors.length}）</div>
-                {knowledge.errors.map((e, i) => <div key={i} className="knowledge-item">• {e.error}</div>)}
+                {(knowledge.errors ?? []).map((e, i) => <div key={i} className="knowledge-item">• {e.error}</div>)}
               </div>
             )}
-            {knowledge.commands.length > 0 && (
+            {(knowledge.commands ?? []).length > 0 && (
               <div className="knowledge-block commands">
                 <div className="knowledge-label">⚙️ 命令（{knowledge.commands.length}）</div>
-                {knowledge.commands.map((c, i) => <div key={i} className="knowledge-item mono">• {c}</div>)}
+                {(knowledge.commands ?? []).map((c, i) => <div key={i} className="knowledge-item mono">• {c}</div>)}
               </div>
             )}
-            {knowledge.files.length > 0 && (
+            {(knowledge.files ?? []).length > 0 && (
               <div className="knowledge-block files">
                 <div className="knowledge-label">📄 涉及文件（{knowledge.files.length}）</div>
-                {knowledge.files.map((f, i) => <div key={i} className="knowledge-item mono">• {f.path}</div>)}
+                {(knowledge.files ?? []).map((f, i) => <div key={i} className="knowledge-item mono">• {f.path}</div>)}
               </div>
             )}
           </div>

@@ -55,6 +55,7 @@ export default function App() {
   } | null>(null);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [onlyMine, setOnlyMine] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
   const [collapsedMsgs, setCollapsedMsgs] = useState<Set<string>>(new Set());
@@ -68,6 +69,16 @@ export default function App() {
   const refreshNewCount = async () => {
     try { setNewCount(await invoke<import("./ImportMenu").NewCount>("sources_new_count", {})); }
     catch { /* 红点检测失败静默 */ }
+  };
+  // 库中实际存在会话的来源集合（无数据的来源不在筛选栏显示，如未装 Cursor）
+  const [availableProviders, setAvailableProviders] = useState<Set<string>>(new Set());
+  const refreshProviders = async () => {
+    try {
+      const all = await invoke<Conversation[]>("list_conversations", {
+        workspaceId: null, provider: null, favorite: null, archived: null, includeDeleted: false,
+      });
+      setAvailableProviders(new Set(all.map((c) => c.provider)));
+    } catch { /* 静默：失败时保持全部 chips */ }
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -129,6 +140,7 @@ export default function App() {
     const t2 = setTimeout(async () => {
       refreshBudget();
       refreshNewCount();
+      refreshProviders();
       try {
         const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
         if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
@@ -198,8 +210,9 @@ export default function App() {
       if (!msg.includes("同步中") && !msg.includes("重置中")) showError(e);
     }
     setSyncing(false);
-    // 同步完成：重算红点（全部消化后熄灭）；状态条 15 秒后自动清除避免残留旧统计
+    // 同步完成：重算红点（全部消化后熄灭）与来源显隐；状态条 15 秒后自动清除
     refreshNewCount();
+    refreshProviders();
     window.setTimeout(() => setSyncResult((cur) => cur?.startsWith("✓") ? null : cur), 15000);
   };
 
@@ -258,8 +271,14 @@ export default function App() {
 
   // ── actions ──
   const doSearch = async () => {
-    if (!searchQuery.trim()) { setSearchResults(null); return; }
-    try { setSearchResults(await invoke<SearchResult[]>("search", { query: searchQuery })); } catch (e) { showError(e); }
+    // 空关键词 + 勾选「仅我的提问」= 全量我的提问；两者皆空则清空结果
+    if (!searchQuery.trim() && !onlyMine) { setSearchResults(null); return; }
+    try {
+      setSearchResults(await invoke<SearchResult[]>("search", {
+        query: searchQuery,
+        role: onlyMine ? "user" : null,
+      }));
+    } catch (e) { showError(e); }
   };
 
   const jumpToSearchResult = async (r: SearchResult) => {
@@ -287,7 +306,16 @@ export default function App() {
 
   const extractKnowledge = async () => {
     if (!selectedConv) return;
-    try { setKnowledge(await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id })); } catch (e) { showError(e); }
+    try {
+      const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id });
+      setKnowledge(r);
+      const empty = !r.summary && !(r.decisions ?? []).length && !(r.todos ?? []).length
+        && !(r.errors ?? []).length && !(r.commands ?? []).length && !(r.files ?? []).length;
+      if (empty) showToast("✨ 本会话未提取到知识要点", "info");
+    } catch (e) {
+      // 提取失败不打断浏览：toast 呈现原因（此前弹 error-banner 会被误认为页面异常）
+      showToast(`知识提取失败：${typeof e === "string" ? e : (e as { message?: string }).message ?? String(e)}`, "error");
+    }
   };
 
   const importHandler = async () => {
@@ -383,26 +411,6 @@ export default function App() {
     } catch (e) { showError(e); }
   };
 
-  const softDeleteConv = async () => {
-    if (!selectedConv) return;
-    try {
-      await invoke("delete_conversation", { id: selectedConv.id });
-      showToast("🗑 已移入回收站（会话列表切到「已删除」可恢复）");
-      setSelectedConv(null); setMessages([]); setEvents([]);
-      await loadConversations();
-    } catch (e) { showError(e); }
-  };
-
-  const hardDeleteConv = async () => {
-    if (!selectedConv) return;
-    try {
-      await invoke("hard_delete_conversation", { id: selectedConv.id });
-      showToast("⚡ 已彻底删除（含原始归档与索引文档）");
-      setSelectedConv(null); setMessages([]); setEvents([]);
-      await loadConversations();
-    } catch (e) { showError(e); }
-  };
-
   const restoreConv = async (c: Conversation) => {
     try {
       await invoke("restore_conversation", { id: c.id });
@@ -480,6 +488,10 @@ export default function App() {
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doSearch()} />
+              <label className="only-mine" title="只看我自己发出的提问（可留空关键词列出全部）">
+                <input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} />
+                仅我的提问
+              </label>
               <button onClick={doSearch}>搜索</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
             </div>
@@ -528,7 +540,7 @@ export default function App() {
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
                     loading={convsLoading} providerFilter={providerFilter} selectedWs={selectedWs}
                     expandedParents={expandedParents} childConvs={childConvs}
-                    scope={scope} onScopeChange={setScope}
+                    scope={scope} onScopeChange={setScope} availableProviders={availableProviders}
                     onFilter={setProviderFilter} onSelect={selectConversation}
                     onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite} onRestore={restoreConv}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
@@ -542,7 +554,6 @@ export default function App() {
                     tags={detailTags}
                     onToggleFavorite={() => selectedConv && toggleFavorite(selectedConv)}
                     onToggleArchive={toggleArchive}
-                    onSoftDelete={softDeleteConv} onHardDelete={hardDeleteConv}
                     onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={extractKnowledge}

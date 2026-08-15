@@ -315,10 +315,25 @@ pub(crate) async fn extract_knowledge(
 pub(crate) async fn search(
     state: tauri::State<'_, DaemonState>,
     query: String,
+    role: Option<String>,
 ) -> Result<Vec<SearchResultDto>, String> {
+    // 空关键词 + 角色筛选 = 全量该角色（如「所有我的提问」）：直接走 FTS5
+    // （Tantivy 空 query 无意义；FTS5 空 MATCH 退化为按过滤条件全量）
+    if query.trim().is_empty() {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        let mut q = ch_storage::SearchQuery::new("").with_limit(200);
+        if let Some(r) = &role {
+            q = q.with_role(r.clone());
+        }
+        let results = repo.search(&q).map_err(|e| storage_err(e))?;
+        return Ok(results.into_iter().map(search_result_dto).collect());
+    }
     // 优先走 Tantivy（plan §9.5 主检索），降级 FTS5
     let idx = state.search_index.lock().map_err(|e| search_err(e))?;
-    let q = ch_search::SearchQuery::new(&query);
+    let mut q = ch_search::SearchQuery::new(&query);
+    if let Some(r) = &role {
+        q = q.with_role(r.clone());
+    }
     match idx.search(&q) {
         Ok(hits) if !hits.is_empty() => Ok(hits
             .into_iter()
@@ -335,7 +350,10 @@ pub(crate) async fn search(
             // 降级 FTS5
             drop(idx);
             let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-            let q = ch_storage::SearchQuery::new(&query);
+            let mut q = ch_storage::SearchQuery::new(&query);
+            if let Some(r) = &role {
+                q = q.with_role(r.clone());
+            }
             let results = repo.search(&q).map_err(|e| storage_err(e))?;
             Ok(results.into_iter().map(search_result_dto).collect())
         }

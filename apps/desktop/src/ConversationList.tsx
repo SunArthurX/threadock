@@ -14,6 +14,8 @@ interface Props {
   childConvs: Record<string, Conversation[]>;
   scope: ListScope;
   onScopeChange: (s: ListScope) => void;
+  /** 库中实际存在会话的来源（空集合 = 尚未加载，显示全部）。 */
+  availableProviders?: Set<string>;
   onFilter: (p: string | null) => void;
   onSelect: (c: Conversation) => void;
   onToggleExpand: (c: Conversation) => void;
@@ -33,7 +35,7 @@ const SCOPES: [ListScope, string][] = [
 
 export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
-  expandedParents, childConvs, scope, onScopeChange, onFilter, onSelect,
+  expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onRestore,
 }: Props) {
   const renderItem = (c: Conversation, isChild = false) => (
@@ -109,13 +111,15 @@ export default function ConversationList({
           className={`filter-chip ${providerFilter === null ? "active" : ""}`}
           onClick={() => onFilter(null)}
         >全部</button>
-        {["zcode", "claude-code", "cursor", "minimax-code", "codex"].map((p) => (
-          <button
-            key={p}
-            className={`filter-chip ${providerFilter === p ? "active" : ""}`}
-            onClick={() => onFilter(p)}
-          >{sourceLabel(p)}</button>
-        ))}
+        {["zcode", "claude-code", "cursor", "minimax-code", "codex"]
+          .filter((p) => !availableProviders || availableProviders.size === 0 || availableProviders.has(p))
+          .map((p) => (
+            <button
+              key={p}
+              className={`filter-chip ${providerFilter === p ? "active" : ""}`}
+              onClick={() => onFilter(p)}
+            >{sourceLabel(p)}</button>
+          ))}
       </div>
       {loading && (
         <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载会话…</span></div>

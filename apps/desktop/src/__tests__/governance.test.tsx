@@ -91,7 +91,7 @@ describe("时间线归并排序（M15 修复验证）", () => {
         collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
         onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
-        onSoftDelete={() => {}} onHardDelete={() => {}} onAddTag={() => {}}
+        onAddTag={() => {}}
         onRemoveTag={() => {}} onRescanAudit={() => {}}
       />
     );

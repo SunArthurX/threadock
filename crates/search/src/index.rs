@@ -33,6 +33,8 @@ pub struct SearchQuery {
     pub query: String,
     pub provider: Option<Provider>,
     pub workspace_id: Option<String>,
+    /// 角色过滤（如 "user" = 仅用户提问）。
+    pub role: Option<String>,
     pub limit: usize,
 }
 
@@ -42,6 +44,7 @@ impl SearchQuery {
             query: query.into(),
             provider: None,
             workspace_id: None,
+            role: None,
             limit: 50,
         }
     }
@@ -53,6 +56,12 @@ impl SearchQuery {
     #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
+        self
+    }
+    /// 角色过滤（"user" = 仅我的提问）。
+    #[must_use]
+    pub fn with_role(mut self, role: impl Into<String>) -> Self {
+        self.role = Some(role.into());
         self
     }
     #[must_use]
@@ -265,6 +274,13 @@ impl SearchIndex {
         }
         if let Some(ws) = &q.workspace_id {
             let term = tantivy::Term::from_field_text(f.workspace_id, ws);
+            clauses.push((
+                Occur::Must,
+                Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+            ));
+        }
+        if let Some(role) = &q.role {
+            let term = tantivy::Term::from_field_text(f.role, role);
             clauses.push((
                 Occur::Must,
                 Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
@@ -675,5 +691,30 @@ mod tests {
             .search(&SearchQuery::new("keyword").with_limit(3))
             .expect("unexpected None");
         assert!(hits.len() <= 3);
+    }
+
+    #[test]
+    fn filter_by_role_user_only() {
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        index_samples(
+            &idx,
+            &[
+                msg("m1", "c1", "t", "user asks about feature"),
+                IndexableMessage {
+                    message_id: "m2".into(),
+                    conversation_id: "c1".into(),
+                    provider: Provider::Generic,
+                    workspace_id: None,
+                    role: Role::Assistant,
+                    title: Some("t".into()),
+                    body: Some("assistant answers feature".into()),
+                },
+            ],
+        );
+        let hits = idx
+            .search(&SearchQuery::new("feature").with_role("user"))
+            .expect("unexpected None");
+        assert!(!hits.is_empty());
+        assert!(hits.iter().all(|h| h.role == Role::User));
     }
 }
