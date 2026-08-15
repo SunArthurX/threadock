@@ -10,6 +10,7 @@
 // - 数据：重置所有数据（危险操作，输入「重置」确认，防误触）
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { formatTime } from "./types";
 
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
@@ -46,6 +47,17 @@ const RETENTION_OPTIONS: [number, string][] = [
   [180, "180 天"],
 ];
 
+/** 弹窗内迷你进度条（与后端 sync_progress 事件联动）。 */
+function MiniProgress({ p }: { p: { current: number; total: number; detail: string } | null }) {
+  if (!p || p.total === 0) return null;
+  return (
+    <span className="mini-progress" title={`${p.detail} ${p.current}/${p.total}`}>
+      <span className="mini-progress-fill" style={{ width: `${Math.min(100, (p.current / p.total) * 100)}%` }} />
+      <span className="mini-progress-label">{p.detail === "done" ? "完成" : `${p.detail} ${p.current}/${p.total}`}</span>
+    </span>
+  );
+}
+
 /** 字节数人性化。 */
 export function formatBytes(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
@@ -78,6 +90,15 @@ export default function SettingsView({
   const [rebuildMsg, setRebuildMsg] = useState<string | null>(null);
   const [govLog, setGovLog] = useState<{ id: string; action: string; created_at: number }[]>([]);
   const [lastWeekly, setLastWeekly] = useState<number | null>(null);
+  // 弹窗内迷你进度（sync_progress 事件：重置后重导 / 指标同步 / 重建索引共用）
+  const [mini, setMini] = useState<{ current: number; total: number; detail: string; finished: boolean } | null>(null);
+  useEffect(() => {
+    const un = listen<{ current: number; total: number; detail: string; finished: boolean }>("sync_progress", (e) => {
+      setMini(e.payload);
+      if (e.payload.finished) window.setTimeout(() => setMini(null), 2000);
+    });
+    return () => { un.then((f) => f()); };
+  }, []);
   const [confirmText, setConfirmText] = useState("");
   const [lastConvSync, setLastConvSync] = useState<number | null>(null);
   const [lastOpsSync, setLastOpsSync] = useState<number | null>(null);
@@ -153,7 +174,7 @@ export default function SettingsView({
               </select>
             </div>
             <div className="settings-hint">
-              手动入口在「📥 导入 → 增量同步」；指标采集另有 30 分钟节流（防止重复全量扫描）。
+              手动入口在「⬇ 导入 → 增量同步」；指标采集另有 30 分钟节流（防止重复全量扫描）。
             </div>
             <div className="settings-row">
               <span>上次会话同步</span>
@@ -166,8 +187,9 @@ export default function SettingsView({
             <div className="settings-row">
               <span>指标数据</span>
               <button className="action-btn" disabled={opsSyncing} onClick={forceOpsSync}>
-                {opsSyncing ? "⟳ 同步中…" : "立即全量同步指标"}
+                {opsSyncing ? "同步中…" : "立即全量同步指标"}
               </button>
+              <MiniProgress p={mini} />
               {opsMsg && <span className="settings-value">{opsMsg}</span>}
             </div>
           </section>
@@ -232,6 +254,7 @@ export default function SettingsView({
                   setRebuildMsg(`已重建 ${r.messages} 条消息的索引`);
                 } catch (e) { setRebuildMsg(String(e)); }
               }}>♻ 重建</button>
+              <MiniProgress p={mini} />
               {rebuildMsg && <span className="settings-value">{rebuildMsg}</span>}
             </div>
             <div className="settings-row">
@@ -288,6 +311,7 @@ export default function SettingsView({
               <button className="reset-confirm-btn" disabled={!canReset} onClick={doReset}>
                 {resetting ? "重置中…" : "重置所有数据"}
               </button>
+              <MiniProgress p={mini} />
             </div>
           </section>
         </div>

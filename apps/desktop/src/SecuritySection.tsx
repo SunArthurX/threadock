@@ -1,5 +1,6 @@
 // 安全 Section：异常检测 + 安全审计 + 策略规则 + 风险调用
 import { formatDuration } from "./charts";
+import { usePager } from "./usePager";
 import type { AnomalyRow, AuditReport, AuditFinding, PolicyRule, RiskyCall } from "./ops-types";
 import { meta, SEV_LABEL } from "./ops-types";
 
@@ -28,6 +29,16 @@ interface Props {
 
 export default function SecuritySection(p: Props) {
   const findings = (p.audit?.findings ?? []).filter((f) => p.auditKindFilter === "all" || f.kind === p.auditKindFilter);
+  const anomalyPager = usePager(p.anomalies, 20);
+  const riskyPager = usePager(p.risky, 20);
+  const pagerBar = (pg: { page: number; totalPages: number; total: number; needed: boolean; prev: () => void; next: () => void }) =>
+    pg.needed ? (
+      <div className="pager">
+        <button className="pager-btn" onClick={pg.prev} disabled={pg.page === 0}>‹ 上一页</button>
+        <span className="pager-info">{pg.page + 1} / {pg.totalPages} 页 · 共 {pg.total} 条</span>
+        <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>下一页 ›</button>
+      </div>
+    ) : null;
 
   return (
     <>
@@ -36,16 +47,23 @@ export default function SecuritySection(p: Props) {
         {p.anomalies.length === 0 ? (
           p.loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">未检测到异常 🎉</div>
         ) : (
+          <>
           <div className="ops-risky">
-            {p.anomalies.map((a, i) => (
+            {anomalyPager.slice.map((a, i) => (
               <div key={i} className="ops-risky-row">
                 <span className={`risk-flag ${a.severity}`}>
                   {a.kind === "error_spike" ? "错误尖峰" : a.kind === "retry_storm" ? "重试风暴" : "context超限"}
                 </span>
                 <span className="mono" style={{ fontSize: 11.5 }}>{a.detail}</span>
+                {a.source_session_id && (
+                  <button className="finding-btn" title="跳转到对应会话"
+                    onClick={() => p.onJump(a.provider ?? "*", a.source_session_id!, null)}>→ 会话</button>
+                )}
               </div>
             ))}
           </div>
+          {pagerBar(anomalyPager)}
+          </>
         )}
       </div>
 
@@ -132,7 +150,7 @@ export default function SecuritySection(p: Props) {
       <div className="ops-card">
         <div className="ops-card-title">风险调用（{p.risky.length}）</div>
         <div className="ops-risky">
-          {p.risky.slice(0, 20).map((r) => {
+          {riskyPager.slice.map((r) => {
             const open = p.expandedRisk.has(r.id);
             return (
               <div key={r.id} className={`ops-risky-item ${open ? "open" : ""}`}>
@@ -162,6 +180,7 @@ export default function SecuritySection(p: Props) {
           })}
           {p.risky.length === 0 && <div className="ops-table-empty">无风险调用 🎉</div>}
         </div>
+        {pagerBar(riskyPager)}
       </div>
     </>
   );

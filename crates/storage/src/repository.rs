@@ -40,7 +40,7 @@ pub use knowledge_repo::KnowledgeRecord;
 pub use ops_queries::{
     AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat, CacheTrendRow,
     DailyUsage, DirCost, LatencyStat, ModelUsage, MonthProjection, OpsOverview, ProviderUsage,
-    TokenWaste, ToolUsageRow, WeeklySummary,
+    TokenWaste, ToolUsageRow, UsageSummary, WeeklySummary,
 };
 pub use settings::RedactionRuleRecord;
 

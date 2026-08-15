@@ -20,7 +20,10 @@ export interface AssetRow {
 export interface AutomationRow { provider: string; name: string; kind: string; schedule: string | null; status: string | null; detail: string | null; }
 export interface DirCost { dir: string; tokens: number; cost_usd: number; requests: number; }
 export interface CacheStat { provider: string; input_tokens: number; cache_read_tokens: number; hit_rate: number; }
-export interface AnomalyRow { kind: string; agent: string; detail: string; severity: string; }
+export interface AnomalyRow {
+  kind: string; agent: string; detail: string; severity: string;
+  provider?: string | null; source_session_id?: string | null;
+}
 export interface AgentHealth {
   provider: string; total_requests: number; errors: number; completed: number;
   retries: number; sessions: number; success_rate: number; error_rate: number;

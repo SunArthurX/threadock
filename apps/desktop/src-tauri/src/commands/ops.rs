@@ -2,6 +2,7 @@
 
 use super::*;
 use ch_daemon::DaemonState;
+use tauri::Emitter;
 
 /// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
 /// force=false 时 30 分钟节流（进入治理页不再每次全量扫描 32MB+ JSONL）。
@@ -9,6 +10,7 @@ use ch_daemon::DaemonState;
 #[tracing::instrument(skip_all, level = "info")]
 pub(crate) async fn ops_sync(
     state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
     force: Option<bool>,
 ) -> Result<serde_json::Value, String> {
     let now_ms =
@@ -55,7 +57,13 @@ pub(crate) async fn ops_sync(
             tracing::warn!(error = %e, "ops collect codex failed");
         }
 
-        // 2. 后写入（短临界区：只做批量入库）
+        // 2. 后写入（短临界区：只做批量入库）；每完成一个来源 emit 阶段进度
+        let emit_stage = |done: u64, detail: &str| {
+            let _ = app.emit(
+                "sync_progress",
+                serde_json::json!({ "current": done, "total": 4, "detail": detail, "finished": false }),
+            );
+        };
         let repo = state.repo.lock().map_err(|e| storage_err(e))?;
         // provider 表需要存在对应行（JOIN 用）
         for p in [
@@ -75,11 +83,13 @@ pub(crate) async fn ops_sync(
             tools_written += repo
                 .upsert_tool_call_batch(&t)
                 .map_err(|e| storage_err(e))?;
+            emit_stage(1, "ZCode 指标");
         }
         if let Ok(u) = minimax {
             usage_written += repo
                 .replace_provider_usage("prov_minimax-code", &u)
                 .map_err(|e| storage_err(e))?;
+            emit_stage(2, "MiniMax 指标");
         }
         if let Ok((u, t)) = cc {
             usage_written += repo
@@ -88,6 +98,7 @@ pub(crate) async fn ops_sync(
             tools_written += repo
                 .upsert_tool_call_batch(&t)
                 .map_err(|e| storage_err(e))?;
+            emit_stage(3, "Claude Code 指标");
         }
         if let Ok((u, t)) = codex {
             usage_written += repo
@@ -96,6 +107,7 @@ pub(crate) async fn ops_sync(
             tools_written += repo
                 .upsert_tool_call_batch(&t)
                 .map_err(|e| storage_err(e))?;
+            emit_stage(4, "Codex 指标");
         }
         // 自动成本重算：同步后立即按定价出数（此前需手动点重算，成本恒为 0）
         if let Ok(pricing) = ops_pricing_get_inner(&state) {
@@ -112,6 +124,10 @@ pub(crate) async fn ops_sync(
         }
     }
     result?;
+    let _ = app.emit(
+        "sync_progress",
+        serde_json::json!({ "current": 4, "total": 4, "detail": "done", "finished": true }),
+    );
     Ok(serde_json::json!({
         "usage_written": usage_written,
         "tools_written": tools_written,
@@ -686,4 +702,13 @@ pub(crate) async fn ops_cache_trend(
 ) -> Result<Vec<ch_storage::CacheTrendRow>, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
     repo.ops_cache_trend(days).map_err(|e| storage_err(e))
+}
+
+/// 用量汇总（本月 / 本年 / 全部）：成本页顶部总览卡。
+#[tauri::command]
+pub(crate) async fn ops_usage_summary(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<ch_storage::UsageSummary, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.ops_usage_summary().map_err(|e| storage_err(e))
 }

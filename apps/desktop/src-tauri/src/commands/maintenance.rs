@@ -4,6 +4,7 @@
 
 use super::*;
 use ch_daemon::DaemonState;
+use tauri::Emitter;
 
 /// 存储占用统计。
 #[derive(serde::Serialize)]
@@ -179,8 +180,28 @@ pub(crate) async fn weekly_report_auto(
 #[tauri::command]
 pub(crate) async fn rebuild_search_index(
     state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    let count = run_blocking(|| rebuild_index_inner(&state))?;
+    let count = run_blocking(|| {
+        let app = app.clone();
+        let total = state
+            .repo
+            .lock()
+            .map_err(|e| storage_err(e))?
+            .count_conversations()
+            .map_err(|e| storage_err(e))? as u64;
+        let n = rebuild_index_inner(&state, &mut |done: u64| {
+            let _ = app.emit(
+                "sync_progress",
+                serde_json::json!({ "current": done, "total": total, "detail": "重建索引", "finished": false }),
+            );
+        })?;
+        let _ = app.emit(
+            "sync_progress",
+            serde_json::json!({ "current": total, "total": total, "detail": "done", "finished": true }),
+        );
+        Ok::<usize, String>(n)
+    })?;
     let _ = {
         let repo = state.repo.lock().map_err(|e| storage_err(e))?;
         repo.log_governance_action(
@@ -195,7 +216,10 @@ pub(crate) async fn rebuild_search_index(
 }
 
 /// 重建核心：清空索引 → 全量重灌所有会话消息。
-fn rebuild_index_inner(state: &DaemonState) -> Result<usize, String> {
+fn rebuild_index_inner(
+    state: &DaemonState,
+    progress: &mut dyn FnMut(u64),
+) -> Result<usize, String> {
     let convs: Vec<ch_domain::Conversation> = {
         let repo = state.repo.lock().map_err(|e| storage_err(e))?;
         repo.list_conversations(None).map_err(|e| storage_err(e))?
@@ -203,6 +227,7 @@ fn rebuild_index_inner(state: &DaemonState) -> Result<usize, String> {
     let mut docs: Vec<ch_search::index::IndexableMessage> = Vec::new();
     {
         let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        let mut done: u64 = 0;
         for c in &convs {
             let msgs = repo.list_messages(&c.id).map_err(|e| storage_err(e))?;
             let title = c.effective_title().to_string();
@@ -217,6 +242,8 @@ fn rebuild_index_inner(state: &DaemonState) -> Result<usize, String> {
                     body: m.content_text.clone(),
                 });
             }
+            done += 1;
+            progress(done);
         }
     }
     let n = docs.len();

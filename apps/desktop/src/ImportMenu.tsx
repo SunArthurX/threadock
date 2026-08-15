@@ -35,7 +35,7 @@ export default function ImportMenu({ open, onToggle, onSelect, onSync, syncing, 
   return (
     <div className="import-dropdown">
       <button className="import-trigger" onClick={onToggle}>
-        ⇩ 导入 {total > 0 && <span className="new-dot" title={`${total} 条未导入`} />}
+        ⬇ 导入 {total > 0 && <span className="new-dot" title={`${total} 条未导入`} />}
         <span className="import-caret">▾</span>
       </button>
       {open && (
@@ -48,9 +48,9 @@ export default function ImportMenu({ open, onToggle, onSelect, onSync, syncing, 
               disabled={syncing}
               title="拉取全部来源的最新会话（已导入且无更新的自动跳过）"
             >
-              <span className="import-item-icon">⇩</span>
+              <span className="import-item-icon">⬇</span>
               <span className="import-item-main">
-                {syncing ? "⟳ 同步中…" : "增量同步"}
+                {syncing ? "同步中…" : "增量同步"}
                 <span className="import-item-sub">全部来源 · 已导入且无更新的自动跳过</span>
               </span>
             </button>

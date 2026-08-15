@@ -506,14 +506,7 @@ export default function App() {
                 <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button>
               </span>
             ) : syncResult && <span className="sync-status done">{syncResult}</span>}
-            {syncProgress && syncProgress.total > 0 && (
-              <div className="sync-progress" title={`导入进度 ${syncProgress.current}/${syncProgress.total}`}>
-                <div
-                  className="sync-progress-fill"
-                  style={{ width: `${Math.min(100, (syncProgress.current / syncProgress.total) * 100)}%` }}
-                />
-              </div>
-            )}
+
             <div className="search-box">
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
@@ -524,6 +517,14 @@ export default function App() {
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
               onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
           </>)}
+          {syncProgress && syncProgress.total > 0 && (
+            <div className={`sync-progress ${syncProgress.finished ? "done" : ""}`} title={`${syncProgress.detail} ${syncProgress.current}/${syncProgress.total}`}>
+              <div
+                className="sync-progress-fill"
+                style={{ width: `${Math.min(100, (syncProgress.current / syncProgress.total) * 100)}%` }}
+              />
+            </div>
+          )}
           {budgetInfo && (
             <BudgetBar
               costSoFar={budgetInfo.costSoFar} tokensSoFar={budgetInfo.tokensSoFar}

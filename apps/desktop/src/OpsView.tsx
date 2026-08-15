@@ -35,6 +35,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [automations, setAutomations] = useState<AutomationRow[]>([]);
   const [dirCosts, setDirCosts] = useState<DirCost[]>([]);
+  const [usageSummary, setUsageSummary] = useState<import("./CostSection").UsageSummary | null>(null);
   const [cacheTrend, setCacheTrend] = useState<{ day: string; total_input: number; cache_read: number }[]>([]);
   const [audit, setAudit] = useState<AuditReport | null>(null);
   const [policies, setPolicies] = useState<PolicyRule[]>([]);
@@ -59,6 +60,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       p(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then(setTimeseries), "ts");
       p(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then(setTopTools), "tools");
       p(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then(setCacheStats), "cache");
+      p(invoke<import("./CostSection").UsageSummary>("ops_usage_summary", {}).then(setUsageSummary), "summary");
       p(invoke<{ day: string; total_input: number; cache_read: number }[]>("ops_cache_trend", { days: range }).then(setCacheTrend), "cacheTrend");
       p(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then(setHealth), "health");
       p(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then(setLatency), "latency");
@@ -181,7 +183,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
           loading={loading} onWeeklyReport={weeklyReport} />
       )}
       {section === "cost" && (
-        <CostSection dirCosts={dirCosts} budget={budget} monthUsage={monthUsage}
+        <CostSection summary={usageSummary} dirCosts={dirCosts} budget={budget} monthUsage={monthUsage}
           budgetInput={budgetInput} loading={loading}
           onBudgetInput={(f, v) => setBudgetInput((p) => ({ ...p, [f]: v }))}
           onSaveBudget={saveBudget} onRecalc={recalcCost} />

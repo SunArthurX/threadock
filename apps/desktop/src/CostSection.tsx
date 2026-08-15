@@ -3,9 +3,16 @@ import { formatTokens, formatCost } from "./charts";
 import type { DirCost, BudgetSettings } from "./ops-types";
 
 
+export interface UsageSummary {
+  month_tokens: number; month_cost: number;
+  year_tokens: number; year_cost: number;
+  all_tokens: number; all_cost: number;
+}
+
 interface Props {
   dirCosts: DirCost[];
   budget: BudgetSettings;
+  summary: UsageSummary | null;
   monthUsage: { tokens: number; cost_usd: number } | null;
   budgetInput: { tokens: string; cost: string };
   loading: boolean;
@@ -15,38 +22,13 @@ interface Props {
 }
 
 export default function CostSection({
-  dirCosts, budget, monthUsage, budgetInput, loading,
+  dirCosts, budget, summary, monthUsage, budgetInput, loading,
   onBudgetInput, onSaveBudget, onRecalc,
 }: Props) {
   const tokenPct = budget.monthly_token_limit && monthUsage ? Math.min((monthUsage.tokens / budget.monthly_token_limit) * 100, 999) : null;
   const costPct = budget.monthly_cost_limit && monthUsage ? Math.min((monthUsage.cost_usd / budget.monthly_cost_limit) * 100, 999) : null;
 
-  return (
-    <>
-      <div className="ops-card">
-        <div className="ops-card-title">
-          按项目成本 Top10
-          <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onRecalc}>$ 重算</button>
-        </div>
-        {dirCosts.length === 0 ? (
-          loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
-        ) : (
-          <table className="ops-table">
-            <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th></tr></thead>
-            <tbody>
-              {dirCosts.map((d, i) => (
-                <tr key={i}>
-                  <td className="mono" title={d.dir}>{d.dir.split("/").slice(-2).join("/")}</td>
-                  <td>{formatTokens(d.tokens)}</td>
-                  <td>{formatCost(d.cost_usd)}</td>
-                  <td>{d.requests.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
+  const budgetCard = (
       <div className="ops-card ops-budget">
         <div className="ops-card-title">月度预算</div>
         <div className="budget-grid">
@@ -77,7 +59,43 @@ export default function CostSection({
             </div>
           </div>
         </div>
+        {summary && (
+          <div className="summary-strip">
+            <span>本年 <b>{formatTokens(summary.year_tokens)}</b> · <b>{formatCost(summary.year_cost)}</b></span>
+            <span>全部 <b>{formatTokens(summary.all_tokens)}</b> · <b>{formatCost(summary.all_cost)}</b></span>
+            <span>本月 <b>{formatTokens(summary.month_tokens)}</b> · <b>{formatCost(summary.month_cost)}</b></span>
+          </div>
+        )}
       </div>
+  );
+
+  return (
+    <>
+      {budgetCard}
+      <div className="ops-card">
+        <div className="ops-card-title">
+          按项目成本 Top10
+          <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onRecalc}>$ 重算</button>
+        </div>
+        {dirCosts.length === 0 ? (
+          loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+        ) : (
+          <table className="ops-table">
+            <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th></tr></thead>
+            <tbody>
+              {dirCosts.map((d, i) => (
+                <tr key={i}>
+                  <td className="mono" title={d.dir}>{d.dir.split("/").slice(-2).join("/")}</td>
+                  <td>{formatTokens(d.tokens)}</td>
+                  <td>{formatCost(d.cost_usd)}</td>
+                  <td>{d.requests.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
     </>
   );
 }

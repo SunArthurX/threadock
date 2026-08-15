@@ -1,6 +1,7 @@
 // 资产 Section：资产清单（按 agent 分组+类型颜色）+ 自动化任务（完成折叠）
 import { useState } from "react";
 import type { AssetRow, AutomationRow } from "./ops-types";
+import { usePager } from "./usePager";
 import { meta } from "./ops-types";
 
 interface Props {
@@ -32,9 +33,11 @@ export function toggleAutomationWatch(key: string): Set<string> {
 export default function AssetsSection({ assets, automations, loading }: Props) {
   const [watch, setWatch] = useState<Set<string>>(loadAutomationWatch);
   const isDone = (s: string | null) => s?.includes("completed") || s?.includes("finished") || s?.includes("idle");
-  const activeSorted = [...automations.filter((a) => !isDone(a.status))].sort(
+  const activeAll = [...automations.filter((a) => !isDone(a.status))].sort(
     (a, b) => Number(watch.has(`${b.provider}:${b.name}`)) - Number(watch.has(`${a.provider}:${a.name}`)),
   );
+  const activePager = usePager(activeAll, 20);
+  const activeSorted = activePager.slice;
   const done = automations.filter((a) => isDone(a.status));
 
   const autoRow = (a: AutomationRow, i: number) => {
@@ -108,6 +111,13 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
           <div className="ops-risky">
             {activeSorted.length > 0 && <div className="automation-sub">进行中（{activeSorted.length}）</div>}
             {activeSorted.map(autoRow)}
+            {activePager.needed && (
+              <div className="pager">
+                <button className="pager-btn" onClick={activePager.prev} disabled={activePager.page === 0}>‹ 上一页</button>
+                <span className="pager-info">{activePager.page + 1} / {activePager.totalPages} 页 · 共 {activePager.total} 条</span>
+                <button className="pager-btn" onClick={activePager.next} disabled={activePager.page >= activePager.totalPages - 1}>下一页 ›</button>
+              </div>
+            )}
             {activeSorted.length === 0 && done.length === 0 && <div className="ops-table-empty">无任务</div>}
           </div>
           {done.length > 0 && (

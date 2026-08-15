@@ -110,6 +110,9 @@ pub struct AnomalyRow {
     pub agent: String,
     pub detail: String,
     pub severity: String,
+    /// 会话级异常（重试风暴等）携带定位：provider 名 + 来源会话 ID（可跳转）。
+    pub provider: Option<String>,
+    pub source_session_id: Option<String>,
 }
 
 /// Agent 健康度（M10）。
@@ -172,6 +175,17 @@ pub struct WeeklySummary {
     pub health: Vec<AgentHealth>,
     pub benchmark: Vec<AgentBenchmark>,
     pub waste_sessions: i64,
+}
+
+/// 用量汇总（本月 / 本年 / 全部）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UsageSummary {
+    pub month_tokens: i64,
+    pub month_cost: f64,
+    pub year_tokens: i64,
+    pub year_cost: f64,
+    pub all_tokens: i64,
+    pub all_cost: f64,
 }
 
 /// 月度用量 + 按日均外推的月底预测（预算告警用）。
@@ -825,6 +839,8 @@ impl Repository {
             for (day, cnt) in daily {
                 if avg > 0.0 && cnt as f64 > avg * 3.0 && cnt >= 3 {
                     out.push(AnomalyRow {
+                        provider: None,
+                        source_session_id: None,
                         kind: "error_spike".into(),
                         agent: "*".into(),
                         detail: format!(
@@ -855,9 +871,12 @@ impl Repository {
             for r in rows {
                 let (sid, rc, n) = r?;
                 out.push(AnomalyRow {
+                    // 会话级异常：带定位（前端可跳转对应会话）
+                    provider: None,
+                    source_session_id: Some(sid),
                     kind: "retry_storm".into(),
                     agent: "*".into(),
-                    detail: format!("会话 {sid:.18}… 共重试 {rc} 次 / {n} 请求"),
+                    detail: format!("共重试 {rc} 次 / {n} 请求"),
                     severity: if rc >= 20 {
                         "high".into()
                     } else {
@@ -887,6 +906,8 @@ impl Repository {
                 let (name, cx, n) = r?;
                 if cx > 0 {
                     out.push(AnomalyRow {
+                        provider: None,
+                        source_session_id: None,
                         kind: "context_exceeded".into(),
                         agent: name,
                         detail: format!("{cx} 次 context 超限 / {n} 请求"),
@@ -1224,5 +1245,48 @@ impl Repository {
             set.insert(r?);
         }
         Ok(set)
+    }
+
+    /// 用量汇总（本月 / 本年 / 全部），成本页顶部总览卡。
+    pub fn ops_usage_summary(&self) -> StorageResult<UsageSummary> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now = now_utc();
+        let month_start = time::Date::from_calendar_date(now.year(), now.month(), 1)
+            .expect("月初构造仅在当时钟异常时失败")
+            .midnight()
+            .assume_utc();
+        let year_start = time::Date::from_calendar_date(now.year(), time::Month::January, 1)
+            .expect("年初构造仅在当时钟异常时失败")
+            .midnight()
+            .assume_utc();
+        let q = |cutoff: Option<i64>| -> StorageResult<(i64, f64)> {
+            Ok(match cutoff {
+                Some(c) => conn.query_row(
+                    "SELECT COALESCE(SUM(input_tokens+output_tokens+reasoning_tokens),0),
+                            COALESCE(SUM(cost_usd),0.0)
+                     FROM usage_records WHERE ts >= ?1",
+                    params![c],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?,
+                None => conn.query_row(
+                    "SELECT COALESCE(SUM(input_tokens+output_tokens+reasoning_tokens),0),
+                            COALESCE(SUM(cost_usd),0.0)
+                     FROM usage_records",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?,
+            })
+        };
+        let month = q(Some(timestamp::to_millis(Some(month_start)).unwrap_or(0)))?;
+        let year = q(Some(timestamp::to_millis(Some(year_start)).unwrap_or(0)))?;
+        let all = q(None)?;
+        Ok(UsageSummary {
+            month_tokens: month.0,
+            month_cost: month.1,
+            year_tokens: year.0,
+            year_cost: year.1,
+            all_tokens: all.0,
+            all_cost: all.1,
+        })
     }
 }

@@ -129,6 +129,7 @@ pub fn run() {
             hard_delete_conversation,
             rebuild_search_index,
             sources_new_count,
+            ops_usage_summary,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");
