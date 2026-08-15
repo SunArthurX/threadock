@@ -1,4 +1,11 @@
-//! Daemon 状态：持有主数据、搜索索引、Raw Store（plan §9.4 单点写）。
+//! Daemon 状态：双连接架构（WAL 模式下读写分离，互不阻塞）。
+//!
+//! write_repo：写连接（auto_sync / 导入 / 重置）
+//! read_repo： 读连接（UI 查询 / 概览 / 会话详情）
+//!
+//! SQLite WAL 模式支持 N 个读者 + 1 个写者并发，
+//! 两个连接各自持有独立 Mutex，读写路径完全解耦 →
+//! 增量导入时 UI 查询零等待。
 
 use ch_raw_store::RawStore;
 use ch_search::SearchIndex;
@@ -10,48 +17,54 @@ pub struct DaemonStateConfig {
     pub data_dir: PathBuf,
 }
 
-/// Daemon 全局状态。所有字段 Mutex 保护，支持并发 JSON-RPC 调用。
+/// Daemon 全局状态。双连接 + 搜索索引 + Raw Store。
 pub struct DaemonState {
+    /// 写连接：同步/导入/重置（唯一写者）
     pub repo: Mutex<Repository>,
+    /// 读连接：UI 查询（与写连接互不阻塞，WAL 并发读）
+    pub read_repo: Mutex<Repository>,
     pub search_index: Mutex<SearchIndex>,
     pub raw_store: Mutex<RawStore>,
     pub data_dir: PathBuf,
 }
 
 impl DaemonState {
-    /// 在 data_dir 下打开/创建 Repository + SearchIndex + RawStore。
+    /// 在 data_dir 下打开/创建双连接 + SearchIndex + RawStore。
     pub fn open(config: DaemonStateConfig) -> Result<Self, DaemonStateError> {
         std::fs::create_dir_all(&config.data_dir)?;
         let db_path = config.data_dir.join("conversation-hub.db");
         let repo = Repository::open(&db_path)?;
+        // 第二个连接：同一 DB 文件，独立 Mutex（WAL 读写并发）
+        let read_repo = Repository::open(&db_path)?;
         let search_index = SearchIndex::open(config.data_dir.join("index"))?;
         let raw_store = RawStore::new(&config.data_dir)?;
         Ok(Self {
             repo: Mutex::new(repo),
+            read_repo: Mutex::new(read_repo),
             search_index: Mutex::new(search_index),
             raw_store: Mutex::new(raw_store),
             data_dir: config.data_dir,
         })
     }
 
-    /// 内存模式（测试用）。SQLite 用内存库，Tantivy 用 RAM 索引，Raw 用临时目录。
+    /// 内存模式（测试用）。
     pub fn open_in_memory() -> Result<Self, DaemonStateError> {
         let dir = tempfile::TempDir::new().map_err(DaemonStateError::Io)?;
         let db_path = dir.path().join("conversation-hub.db");
         let repo = Repository::open(&db_path)?;
-        // Tantivy 用 RAM 索引（避免持久化锁问题）
+        let read_repo = Repository::open(&db_path)?;
         let search_index = SearchIndex::open_in_memory()?;
         let raw_store = RawStore::new(dir.path())?;
         Ok(Self {
             repo: Mutex::new(repo),
+            read_repo: Mutex::new(read_repo),
             search_index: Mutex::new(search_index),
             raw_store: Mutex::new(raw_store),
             data_dir: dir.path().to_path_buf(),
         })
     }
 
-    /// 清空所有数据（conversations/workspaces/providers + 搜索索引 + raw blobs）。
-    /// 保留 schema 和用户自定义脱敏规则。用于「重置数据」。
+    /// 清空所有数据。保留 schema 和用户自定义脱敏规则。
     pub fn wipe_all(&self) -> Result<(), DaemonStateError> {
         self.repo.lock().unwrap().clear_all()?;
         self.search_index.lock().unwrap().clear_all()?;

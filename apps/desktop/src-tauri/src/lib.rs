@@ -90,20 +90,20 @@ pub struct SearchResultDto {
 // ── Tauri commands ──────────────────────────────────────────────────────
 
 #[tauri::command]
-fn list_workspaces(state: tauri::State<DaemonState>) -> Result<Vec<WorkspaceDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn list_workspaces(state: tauri::State<'_, DaemonState>) -> Result<Vec<WorkspaceDto>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     // 时间取自对话真实时间，按对话最新更新时间倒序
     let ws = repo.list_workspaces_by_conv_time().map_err(|e| e.to_string())?;
     Ok(ws.into_iter().map(workspace_dto).collect())
 }
 
 #[tauri::command]
-fn list_conversations(
-    state: tauri::State<DaemonState>,
+async fn list_conversations(
+    state: tauri::State<'_, DaemonState>,
     workspace_id: Option<String>,
     provider: Option<String>,
 ) -> Result<Vec<ConversationDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let convs = repo
         .list_conversations(workspace_id.as_deref())
         .map_err(|e| e.to_string())?;
@@ -131,12 +131,12 @@ fn list_conversations(
 
 /// 列出指定父会话的子任务（中栏展开时调用）。
 #[tauri::command]
-fn list_child_conversations(
-    state: tauri::State<DaemonState>,
+async fn list_child_conversations(
+    state: tauri::State<'_, DaemonState>,
     parent_source_id: String,
     provider: String,
 ) -> Result<Vec<ConversationDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let provider_id = format!("prov_{}", provider);
     let convs = repo
         .list_child_conversations(&parent_source_id, &provider_id)
@@ -173,32 +173,32 @@ async fn reset_all_data(state: tauri::State<'_, DaemonState>) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn list_messages(
-    state: tauri::State<DaemonState>,
+async fn list_messages(
+    state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<Vec<MessageDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let msgs = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
     Ok(msgs.into_iter().map(message_dto).collect())
 }
 
 #[tauri::command]
-fn list_events(
-    state: tauri::State<DaemonState>,
+async fn list_events(
+    state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<Vec<EventDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let events = repo.list_events(&conversation_id).map_err(|e| e.to_string())?;
     Ok(events.into_iter().map(event_dto).collect())
 }
 
 /// 获取会话完整详情（消息 + 事件 + 完整度，plan §6.4）。
 #[tauri::command]
-fn get_conversation_detail(
-    state: tauri::State<DaemonState>,
+async fn get_conversation_detail(
+    state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<ConversationDetailDto, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let conv = repo
         .get_conversation(&conversation_id)
         .map_err(|e| e.to_string())?
@@ -229,11 +229,11 @@ fn get_conversation_detail(
 
 /// 知识提取（plan §13.5）：返回 ExtractionResult 结构给前端。
 #[tauri::command]
-fn extract_knowledge(
-    state: tauri::State<DaemonState>,
+async fn extract_knowledge(
+    state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<ch_knowledge::ExtractionResult, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let conv = repo
         .get_conversation(&conversation_id)
         .map_err(|e| e.to_string())?
@@ -249,7 +249,7 @@ fn extract_knowledge(
 }
 
 #[tauri::command]
-fn search(state: tauri::State<DaemonState>, query: String) -> Result<Vec<SearchResultDto>, String> {
+async fn search(state: tauri::State<'_, DaemonState>, query: String) -> Result<Vec<SearchResultDto>, String> {
     // 优先走 Tantivy（plan §9.5 主检索），降级 FTS5
     let idx = state.search_index.lock().map_err(|e| e.to_string())?;
     let q = ch_search::SearchQuery::new(&query);
@@ -268,7 +268,7 @@ fn search(state: tauri::State<DaemonState>, query: String) -> Result<Vec<SearchR
         _ => {
             // 降级 FTS5
             drop(idx);
-            let repo = state.repo.lock().map_err(|e| e.to_string())?;
+            let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
             let q = ch_storage::SearchQuery::new(&query);
             let results = repo.search(&q).map_err(|e| e.to_string())?;
             Ok(results.into_iter().map(search_result_dto).collect())
@@ -288,8 +288,8 @@ struct ImportResultDto {
 /// 导入一个会话文件（plan §8.3 流水线）。
 /// 按扩展名自动选择 markdown/jsonl adapter。
 #[tauri::command]
-fn import_file(
-    state: tauri::State<DaemonState>,
+async fn import_file(
+    state: tauri::State<'_, DaemonState>,
     path: String,
     workspace_name: Option<String>,
 ) -> Result<ImportResultDto, String> {
@@ -411,7 +411,7 @@ fn imported_flag(ctx: &ImportCtx, provider_id: &str, source_id: &str, src_ms: Op
 
 /// 列出 ZCode 会话。
 #[tauri::command]
-fn list_zcode_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
+async fn list_zcode_sessions(state: tauri::State<'_, DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
     let sessions = ch_adapter_zcode::discover_sessions(&db_path)
@@ -431,8 +431,8 @@ fn list_zcode_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSes
 
 /// 从 ZCode 导入一条会话。
 #[tauri::command]
-fn import_from_zcode(
-    state: tauri::State<DaemonState>,
+async fn import_from_zcode(
+    state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<ImportResultDto, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
@@ -448,7 +448,7 @@ fn import_from_zcode(
 
 /// 列出 Claude Code 会话。
 #[tauri::command]
-fn list_claude_code_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
+async fn list_claude_code_sessions(state: tauri::State<'_, DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
     let claude_home = format!("{home}/.claude");
     let sessions = ch_adapter_claude_code::discover_sessions(&claude_home)
@@ -468,8 +468,8 @@ fn list_claude_code_sessions(state: tauri::State<DaemonState>) -> Result<Vec<Sou
 
 /// 从 Claude Code 导入一条会话。
 #[tauri::command]
-fn import_from_claude_code(
-    state: tauri::State<DaemonState>,
+async fn import_from_claude_code(
+    state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<ImportResultDto, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
@@ -501,7 +501,7 @@ fn minimax_db_path() -> Result<String, String> {
 
 /// 列出 Cursor 会话。
 #[tauri::command]
-fn list_cursor_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
+async fn list_cursor_sessions(state: tauri::State<'_, DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let db = cursor_db_path()?;
     let sessions = ch_adapter_cursor::discover_sessions(&db)
         .map_err(|e| format!("discover cursor: {e}"))?;
@@ -520,8 +520,8 @@ fn list_cursor_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSe
 
 /// 从 Cursor 导入一条会话。
 #[tauri::command]
-fn import_from_cursor(
-    state: tauri::State<DaemonState>,
+async fn import_from_cursor(
+    state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<ImportResultDto, String> {
     let db = cursor_db_path()?;
@@ -532,7 +532,7 @@ fn import_from_cursor(
 
 /// 列出 MiniMax 会话。
 #[tauri::command]
-fn list_minimax_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
+async fn list_minimax_sessions(state: tauri::State<'_, DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let db = minimax_db_path()?;
     let sessions = ch_adapter_minimax::discover_sessions(&db)
         .map_err(|e| format!("discover minimax: {e}"))?;
@@ -561,8 +561,8 @@ fn list_minimax_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceS
 
 /// 从 MiniMax 导入一条会话。
 #[tauri::command]
-fn import_from_minimax(
-    state: tauri::State<DaemonState>,
+async fn import_from_minimax(
+    state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<ImportResultDto, String> {
     let db = minimax_db_path()?;
@@ -585,7 +585,7 @@ fn codex_home() -> Result<String, String> {
 
 /// 列出 Codex 会话。
 #[tauri::command]
-fn list_codex_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
+async fn list_codex_sessions(state: tauri::State<'_, DaemonState>) -> Result<Vec<SourceSessionDto>, String> {
     let home = codex_home()?;
     let sessions = ch_adapter_codex::discover_sessions(&home)
         .map_err(|e| format!("discover codex: {e}"))?;
@@ -604,8 +604,8 @@ fn list_codex_sessions(state: tauri::State<DaemonState>) -> Result<Vec<SourceSes
 
 /// 从 Codex 导入一条会话。
 #[tauri::command]
-fn import_from_codex(
-    state: tauri::State<DaemonState>,
+async fn import_from_codex(
+    state: tauri::State<'_, DaemonState>,
     session_id: String,
 ) -> Result<ImportResultDto, String> {
     let home = codex_home()?;
@@ -705,32 +705,32 @@ async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> 
 }
 
 #[tauri::command]
-fn ops_overview(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<ch_storage::OpsOverview, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_overview(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<ch_storage::OpsOverview, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_overview(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_by_provider(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ProviderUsage>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_by_provider(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ProviderUsage>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_by_provider(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_by_model(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ModelUsage>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_by_model(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ModelUsage>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_by_model(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_timeseries(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::DailyUsage>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_timeseries(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::DailyUsage>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_timeseries_daily(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_tool_toplist(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::ToolUsageRow>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_tool_toplist(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::ToolUsageRow>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_tool_toplist(days, n.unwrap_or(10)).map_err(|e| e.to_string())
 }
 
@@ -753,8 +753,8 @@ struct RiskyCallDto {
 }
 
 #[tauri::command]
-fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<RiskyCallDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_risky_calls(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<RiskyCallDto>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let rows = repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())?;
     Ok(rows
         .into_iter()
@@ -777,12 +777,12 @@ fn ops_risky_calls(state: tauri::State<DaemonState>, days: Option<i64>, n: Optio
 
 /// 按 provider + source_conversation_id 精确查会话（审计命中跳转用，含子任务）。
 #[tauri::command]
-fn get_conversation_by_source(
-    state: tauri::State<DaemonState>,
+async fn get_conversation_by_source(
+    state: tauri::State<'_, DaemonState>,
     provider: String,
     source_conversation_id: String,
 ) -> Result<Option<ConversationDto>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let provider_id = format!("prov_{provider}");
     let conn_row = repo
         .find_conversation_by_source(&provider_id, &source_conversation_id)
@@ -796,7 +796,7 @@ fn get_conversation_by_source(
 /// catch_unwind 兜底：扫描内部任何 panic 转为错误返回，绝不带崩整个应用。
 #[tauri::command]
 async fn audit_scan(state: tauri::State<'_, DaemonState>) -> Result<ch_audit::AuditReport, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
     }))
@@ -807,7 +807,7 @@ async fn audit_scan(state: tauri::State<'_, DaemonState>) -> Result<ch_audit::Au
 /// 渲染 HTML 审计报告（前端保存对话框落盘）。同样带 panic 兜底。
 #[tauri::command]
 async fn audit_export_html(state: tauri::State<'_, DaemonState>) -> Result<String, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
     }))
@@ -818,14 +818,14 @@ async fn audit_export_html(state: tauri::State<'_, DaemonState>) -> Result<Strin
 
 /// 策略规则 CRUD（M4/M5：命令黑名单 + 自定义敏感规则）。
 #[tauri::command]
-fn policy_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::PolicyRuleRecord>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn policy_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::PolicyRuleRecord>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.list_policy_rules().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn policy_upsert(
-    state: tauri::State<DaemonState>,
+async fn policy_upsert(
+    state: tauri::State<'_, DaemonState>,
     rule: ch_storage::PolicyRuleRecord,
 ) -> Result<(), String> {
     // 校验正则合法
@@ -836,7 +836,7 @@ fn policy_upsert(
 }
 
 #[tauri::command]
-fn policy_delete(state: tauri::State<DaemonState>, name: String) -> Result<(), String> {
+async fn policy_delete(state: tauri::State<'_, DaemonState>, name: String) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     repo.delete_policy_rule(&name).map_err(|e| e.to_string())
 }
@@ -844,21 +844,21 @@ fn policy_delete(state: tauri::State<DaemonState>, name: String) -> Result<(), S
 // ── M5：预算设置 ───────────────────────────────────────────────────────
 
 #[tauri::command]
-fn budget_get(state: tauri::State<DaemonState>) -> Result<ch_storage::BudgetSettings, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn budget_get(state: tauri::State<'_, DaemonState>) -> Result<ch_storage::BudgetSettings, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.get_budget_settings().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn budget_set(state: tauri::State<DaemonState>, settings: ch_storage::BudgetSettings) -> Result<(), String> {
+async fn budget_set(state: tauri::State<'_, DaemonState>, settings: ch_storage::BudgetSettings) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     repo.set_budget_settings(&settings).map_err(|e| e.to_string())
 }
 
 /// 本月（自然月）用量：预算告警用。
 #[tauri::command]
-fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_month_usage(state: tauri::State<'_, DaemonState>) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let now = ch_domain::now_utc();
     // 本月 1 号 00:00 UTC 的毫秒
     let month_start = time::Date::from_calendar_date(
@@ -925,8 +925,8 @@ async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) 
 }
 
 #[tauri::command]
-fn assets_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::AssetRow>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn assets_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::AssetRow>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.list_assets().map_err(|e| e.to_string())
 }
 
@@ -972,61 +972,61 @@ async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bo
 }
 
 #[tauri::command]
-fn automations_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::AutomationRow>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn automations_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::AutomationRow>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.list_automations().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_cost_by_dir(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::DirCost>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_cost_by_dir(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::DirCost>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_cost_by_dir(days, n.unwrap_or(10)).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_cache_stats(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::CacheStat>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_cache_stats(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::CacheStat>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_cache_stats(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_anomalies(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AnomalyRow>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_anomalies(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AnomalyRow>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_anomalies(days).map_err(|e| e.to_string())
 }
 
 // ── M10-M12：健康度 / 延迟 / Token 浪费 ────────────────────────────────
 
 #[tauri::command]
-fn ops_agent_health(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentHealth>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_agent_health(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentHealth>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_agent_health(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_latency_stats(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::LatencyStat>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_latency_stats(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::LatencyStat>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_latency_stats(days).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn ops_token_waste(state: tauri::State<DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::TokenWaste>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_token_waste(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::TokenWaste>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_token_waste(days, n.unwrap_or(10)).map_err(|e| e.to_string())
 }
 
 // ── M13-M14：横向对比 / 周报 ────────────────────────────────────────────
 
 #[tauri::command]
-fn ops_agent_benchmark(state: tauri::State<DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentBenchmark>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_agent_benchmark(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentBenchmark>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.ops_agent_benchmark(days).map_err(|e| e.to_string())
 }
 
 /// M14：生成周报 HTML（7 天治理汇总，自包含可分享）。
 #[tauri::command]
-fn ops_weekly_report(state: tauri::State<DaemonState>) -> Result<String, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<String, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let s = repo.ops_weekly_summary().map_err(|e| e.to_string())?;
     let mut html = String::new();
     use std::fmt::Write;
@@ -1139,13 +1139,13 @@ fn ops_pricing_get_inner(state: &DaemonState) -> Result<serde_json::Value, Strin
 }
 
 #[tauri::command]
-fn ops_pricing_get(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
+async fn ops_pricing_get(state: tauri::State<'_, DaemonState>) -> Result<serde_json::Value, String> {
     ops_pricing_get_inner(&state)
 }
 
 /// 保存定价表（前端编辑后写回）。
 #[tauri::command]
-fn ops_pricing_set(state: tauri::State<DaemonState>, pricing: serde_json::Value) -> Result<(), String> {
+async fn ops_pricing_set(state: tauri::State<'_, DaemonState>, pricing: serde_json::Value) -> Result<(), String> {
     let path = pricing_path(&state);
     let content = serde_json::to_string_pretty(&pricing).map_err(|e| e.to_string())?;
     std::fs::write(&path, content).map_err(|e| e.to_string())
@@ -1196,9 +1196,9 @@ fn apply_pricing(repo: &ch_storage::Repository, pricing: &serde_json::Value) -> 
 
 /// 按定价重算 cost_usd（改 pricing.json 后调用立即生效）。
 #[tauri::command]
-fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value, String> {
-    let pricing = ops_pricing_get(state.clone())?;
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn ops_cost_recalc(state: tauri::State<'_, DaemonState>) -> Result<serde_json::Value, String> {
+    let pricing = ops_pricing_get_inner(&state)?;
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     let (updated, total_cost) = apply_pricing(&repo, &pricing);
     Ok(serde_json::json!({
         "models_updated": updated,
@@ -1620,8 +1620,8 @@ struct ExportOutput {
 }
 
 #[tauri::command]
-fn export_conversation(
-    state: tauri::State<DaemonState>,
+async fn export_conversation(
+    state: tauri::State<'_, DaemonState>,
     conversation_id: String,
     format: String,
 ) -> Result<ExportOutput, String> {
@@ -1665,20 +1665,20 @@ fn save_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn set_favorite(state: tauri::State<DaemonState>, id: String, favorite: bool) -> Result<(), String> {
+async fn set_favorite(state: tauri::State<'_, DaemonState>, id: String, favorite: bool) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     repo.set_favorite(&id, favorite).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn add_tag(state: tauri::State<DaemonState>, id: String, tag: String) -> Result<(), String> {
+async fn add_tag(state: tauri::State<'_, DaemonState>, id: String, tag: String) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     repo.add_tag(&id, &tag).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn list_tags(state: tauri::State<DaemonState>, id: String) -> Result<Vec<String>, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+async fn list_tags(state: tauri::State<'_, DaemonState>, id: String) -> Result<Vec<String>, String> {
+    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
     repo.list_tags(&id).map_err(|e| e.to_string())
 }
 
