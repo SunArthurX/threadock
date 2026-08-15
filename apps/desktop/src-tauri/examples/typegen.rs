@@ -4,12 +4,28 @@ fn main() {
     // API 文档
     let cmds: Vec<(&str, &str, &str)> = vec![
         ("list_workspaces", "-", "WorkspaceDto[]"),
-        ("list_conversations", "workspaceId?, provider?", "ConversationDto[]"),
-        ("list_child_conversations", "parentSourceId, provider", "ConversationDto[]"),
+        (
+            "list_conversations",
+            "workspaceId?, provider?",
+            "ConversationDto[]",
+        ),
+        (
+            "list_child_conversations",
+            "parentSourceId, provider",
+            "ConversationDto[]",
+        ),
         ("list_messages", "conversationId", "MessageDto[]"),
         ("list_events", "conversationId", "EventDto[]"),
-        ("get_conversation_detail", "conversationId", "ConversationDetailDto"),
-        ("get_conversation_by_source", "provider, sourceConversationId", "ConversationDto?"),
+        (
+            "get_conversation_detail",
+            "conversationId",
+            "ConversationDetailDto",
+        ),
+        (
+            "get_conversation_by_source",
+            "provider, sourceConversationId",
+            "ConversationDto?",
+        ),
         ("extract_knowledge", "conversationId", "ExtractionResult"),
         ("search", "query", "SearchResultDto[]"),
         ("import_file", "path, workspaceName?", "ImportResultDto"),
@@ -38,14 +54,25 @@ fn main() {
         ("assets_list", "-", "AssetRow[]"),
         ("automations_sync", "force?", "{written}"),
         ("automations_list", "-", "AutomationRow[]"),
-        ("export_conversation", "conversationId, format", "ExportOutput"),
+        (
+            "export_conversation",
+            "conversationId, format",
+            "ExportOutput",
+        ),
         ("save_text_file", "path, content", "void"),
     ];
-    let mut md = String::from("# Conversation Hub API\n\n> Auto-generated. Do not edit.\n\n## Commands\n\n");
+    let mut md =
+        String::from("# Conversation Hub API\n\n> Auto-generated. Do not edit.\n\n## Commands\n\n");
     for (n, p, r) in &cmds {
-        md.push_str(&format!("### `{n}`\n\n| 参数 | 返回 |\n|------|------|\n| {p} | `{r}` |\n\n"));
+        md.push_str(&format!(
+            "### `{n}`\n\n| 参数 | 返回 |\n|------|------|\n| {p} | `{r}` |\n\n"
+        ));
     }
     std::fs::create_dir_all("../../../docs").expect("mkdir docs");
     std::fs::write("../../../docs/api.md", &md).expect("write api.md");
-    println!("✓ docs/api.md ({} bytes, {} commands)", md.len(), cmds.len());
+    println!(
+        "✓ docs/api.md ({} bytes, {} commands)",
+        md.len(),
+        cmds.len()
+    );
 }

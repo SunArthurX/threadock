@@ -84,11 +84,11 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       ]);
       setBudget(b); setMonthUsage(mu);
       setBudgetInput({ tokens: b.monthly_token_limit?.toString() ?? "", cost: b.monthly_cost_limit?.toString() ?? "" });
-    } catch { }
+    } catch { /* 失败静默：后台/可选操作 */ }
   };
 
   const loadPolicies = async () => {
-    try { setPolicies(await invoke<PolicyRule[]>("policy_list")); } catch { }
+    try { setPolicies(await invoke<PolicyRule[]>("policy_list")); } catch { /* 失败静默：后台/可选操作 */ }
   };
 
   useEffect(() => {
@@ -99,8 +99,8 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       setSyncing(true);
       try {
         await invoke("ops_sync", { force: false });
-        await Promise.all([invoke("assets_sync", { force: false }).catch(() => {}), invoke("automations_sync", { force: false }).catch(() => {})]);
-      } catch { }
+        await Promise.all([invoke("assets_sync", { force: false }).catch(() => { /* 后台任务失败不打断 UI */ }), invoke("automations_sync", { force: false }).catch(() => { /* 后台任务失败不打断 UI */ })]);
+      } catch { /* 失败静默：后台/可选操作 */ }
       setSyncing(false);
       loadSection(section);
       if (section === "cost") loadBudget();
@@ -114,13 +114,13 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
   }, [range]);
 
   // ── actions ──
-  const runAudit = async () => { setAuditing(true); try { setAudit(await invoke<AuditReport>("audit_scan")); } catch { } setAuditing(false); };
+  const runAudit = async () => { setAuditing(true); try { setAudit(await invoke<AuditReport>("audit_scan")); } catch { /* 失败静默：后台/可选操作 */ } setAuditing(false); };
   const exportHtml = async () => {
     try {
       const html = await invoke<string>("audit_export_html");
       const path = await save({ defaultPath: `audit-${new Date().toISOString().slice(0,10)}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
       if (typeof path === "string") await invoke("save_text_file", { path, content: html });
-    } catch { }
+    } catch { /* 失败静默：后台/可选操作 */ }
   };
   const addPolicy = async () => {
     if (!newPolicy.name.trim() || !newPolicy.pattern.trim()) return;
@@ -150,7 +150,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       const html = await invoke<string>("ops_weekly_report");
       const path = await save({ defaultPath: `weekly-${new Date().toISOString().slice(0,10)}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
       if (typeof path === "string") await invoke("save_text_file", { path, content: html });
-    } catch { }
+    } catch { /* 失败静默：后台/可选操作 */ }
   };
 
   return (
@@ -165,7 +165,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
           </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadSection(section); }}>
+          <button onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch { /* 失败静默：后台/可选操作 */ } setSyncing(false); loadSection(section); }}>
             {syncing ? "⟳ 同步指标中…" : "↻ 同步指标"}
           </button>
         </div>
@@ -191,7 +191,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
           onScan={runAudit} onExportHtml={exportHtml} onFilter={setAuditKindFilter}
           onAddPolicy={addPolicy} onRemovePolicy={async (n) => { await invoke("policy_delete", { name: n }); loadPolicies(); }}
           onPolicyInput={(f, v) => setNewPolicy((p) => ({ ...p, [f]: v }))}
-          onToggleRisk={(id) => setExpandedRisk((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+          onToggleRisk={(id) => setExpandedRisk((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })}
           onJump={onJumpToConversation ?? (() => {})} />
       )}
       {section === "assets" && (

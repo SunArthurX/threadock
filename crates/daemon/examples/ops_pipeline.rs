@@ -2,6 +2,7 @@
 use ch_daemon::{DaemonState, DaemonStateConfig};
 use std::time::Instant;
 
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)]
 fn main() {
     let home = std::env::var("HOME").expect("write to String");
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
@@ -15,14 +16,16 @@ fn main() {
     // 1. 采集（4 源）
     let t = Instant::now();
     let (mut u_all, mut t_all) =
-        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).expect("write to String");
+        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite"))
+            .expect("write to String");
     println!("zcode: usage={} tools={}", u_all.len(), t_all.len());
     let u =
         ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite"))
             .expect("write to String");
     println!("minimax: usage={}", u.len());
     u_all.extend(u);
-    let (u, tc) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).expect("write to String");
+    let (u, tc) =
+        ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).expect("write to String");
     println!("claude: usage={} tools={}", u.len(), tc.len());
     u_all.extend(u);
     t_all.extend(tc);
@@ -54,7 +57,9 @@ fn main() {
         .replace_provider_usage("prov_zcode", &zc_usage)
         .expect("write to String");
     let n1 = repo.upsert_usage_batch(&others).expect("write to String") + nz;
-    let n2 = repo.upsert_tool_call_batch(&t_all).expect("write to String");
+    let n2 = repo
+        .upsert_tool_call_batch(&t_all)
+        .expect("write to String");
     println!(
         "── 入库: {:?}  usage 新增 {n1} tools 新增 {n2}",
         t.elapsed()

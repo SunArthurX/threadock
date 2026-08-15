@@ -29,7 +29,7 @@ members = [
 [workspace.package]
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/example/conversation-hub"
 
@@ -50,6 +50,8 @@ blake3 = "1"
 zstd = "0.13"
 # 加密（backup，plan §14.3 XChaCha20-Poly1305）
 chacha20poly1305 = "0.10"
+# 密码派生（backup：Argon2id + 随机盐，抗 GPU 离线穷举）
+argon2 = { version = "0.5", features = ["std"] }
 # 全文检索（plan §9.5 Tantivy）
 tantivy = "0.22"
 # 日志/追踪

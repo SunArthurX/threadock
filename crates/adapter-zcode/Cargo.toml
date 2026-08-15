@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+ch-adapter-sdk = { path = "../adapter-sdk" }
 ch-domain = { path = "../domain" }
 ch-normalization = { path = "../normalization" }
 thiserror.workspace = true

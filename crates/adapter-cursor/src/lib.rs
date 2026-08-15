@@ -20,7 +20,7 @@
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::Connection;
 use std::path::Path;
 use thiserror::Error;
 
@@ -62,11 +62,7 @@ pub struct DiscoveredSession {
 
 /// 只读打开 Cursor 的 state.vscdb（plan §10.1：只读快照原则）。
 fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
-    let conn = Connection::open_with_flags(
-        db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    Ok(conn)
+    Ok(ch_adapter_sdk::open_readonly(db_path)?)
 }
 
 /// 列出 Cursor 所有会话（按首条消息时间降序，无时间的排最后）。
@@ -110,6 +106,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
 }
 
 /// 解析单条 Cursor 会话：读取它的所有 bubble，提取文本与工具事件。
+#[allow(clippy::too_many_lines)] // 解析主函数：JSON 展开与领域装配一体
 pub fn parse_session(
     db_path: impl AsRef<Path>,
     conversation_id: &str,
@@ -151,7 +148,10 @@ pub fn parse_session(
         if bubble_id.is_empty() {
             continue;
         }
-        let type_num = h.get("type").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let type_num = h
+            .get("type")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(0);
         let bubble_key = format!("bubbleId:{conversation_id}:{bubble_id}");
 
         let bubble_value: Vec<u8> = match conn.query_row(

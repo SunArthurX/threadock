@@ -51,7 +51,7 @@ pub fn conversation_text(id: &str, title: Option<&str>, messages: &[Message]) ->
 /// - `target`：目标会话文本。
 /// - `candidates`：候选池（不含 target 本身）。
 /// - `limit`：返回条数。
-#[must_use] 
+#[must_use]
 pub fn find_similar(
     target: &ConversationText,
     candidates: &[ConversationText],
@@ -250,7 +250,7 @@ mod tests {
     fn jaccard_zero_for_disjoint() {
         let a: HashSet<String> = ["a", "b"].iter().map(|s| (*s).to_string()).collect();
         let b: HashSet<String> = ["c", "d"].iter().map(|s| (*s).to_string()).collect();
-        assert_eq!(jaccard(&a, &b), 0.0);
+        assert!((jaccard(&a, &b) - 0.0).abs() < 1e-9);
     }
 
     #[test]

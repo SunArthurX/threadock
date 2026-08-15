@@ -5,7 +5,12 @@
 //! - AWS Secret Key（40 位 base64 风格）
 //! - GitHub Token（`ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_` 前缀）
 //! - 通用 Bearer Token（`Bearer xxx`）
-//! - 私有 API Key（`sk-`/`api_key=`/`apikey=` 风格）
+//! - 私有 API Key（`sk-`（含 `sk-proj-`/`sk-ant-` 新式带连字符格式）/`api_key=`/`apikey=` 风格）
+//! - Slack Token（`xoxb-`/`xoxp-` 等）
+//! - GitLab Token（`glpat-`）
+//! - Google API Key（`AIza...`）
+//! - JWT（`eyJxxx.yyy.zzz`）
+//! - PEM 私钥块（`-----BEGIN ... PRIVATE KEY-----`）
 //! - 邮箱地址
 //! - 私有 IP 段（10./172.16~31./192.168.）
 //!
@@ -23,6 +28,7 @@ pub struct RedactionRule {
 
 /// 脱敏命中统计。
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RedactionStats {
     pub aws_access_key: usize,
     pub aws_secret_key: usize,
@@ -31,10 +37,15 @@ pub struct RedactionStats {
     pub api_key: usize,
     pub email: usize,
     pub private_ip: usize,
+    pub slack_token: usize,
+    pub gitlab_token: usize,
+    pub google_api_key: usize,
+    pub jwt: usize,
+    pub private_key: usize,
 }
 
 impl RedactionStats {
-    #[must_use] 
+    #[must_use]
     pub fn total(&self) -> usize {
         self.aws_access_key
             + self.aws_secret_key
@@ -43,11 +54,16 @@ impl RedactionStats {
             + self.api_key
             + self.email
             + self.private_ip
+            + self.slack_token
+            + self.gitlab_token
+            + self.google_api_key
+            + self.jwt
+            + self.private_key
     }
 }
 
 /// 内置规则集。
-#[must_use] 
+#[must_use]
 pub fn builtin_rules() -> Vec<RedactionRule> {
     vec![
         RedactionRule {
@@ -67,9 +83,36 @@ pub fn builtin_rules() -> Vec<RedactionRule> {
         },
         RedactionRule {
             name: "api_key",
-            // sk- (OpenAI 风格) 或 api_key=/apikey= 后跟值
-            pattern: Regex::new(r"(sk-[A-Za-z0-9]{20,}|(?i)api_?key\s*[:=]\s*[A-Za-z0-9\-_]{8,})")
+            // sk-（OpenAI/Anthropic 风格，允许新式 sk-proj-/sk-ant-api03- 的连字符）
+            // 或 api_key=/apikey= 后跟值
+            pattern: Regex::new(r"(sk-[A-Za-z0-9_\-]{20,}|(?i)api_?key\s*[:=]\s*[A-Za-z0-9\-_]{8,})")
                 .expect("unexpected None"),
+        },
+        RedactionRule {
+            name: "slack_token",
+            pattern: Regex::new(r"xox[baprs]-[A-Za-z0-9\-]{10,}").expect("invalid regex"),
+        },
+        RedactionRule {
+            name: "gitlab_token",
+            pattern: Regex::new(r"glpat-[A-Za-z0-9_\-]{20,}").expect("invalid regex"),
+        },
+        RedactionRule {
+            name: "google_api_key",
+            pattern: Regex::new(r"AIza[0-9A-Za-z_\-]{35}").expect("invalid regex"),
+        },
+        RedactionRule {
+            name: "jwt",
+            // 三段式 JWT（header.payload.signature 均为 base64url）
+            pattern: Regex::new(r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{5,}")
+                .expect("invalid regex"),
+        },
+        RedactionRule {
+            name: "private_key",
+            // PEM 私钥块（含 BEGIN/END 之间的 base64 体）
+            pattern: Regex::new(
+                r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]{0,8000}?-----END [A-Z0-9 ]*PRIVATE KEY-----",
+            )
+            .expect("invalid regex"),
         },
         RedactionRule {
             name: "email",
@@ -95,7 +138,7 @@ pub fn builtin_rules() -> Vec<RedactionRule> {
 /// 对文本执行脱敏，返回脱敏后的文本与命中统计。
 ///
 /// 同一处命中只算一次（按规则顺序应用）。`[REDACTED:type]` 占位便于审计定位。
-#[must_use] 
+#[must_use]
 pub fn redact(input: &str) -> (String, RedactionStats) {
     redact_with(input, &[])
 }
@@ -121,7 +164,7 @@ impl CustomRule {
 /// 用内置规则 + 自定义规则执行脱敏（plan §14.6）。
 ///
 /// 自定义规则在内置规则之后应用，允许用户覆盖项目特定的敏感模式。
-#[must_use] 
+#[must_use]
 pub fn redact_with(input: &str, custom: &[CustomRule]) -> (String, RedactionStats) {
     let mut text = input.to_string();
     let mut stats = RedactionStats::default();
@@ -159,6 +202,11 @@ pub fn redact_with(input: &str, custom: &[CustomRule]) -> (String, RedactionStat
                     "api_key" => stats.api_key += count,
                     "email" => stats.email += count,
                     "private_ip" => stats.private_ip += count,
+                    "slack_token" => stats.slack_token += count,
+                    "gitlab_token" => stats.gitlab_token += count,
+                    "google_api_key" => stats.google_api_key += count,
+                    "jwt" => stats.jwt += count,
+                    "private_key" => stats.private_key += count,
                     _ => {}
                 }
             }
@@ -199,6 +247,58 @@ mod tests {
         let (out, stats) = redact("sk-projabcdefghijklmnopqrstuvwxyz0123456789");
         assert!(out.contains("[REDACTED:api_key]"));
         assert!(stats.api_key >= 1);
+    }
+
+    #[test]
+    fn redacts_new_style_hyphenated_keys() {
+        // 新式带连字符的 key（旧规则 sk-[A-Za-z0-9]{20,} 匹配不到）
+        let cases = [
+            "sk-proj-abcdefghijklmnopqrstuv0123456789abcd",
+            "sk-ant-api03-abcdefghijklmnopqrstuv0123456789",
+        ];
+        for c in cases {
+            let (out, stats) = redact(c);
+            assert!(out.contains("[REDACTED:api_key]"), "must redact: {c}");
+            assert!(!out.contains(c), "raw key must not survive: {c}");
+            assert!(stats.api_key >= 1);
+        }
+    }
+
+    #[test]
+    fn redacts_slack_gitlab_google_tokens() {
+        let (out, stats) = redact("xoxb-1234567890abcdefghij");
+        assert!(out.contains("[REDACTED:slack_token]"));
+        assert_eq!(stats.slack_token, 1);
+
+        let (out, stats) = redact("glpat-abcdefghijklmnopqrst0123456789");
+        assert!(out.contains("[REDACTED:gitlab_token]"));
+        assert_eq!(stats.gitlab_token, 1);
+
+        let (out, stats) = redact("key=AIzaSyA1234567890abcdefghijklmnopqrstuv");
+        assert!(out.contains("[REDACTED:google_api_key]"));
+        assert_eq!(stats.google_api_key, 1);
+    }
+
+    #[test]
+    fn redacts_bare_jwt() {
+        // 裸 JWT（无 Bearer 前缀）也要脱敏
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c";
+        let (out, stats) = redact(jwt);
+        assert!(
+            out.contains("[REDACTED:jwt]"),
+            "bare JWT must be redacted: {out}"
+        );
+        assert!(!out.contains("SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c"));
+        assert_eq!(stats.jwt, 1);
+    }
+
+    #[test]
+    fn redacts_pem_private_key_block() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA7test0123456789\n-----END RSA PRIVATE KEY-----";
+        let (out, stats) = redact(pem);
+        assert!(out.contains("[REDACTED:private_key]"));
+        assert!(!out.contains("MIIEpAIBAAKCAQEA"));
+        assert_eq!(stats.private_key, 1);
     }
 
     #[test]

@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub mod error;
+pub mod html;
 pub mod id;
 
 pub use error::{DomainError, Result};
@@ -21,7 +22,7 @@ pub type Timestamp = OffsetDateTime;
 /// 生成新的对象 ID（ULID 风格的带前缀 UUID v4）。
 ///
 /// 前缀让人一眼看出对象类型，便于日志和调试。
-#[must_use] 
+#[must_use]
 pub fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
@@ -51,7 +52,7 @@ pub enum Provider {
 
 impl Provider {
     /// 稳定的字符串标识，用于数据库存储和幂等键。
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Provider::Codex => "codex",
@@ -100,7 +101,7 @@ pub enum Role {
 }
 
 impl Role {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Role::User => "user",
@@ -146,7 +147,7 @@ pub enum EventType {
 }
 
 impl EventType {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             EventType::ToolCallStarted => "tool_call_started",
@@ -192,7 +193,7 @@ pub enum Status {
 }
 
 impl Status {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Status::Active => "active",
@@ -282,7 +283,7 @@ pub enum MatchMethod {
 }
 
 impl MatchMethod {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             MatchMethod::Manual => "manual",
@@ -316,7 +317,7 @@ pub struct Workspace {
 
 impl Workspace {
     /// 用户可见名称：用户自定义标题优先，否则用展示名。
-    #[must_use] 
+    #[must_use]
     pub fn effective_title(&self) -> &str {
         self.user_title.as_deref().unwrap_or(&self.display_name)
     }
@@ -389,7 +390,7 @@ impl Conversation {
     }
 
     /// 用户可见标题。
-    #[must_use] 
+    #[must_use]
     pub fn effective_title(&self) -> &str {
         self.user_title
             .as_deref()
@@ -541,7 +542,7 @@ pub enum UsageStatus {
 }
 
 impl UsageStatus {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             UsageStatus::Running => "running",
@@ -551,7 +552,7 @@ impl UsageStatus {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn parse(s: &str) -> UsageStatus {
         match s {
             "running" => UsageStatus::Running,
@@ -611,7 +612,7 @@ pub struct AutomationRecord {
 
 impl UsageRecord {
     /// 计费口径：input + output + reasoning（cache 不计费，单列）。
-    #[must_use] 
+    #[must_use]
     pub fn billable_tokens(&self) -> i64 {
         self.input_tokens + self.output_tokens + self.reasoning_tokens
     }
@@ -622,7 +623,7 @@ impl UsageRecord {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// 当前 UTC 时间。集中一处便于测试替换。
-#[must_use] 
+#[must_use]
 pub fn now_utc() -> Timestamp {
     OffsetDateTime::now_utc()
 }

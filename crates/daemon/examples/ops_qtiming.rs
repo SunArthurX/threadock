@@ -24,11 +24,15 @@ fn main() {
     println!("ops_by_model:        {:?}", t.elapsed());
 
     let t = Instant::now();
-    let _ = repo.ops_timeseries_daily(Some(30)).expect("write to String");
+    let _ = repo
+        .ops_timeseries_daily(Some(30))
+        .expect("write to String");
     println!("ops_timeseries:      {:?}", t.elapsed());
 
     let t = Instant::now();
-    let _ = repo.ops_tool_toplist(Some(30), 10).expect("write to String");
+    let _ = repo
+        .ops_tool_toplist(Some(30), 10)
+        .expect("write to String");
     println!("ops_tool_toplist:    {:?}", t.elapsed());
 
     let t = Instant::now();

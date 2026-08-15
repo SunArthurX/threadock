@@ -6,6 +6,7 @@ use ch_domain::{Provider, ToolCallRecord, UsageRecord, UsageStatus};
 use std::path::Path;
 
 /// 采集一个 Codex 会话文件：返回该会话的（0 或 1 条）用量快照 + 工具调用。
+#[allow(clippy::too_many_lines)] // 单文件逐行采集：解析+分类+装配一体
 pub fn collect_codex_session(
     file_path: impl AsRef<Path>,
     session_id: &str,
@@ -60,8 +61,12 @@ pub fn collect_codex_session(
                     if let Some(u) = info.pointer("/total_token_usage") {
                         last_snapshot = Some((
                             ts.unwrap_or_else(ch_domain::now_utc),
-                            u.get("input_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0),
-                            u.get("output_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                            u.get("input_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or(0),
+                            u.get("output_tokens")
+                                .and_then(serde_json::Value::as_i64)
+                                .unwrap_or(0),
                             u.get("reasoning_output_tokens")
                                 .and_then(serde_json::Value::as_i64)
                                 .unwrap_or(0),
@@ -132,7 +137,10 @@ pub fn collect_codex_session(
 fn extract_cmd_from_args(name: &str, args: &str) -> Option<String> {
     if name == "exec_command" || name == "shell" {
         let v: serde_json::Value = serde_json::from_str(args).unwrap_or_default();
-        return v.get("cmd").and_then(|c| c.as_str()).map(std::string::ToString::to_string);
+        return v
+            .get("cmd")
+            .and_then(|c| c.as_str())
+            .map(std::string::ToString::to_string);
     }
     None
 }
@@ -148,7 +156,7 @@ pub fn collect_codex(
     scan_jsonl(&home.join("archived_sessions"), &mut files);
 
     let n_threads = std::thread::available_parallelism()
-        .map_or(4, |n| n.get())
+        .map_or(4, std::num::NonZeroUsize::get)
         .clamp(1, 8);
     // 按大小交替分片让负载均衡（大文件分散到不同线程）
     files.sort_by_key(|f| std::cmp::Reverse(std::fs::metadata(f).map_or(0, |m| m.len())));

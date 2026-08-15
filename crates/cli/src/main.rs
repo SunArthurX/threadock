@@ -34,6 +34,7 @@ fn main() -> ExitCode {
     }
 }
 
+#[allow(clippy::too_many_lines)] // CLI 子命令分派主入口
 fn run() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.is_empty() {
@@ -49,7 +50,11 @@ fn run() -> Result<()> {
     // Raw Store：与数据库同目录（plan §9.6 布局：<dir>/raw/ab/cd/<hash>.json.zst）
     let data_dir = db_path
         .parent()
-        .filter(|p| !p.as_os_str().is_empty()).map_or_else(|| std::path::PathBuf::from("."), std::path::Path::to_path_buf);
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(
+            || std::path::PathBuf::from("."),
+            std::path::Path::to_path_buf,
+        );
     let raw_store = ch_raw_store::RawStore::new(&data_dir).context("open raw store")?;
 
     // Tantivy 索引：与数据库同目录下的 index/（plan §9.5/§13）
@@ -469,9 +474,8 @@ fn import_raw(
 
     let normalized = ch_normalization::normalize(raw)?;
 
-    repo.upsert_provider(normalized.conversation.provider)?;
-
-    // workspace
+    // workspace（名称精确查找/新建，事务内完成）
+    // 单事务批量入库：provider + workspace + 会话 + 消息 + 事件一次提交
     let workspace_id = workspace_name.map(|name| {
         if let Ok(Some(existing)) = repo.find_workspace_by_name(name) {
             existing.id
@@ -482,25 +486,14 @@ fn import_raw(
     });
 
     let mut conv = normalized.conversation;
-    conv.workspace_id = workspace_id.clone();
+    conv.workspace_id.clone_from(&workspace_id);
     conv.raw_payload_id = Some(raw_payload.hash.clone());
     let conversation_id = repo
-        .upsert_conversation(&conv)
-        .context("upsert conversation")?;
-
-    for m in &normalized.messages {
-        let mut m = m.clone();
-        m.conversation_id = conversation_id.clone();
-        repo.upsert_message(&m)?;
-    }
-    for e in &normalized.events {
-        let mut e = e.clone();
-        e.conversation_id = conversation_id.clone();
-        repo.upsert_event(&e)?;
-    }
+        .import_conversation_batch(&conv, &normalized.messages, &normalized.events, None, None)
+        .context("import conversation batch")?;
 
     // 索引
-    let mut writer = search_index.writer(15_000_000)?;
+    let mut writer = search_index.writer(ch_search::index::DEFAULT_WRITER_HEAP)?;
     let conv_title = conv.effective_title().to_string();
     for m in &normalized.messages {
         let im = ch_search::index::IndexableMessage {
@@ -537,7 +530,7 @@ fn index_imported(
         .get_conversation(conversation_id)?
         .ok_or_else(|| anyhow::anyhow!("conversation not found after import: {conversation_id}"))?;
     let messages = repo.list_messages(conversation_id)?;
-    let mut writer = index.writer(15_000_000)?;
+    let mut writer = index.writer(ch_search::index::DEFAULT_WRITER_HEAP)?;
     for m in &messages {
         let im = ch_search::index::IndexableMessage {
             message_id: m.id.clone(),

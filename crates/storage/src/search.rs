@@ -33,16 +33,17 @@ impl SearchQuery {
             limit: 50,
         }
     }
-    #[must_use] 
+    #[must_use]
     pub fn with_provider(mut self, p: Provider) -> Self {
         self.provider = Some(p);
         self
     }
+    #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
         self
     }
-    #[must_use] 
+    #[must_use]
     pub fn with_limit(mut self, n: usize) -> Self {
         self.limit = n;
         self
@@ -58,7 +59,7 @@ pub struct SearchResult {
     pub workspace_id: Option<String>,
     pub role: Role,
     pub title: Option<String>,
-    /// 命中片段（FTS5 snippet，已高亮 `<b>...</b>`）。
+    /// 命中片段（FTS5 snippet，已 HTML 转义并高亮 `<b>...</b>`）。
     pub snippet: String,
     /// 该消息原文（便于直接展示）。
     pub body: Option<String>,
@@ -69,7 +70,7 @@ pub struct SearchResult {
 ///
 /// 策略：对每个 token 加双引号包裹，避免被当 FTS5 语法（如 `OR`、`*`、`:`）误解析。
 /// 这保证「用户搜什么就匹配什么字面量」，符合 MVP 的可预期性。
-#[must_use] 
+#[must_use]
 pub fn build_match_expr(user_input: &str) -> String {
     user_input
         .split_whitespace()
@@ -114,9 +115,11 @@ pub(super) fn search(
     };
 
     // rank() 让 FTS5 按相关性排序；snippet() 生成带高亮的命中片段。
+    // 高亮标记用控制字符 char(1)/char(2)（正文中不会出现），
+    // 取回后先整体 HTML 转义再替换为 <b>，防止正文中的 HTML 注入（存储型 XSS）。
     let sql = format!(
         "SELECT message_id, conversation_id, provider, workspace_id, role, title,
-                snippet(messages_fts, 6, '<b>', '</b>', '…', 16) AS snip,
+                snippet(messages_fts, 6, char(1), char(2), '…', 16) AS snip,
                 body, ''
          FROM messages_fts
          {where_sql}
@@ -131,13 +134,16 @@ pub(super) fn search(
         let provider = Provider::from_str(&provider_str).unwrap_or(Provider::Unknown);
         let role_str: String = r.get(4)?;
         let role = match role_str.as_str() {
-            "user" => Role::User,
             "assistant" => Role::Assistant,
             "system" => Role::System,
             "tool" => Role::Tool,
             _ => Role::User,
         };
         let body: Option<String> = r.get(7)?;
+        let raw_snip: String = r.get(6)?;
+        let snippet = ch_domain::html::escape_html(&raw_snip)
+            .replace('\u{1}', "<b>")
+            .replace('\u{2}', "</b>");
         Ok(SearchResult {
             message_id: r.get(0)?,
             conversation_id: r.get(1)?,
@@ -145,7 +151,7 @@ pub(super) fn search(
             workspace_id: r.get::<_, Option<String>>(3)?,
             role,
             title: r.get(5)?,
-            snippet: r.get(6)?,
+            snippet,
             body,
             created_at: None,
         })
@@ -203,7 +209,9 @@ mod tests {
     #[test]
     fn search_finds_by_keyword() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
+        let results = r
+            .search(&SearchQuery::new("tauri"))
+            .expect("SQL execution failed");
         assert!(!results.is_empty(), "should find tauri matches");
         assert!(results
             .iter()
@@ -239,7 +247,9 @@ mod tests {
     #[test]
     fn search_returns_snippet() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("workmanager")).expect("SQL execution failed");
+        let results = r
+            .search(&SearchQuery::new("workmanager"))
+            .expect("SQL execution failed");
         assert!(!results.is_empty());
         // snippet 非空
         assert!(!results[0].snippet.is_empty());
@@ -248,14 +258,18 @@ mod tests {
     #[test]
     fn search_no_match_returns_empty() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("zzznotfound")).expect("SQL execution failed");
+        let results = r
+            .search(&SearchQuery::new("zzznotfound"))
+            .expect("SQL execution failed");
         assert!(results.is_empty());
     }
 
     #[test]
     fn search_chinese_keyword() {
         let r = seed();
-        let results = r.search(&SearchQuery::new("后台任务")).expect("SQL execution failed");
+        let results = r
+            .search(&SearchQuery::new("后台任务"))
+            .expect("SQL execution failed");
         assert!(!results.is_empty());
     }
 
@@ -278,5 +292,25 @@ mod tests {
     fn build_match_expr_empty_input() {
         assert_eq!(build_match_expr(""), "");
         assert_eq!(build_match_expr("   "), "");
+    }
+
+    #[test]
+    fn search_snippet_escapes_html() {
+        // 防存储型 XSS：正文中的 HTML 不能原样进入 snippet（前端 innerHTML 渲染）
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let c = Conversation::new(Provider::Generic, "src-xss");
+        let cid = r.upsert_conversation(&c).expect("upsert failed");
+        let mut m = Message::new(&cid, Role::User, 1);
+        m.content_text = Some("<img src=x onerror=alert(1)> tauri 攻击载荷".into());
+        r.upsert_message(&m).expect("upsert failed");
+
+        let results = r
+            .search(&SearchQuery::new("tauri"))
+            .expect("SQL execution failed");
+        assert!(!results.is_empty());
+        let snip = &results[0].snippet;
+        assert!(!snip.contains("<img"), "raw HTML must not survive: {snip}");
+        assert!(snip.contains("&lt;img"), "HTML must be escaped: {snip}");
     }
 }

@@ -6,6 +6,7 @@ use std::path::Path;
 
 /// 采集一个 Claude Code 会话文件的用量。
 /// 返回 (usage, `tool_calls)。文件不存在返回空`。
+#[allow(clippy::too_many_lines)] // 单文件逐行采集：解析+分类+装配一体
 pub fn collect_claude_code_session(
     file_path: impl AsRef<Path>,
     session_id: &str,
@@ -51,8 +52,14 @@ pub fn collect_claude_code_session(
         if rec.get("type").and_then(|v| v.as_str()) == Some("assistant") {
             let u = rec.pointer("/message/usage");
             if let Some(u) = u {
-                let input = u.get("input_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0);
-                let output = u.get("output_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0);
+                let input = u
+                    .get("input_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
+                let output = u
+                    .get("output_tokens")
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0);
                 let cache_read = u
                     .get("cache_read_input_tokens")
                     .and_then(serde_json::Value::as_i64)
@@ -196,7 +203,8 @@ mod tests {
 
     #[test]
     fn missing_file_empty() {
-        let (u, t) = collect_claude_code_session("/nonexistent/x.jsonl", "x").expect("unexpected None");
+        let (u, t) =
+            collect_claude_code_session("/nonexistent/x.jsonl", "x").expect("unexpected None");
         assert!(u.is_empty());
         assert!(t.is_empty());
     }

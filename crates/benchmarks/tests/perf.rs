@@ -7,12 +7,12 @@
 
 use ch_benchmarks::{bench_fts5_search, bench_tantivy_search, percentile, seed_conversations};
 use ch_search::index::IndexableMessage;
-use ch_storage::Repository;
+use ch_storage::{Repository, SearchQuery};
 use tempfile::TempDir;
 
 /// plan §7.2：本地导入吞吐 > 500 Message/s
 #[test]
-#[ignore]
+#[ignore = "基准测试耗时较长，需手动 --ignored 运行"]
 fn import_throughput() {
     let dir = TempDir::new().expect("tempdir creation failed");
     let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
@@ -47,7 +47,7 @@ fn import_throughput() {
 
 /// plan §7.2：搜索 P95 < 300ms（FTS5）
 #[test]
-#[ignore]
+#[ignore = "基准测试耗时较长，需手动 --ignored 运行"]
 fn fts5_search_latency() {
     let dir = TempDir::new().expect("tempdir creation failed");
     let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
@@ -75,7 +75,7 @@ fn fts5_search_latency() {
 
 /// Tantivy 搜索延迟基准（无硬性目标，记录用）
 #[test]
-#[ignore]
+#[ignore = "基准测试耗时较长，需手动 --ignored 运行"]
 fn tantivy_search_latency() {
     let dir = TempDir::new().expect("tempdir creation failed");
     let repo = Repository::open(dir.path().join("bench.db")).expect("unexpected None");
@@ -119,7 +119,7 @@ fn tantivy_search_latency() {
 
 /// plan §7.2：冷启动 < 2.5s（打开数据库 + migration）
 #[test]
-#[ignore]
+#[ignore = "基准测试耗时较长，需手动 --ignored 运行"]
 fn cold_start() {
     let dir = TempDir::new().expect("tempdir creation failed");
     // 先建库
@@ -159,8 +159,9 @@ fn bench_smoke() {
     assert!(elapsed < 5000, "小规模 seed 不应超过 5 秒");
 
     // FTS5 能搜到
-    use ch_storage::SearchQuery;
-    let results = repo.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
+    let results = repo
+        .search(&SearchQuery::new("tauri"))
+        .expect("SQL execution failed");
     assert!(!results.is_empty());
 
     let p = percentile(&[1.0, 2.0, 3.0, 4.0, 5.0], 50.0);

@@ -270,7 +270,10 @@ mod tests {
         let s = "{\"type\":\"message\",\"role\":\"tool\",\"text\":\"result\",\"content_json\":{\"tool\":\"bash\",\"code\":0}}\n";
         let raw = parse_str(s, "x").expect("parse failed");
         assert!(raw.messages[0].content_json.is_some());
-        let json = raw.messages[0].content_json.as_ref().expect("unexpected None");
+        let json = raw.messages[0]
+            .content_json
+            .as_ref()
+            .expect("unexpected None");
         assert_eq!(json["tool"], "bash");
     }
 
@@ -310,7 +313,7 @@ mod tests {
     #[test]
     fn invalid_json_reports_line_number() {
         let s = "{\"type\":\"message\",\"role\":\"user\",\"text\":\"ok\"}\n{bad json}\n";
-        let err = parse_str(s, "x").unwrap_err();
+        let err = parse_str(s, "x").expect_err("invalid json must error");
         match err {
             JsonlAdapterError::Json { line, .. } => assert_eq!(line, 2),
             _ => panic!("expected Json error, got {err:?}"),

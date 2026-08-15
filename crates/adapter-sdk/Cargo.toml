@@ -13,6 +13,8 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
+# 只读打开来源 SQLite（各 adapter 共用）
+rusqlite = { version = "0.31", features = ["bundled"] }
 tracing.workspace = true
 
 [dev-dependencies]

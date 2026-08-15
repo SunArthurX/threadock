@@ -61,17 +61,17 @@ pub fn discover_sessions(claude_home: impl AsRef<Path>) -> AdapterResult<Vec<Dis
         if !entry.file_type()?.is_dir() {
             continue;
         }
-        let project_dir = entry.file_name().to_string_lossy().into_owned();
-        for f in std::fs::read_dir(entry.path())? {
-            let f = f?;
-            let path = f.path();
+        let project_name = entry.file_name().to_string_lossy().into_owned();
+        for file in std::fs::read_dir(entry.path())? {
+            let file = file?;
+            let path = file.path();
             if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
                 let session_id = path
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("unknown")
                     .to_string();
-                let meta = f.metadata();
+                let meta = file.metadata();
                 let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
                 let mtime_ms = meta
                     .ok()
@@ -81,7 +81,7 @@ pub fn discover_sessions(claude_home: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                 sessions.push(DiscoveredSession {
                     session_id,
                     file_path: path,
-                    project_dir: project_dir.clone(),
+                    project_dir: project_name.clone(),
                     size_bytes: size,
                     mtime_ms,
                 });
@@ -107,6 +107,7 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
 }
 
 /// 从字符串解析（测试用）。
+#[allow(clippy::too_many_lines)] // JSONL 解析主循环：按消息类型分支装配，拆分反而难读
 pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversation> {
     let mut messages = Vec::new();
     let mut events = Vec::new();
@@ -316,7 +317,11 @@ mod tests {
         // 纯 tool_result 的 user 不计入消息
         assert_eq!(raw.messages.len(), 3);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("书签"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .expect("unexpected None")
+            .contains("书签"));
     }
 
     #[test]
@@ -378,8 +383,16 @@ mod tests {
             "s",
         )
         .expect("unexpected None");
-        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("line1"));
-        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("line2"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .expect("unexpected None")
+            .contains("line1"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .expect("unexpected None")
+            .contains("line2"));
     }
 
     #[test]

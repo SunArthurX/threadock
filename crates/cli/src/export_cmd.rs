@@ -104,6 +104,13 @@ pub fn export_workspace(
     std::fs::create_dir_all(outdir)?;
 
     let opts = ExportOptions::everything();
+    // 用户自定义脱敏规则对批量导出同样生效（plan §14.6，与单条导出行为一致）
+    let custom_rules: Vec<ch_export::CustomRule> = repo
+        .list_redaction_rules()?
+        .into_iter()
+        .filter(|r| r.enabled)
+        .map(|r| ch_export::CustomRule::new(r.name, r.pattern))
+        .collect();
     let mut files_written = 0;
     for c in &convs {
         let messages = repo.list_messages(&c.id)?;
@@ -111,6 +118,11 @@ pub fn export_workspace(
         let content = match format {
             ExportFormat::Markdown => to_markdown(c, &messages, &events, &opts),
             ExportFormat::Json => to_json(Some(&ws), c, &messages, &events, &opts)?,
+        };
+        let content = if custom_rules.is_empty() {
+            content
+        } else {
+            ch_export::redact_with(&content, &custom_rules).0
         };
         let ext = match format {
             ExportFormat::Markdown => "md",
@@ -139,7 +151,8 @@ mod tests {
     fn seeded_repo() -> (TempDir, Repository, String) {
         let dir = TempDir::new().expect("tempdir creation failed");
         let repo = Repository::open(dir.path().join("hub.db")).expect("unexpected None");
-        repo.upsert_provider(Provider::Generic).expect("upsert failed");
+        repo.upsert_provider(Provider::Generic)
+            .expect("upsert failed");
         let mut c = Conversation::new(Provider::Generic, "src-export");
         c.title = Some("含 token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ1234567890 的会话".into());
         let cid = repo.upsert_conversation(&c).expect("upsert failed");
@@ -154,7 +167,13 @@ mod tests {
         let (_dir, repo, cid) = seeded_repo();
         let outdir = TempDir::new().expect("tempdir creation failed");
         let out = outdir.path().join("conv.md");
-        export_conversation(&repo, &cid, out.to_str().expect("unexpected None"), ExportFormat::Markdown).expect("unexpected None");
+        export_conversation(
+            &repo,
+            &cid,
+            out.to_str().expect("unexpected None"),
+            ExportFormat::Markdown,
+        )
+        .expect("unexpected None");
         let content = std::fs::read_to_string(&out).expect("file I/O failed");
         assert!(content.contains("[REDACTED:github_token]"));
         assert!(content.contains("[REDACTED:email]"));
@@ -166,7 +185,13 @@ mod tests {
         let (_dir, repo, cid) = seeded_repo();
         let outdir = TempDir::new().expect("tempdir creation failed");
         let out = outdir.path().join("conv.json");
-        export_conversation(&repo, &cid, out.to_str().expect("unexpected None"), ExportFormat::Json).expect("unexpected None");
+        export_conversation(
+            &repo,
+            &cid,
+            out.to_str().expect("unexpected None"),
+            ExportFormat::Json,
+        )
+        .expect("unexpected None");
         let content = std::fs::read_to_string(&out).expect("file I/O failed");
         let data: ch_export::ExportData = serde_json::from_str(&content).expect("parse failed");
         assert!(data
@@ -196,7 +221,8 @@ mod tests {
     fn seeded_with_workspace() -> (TempDir, Repository, String, Vec<String>) {
         let dir = TempDir::new().expect("tempdir creation failed");
         let repo = Repository::open(dir.path().join("hub.db")).expect("unexpected None");
-        repo.upsert_provider(ch_domain::Provider::Generic).expect("upsert failed");
+        repo.upsert_provider(ch_domain::Provider::Generic)
+            .expect("upsert failed");
         let ws_id = repo
             .upsert_workspace(&ch_domain::Workspace::new("batch-ws"))
             .expect("unexpected None");
@@ -236,7 +262,9 @@ mod tests {
         assert_eq!(summary.files_written, 3);
 
         // 目录下应有 3 个 .md 文件
-        let entries: Vec<_> = std::fs::read_dir(outdir.path()).expect("file I/O failed").collect();
+        let entries: Vec<_> = std::fs::read_dir(outdir.path())
+            .expect("file I/O failed")
+            .collect();
         let md_count = entries
             .iter()
             .filter(|e| {
@@ -296,7 +324,8 @@ mod tests {
     fn export_workspace_empty_workspace() {
         let dir = TempDir::new().expect("tempdir creation failed");
         let repo = Repository::open(dir.path().join("h.db")).expect("unexpected None");
-        repo.upsert_provider(ch_domain::Provider::Generic).expect("upsert failed");
+        repo.upsert_provider(ch_domain::Provider::Generic)
+            .expect("upsert failed");
         let ws_id = repo
             .upsert_workspace(&ch_domain::Workspace::new("empty-ws"))
             .expect("unexpected None");

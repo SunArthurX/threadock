@@ -40,22 +40,43 @@ pub struct AppError {
 
 impl AppError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        Self { code, message: message.into(), detail: None }
+        Self {
+            code,
+            message: message.into(),
+            detail: None,
+        }
     }
 
+    #[must_use]
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
     }
 
-    pub fn storage(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Storage, msg) }
-    pub fn search(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Search, msg) }
-    pub fn import(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Import, msg) }
-    pub fn audit(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Audit, msg) }
-    pub fn io(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Io, msg) }
-    pub fn not_found(msg: impl Into<String>) -> Self { Self::new(ErrorCode::NotFound, msg) }
-    pub fn busy(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Busy, msg) }
-    pub fn invalid(msg: impl Into<String>) -> Self { Self::new(ErrorCode::Invalid, msg) }
+    pub fn storage(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Storage, msg)
+    }
+    pub fn search(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Search, msg)
+    }
+    pub fn import(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Import, msg)
+    }
+    pub fn audit(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Audit, msg)
+    }
+    pub fn io(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Io, msg)
+    }
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::NotFound, msg)
+    }
+    pub fn busy(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Busy, msg)
+    }
+    pub fn invalid(msg: impl Into<String>) -> Self {
+        Self::new(ErrorCode::Invalid, msg)
+    }
 }
 
 impl std::fmt::Display for AppError {
@@ -96,7 +117,6 @@ mod tests {
         assert!(json.contains("\"message\""));
     }
 
-    
     #[test]
     fn display_includes_code_and_detail() {
         let e = AppError::not_found("会话不存在").with_detail("id=abc");

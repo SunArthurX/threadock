@@ -88,10 +88,25 @@ impl RawStore {
     }
 
     /// 写入原始字节，返回 hash 与路径。相同内容幂等（覆盖写同一路径）。
+    ///
+    /// 内容寻址天然幂等：已存在的对象直接短路返回（读取现有文件大小），
+    /// 跳过 zstd-9 重压缩与重写 + fsync——重复导入（增量同步的 stale 路径）
+    /// 不再为已归档内容付整次压缩代价。
     pub fn put(&self, data: &[u8]) -> RawResult<RawPayload> {
         let hash = blake3::hash(data).to_hex().to_string();
         let rel_path = hash_to_rel_path(&hash);
         let abs_path = self.root.join(&rel_path);
+
+        // 已存在短路（BLAKE3 抗碰撞，同 hash = 同内容）
+        if abs_path.exists() {
+            let stored_size = std::fs::metadata(&abs_path).map_or(0, |m| m.len());
+            return Ok(RawPayload {
+                hash,
+                rel_path,
+                original_size: data.len() as u64,
+                stored_size,
+            });
+        }
 
         // 压缩
         let compressed = zstd::encode_all(data, self.compression_level)
@@ -240,6 +255,28 @@ mod tests {
     }
 
     #[test]
+    fn put_existing_content_short_circuits() {
+        // 重复导入相同内容：不重写文件（mtime 不变），元信息仍完整
+        let (_dir, store) = store();
+        let data = b"some conversation payload that is not tiny";
+        let p1 = store.put(data).expect("unexpected None");
+        let abs1 = store.root.join(&p1.rel_path);
+        let mtime1 = std::fs::metadata(&abs1)
+            .expect("file I/O failed")
+            .modified()
+            .expect("file I/O failed");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let p2 = store.put(data).expect("unexpected None");
+        let mtime2 = std::fs::metadata(&abs1)
+            .expect("file I/O failed")
+            .modified()
+            .expect("file I/O failed");
+        assert_eq!(p1.hash, p2.hash);
+        assert_eq!(p1.stored_size, p2.stored_size);
+        assert_eq!(mtime1, mtime2, "existing object must not be rewritten");
+    }
+
+    #[test]
     fn put_returns_correct_hash() {
         let (_dir, store) = store();
         let data = b"hello world";
@@ -286,6 +323,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::items_after_statements)] // 测试内联 DTO 放在使用处旁更易读
     fn json_roundtrip() {
         let (_dir, store) = store();
         #[derive(Serialize, Deserialize, PartialEq, Debug)]

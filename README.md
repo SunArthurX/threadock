@@ -1,9 +1,9 @@
-# Conversation Hub
+# Threadock
 
 > 跨 AI IDE 的统一会话归档、检索与知识提取——把 Codex / Cursor / Claude Code / ZCode / MiniMax Code / OpenCode 等工具里的会话、工具调用、命令、Diff、Artifact 统一收集、标准化、全文检索、知识化。
 >
-> 配套方案：[`ai-ide-conversation-hub-enterprise-plan.md`](./ai-ide-conversation-hub-enterprise-plan.md)
-> 落地清单：[`conversation-hub-execution-plan.md`](./conversation-hub-execution-plan.md)
+> 配套方案：[`docs/ai-ide-conversation-hub-enterprise-plan.md`](./docs/ai-ide-conversation-hub-enterprise-plan.md)
+> 落地清单：[`docs/conversation-hub-execution-plan.md`](./docs/conversation-hub-execution-plan.md)
 
 ## 当前状态：Phase 0/1 + 核心能力扩展
 
@@ -20,7 +20,7 @@
                 ▼
         ┌───────────────┐
         │  DaemonState  │  ← 单点写者（plan §8.2）
-        │  ├ Repository │     SQLite WAL（V3 schema，12 表）
+        │  ├ Repository │     SQLite WAL（V10 schema，22 表）
         │  ├ SearchIndex│     Tantivy（N-gram 中文 + BM25）
         │  └ RawStore   │     BLAKE3 内容寻址 + zstd
         └───────────────┘
@@ -36,7 +36,7 @@
 | 能力 | 实现位置 | 对应 plan |
 |---|---|---|
 | 统一领域模型（6 来源 + 19 事件类型 + 7 级合并） | `crates/domain` + `crates/identity-resolver` | §4, §12 |
-| SQLite V3（12 表 + WAL + Migration + FTS5） | `crates/storage` | §9.4, §12 |
+| SQLite V10（22 表 + WAL + Migration + FTS5） | `crates/storage` | §9.4, §12 |
 | Tantivy 全文检索（N-gram 中文 + BM25 + 高亮） | `crates/search` | §9.5, §13 |
 | 双引擎搜索（Tantivy 主 + FTS5 降级） | `crates/storage` + `crates/search` | §13 |
 | 标准化流水线（BLAKE3 hash + 幂等 + 完整度评分） | `crates/normalization` | §11, §17.3 |
@@ -49,13 +49,12 @@
 | 导出（Markdown/JSON + 敏感信息脱敏 + 批量） | `crates/export` | §6.6, §14.6 |
 | 加密备份/恢复（XChaCha20-Poly1305 + zstd） | `crates/backup` | §6.6, §14.3 |
 | 知识提取（摘要/决策/TODO/错误/命令/文件） | `crates/knowledge` | §13.5 |
-| 知识提取持久化（版本管理 + 不覆盖原始） | `crates/storage` V3 | §13.5 |
+| 知识提取持久化（版本管理 + 不覆盖原始） | `crates/storage` | §13.5 |
 | Daemon 常驻服务（JSON-RPC over stdio） | `crates/daemon` | §8.2, §16 |
 | Tauri 桌面 GUI（三栏 + 搜索 + 知识面板） | `apps/desktop` | §9.1, §17 |
 
 ### 尚未实现（后续阶段）
 
-- Codex / Cursor / Claude Code 真实 Adapter（Phase 2，需调研各来源 API）
 - Tantivy 可插拔中文分词器（当前用 N-gram 兜底）
 - AI 提取走真实 LLM（当前规则引擎，接口已留好）
 - 企业能力：SSO / 审计 / 保留策略 / 加密同步（Phase 5）
@@ -79,8 +78,8 @@ cd src-tauri && cargo build --release
 CH=./target/release/ch
 
 # 导入会话（md/jsonl 自动识别）
-$CH --db ./hub.db import examples/tauri-android.md --workspace my-app
-$CH --db ./hub.db import examples/rust-errors.md  --workspace cli-tool
+$CH --db ./hub.db import docs/tauri-android.md --workspace my-app
+$CH --db ./hub.db import docs/rust-errors.md  --workspace cli-tool
 
 # 列出会话（支持过滤）
 $CH --db ./hub.db list
@@ -133,7 +132,8 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 ## 运行测试
 
 ```bash
-cargo test --workspace --manifest-path Cargo.toml   # 全部单元测试（263 个）
+cargo test --workspace --manifest-path Cargo.toml   # 全部单元测试
+cargo test --release -p ch-benchmarks --test perf -- --ignored --nocapture  # 性能基准
 cargo clippy --workspace --all-targets              # 代码质量检查（0 warning）
 ```
 
@@ -155,12 +155,20 @@ threadock/
 │   ├── adapter-host/        进程隔离（spawn + 崩溃检测）
 │   ├── adapter-markdown/    Markdown Adapter（独立进程二进制）
 │   ├── adapter-jsonl/       JSONL Adapter
+│   ├── adapter-claude-code/ Claude Code 会话 Adapter（~/.claude JSONL）
+│   ├── adapter-zcode/       ZCode Adapter（SQLite 直读）
+│   ├── adapter-cursor/      Cursor Adapter（state.vscdb）
+│   ├── adapter-minimax/     MiniMax Code Adapter（runtime-state.sqlite）
+│   ├── adapter-codex/       Codex Adapter（~/.codex/sessions JSONL）
+│   ├── ops-metrics/         用量/工具调用指标采集（治理）
+│   ├── audit/               安全审计（敏感信息 + 危险命令扫描）
+│   ├── benchmarks/          性能基准（吞吐 / 搜索延迟 / 冷启动）
 │   ├── daemon/              常驻服务（JSON-RPC over stdio）
 │   └── cli/                 `ch` 命令行（import/list/search/export/...）
 ├── apps/desktop/            Tauri 2 桌面应用（React + TS）
 │   ├── src/                 前端（三栏 + 搜索 + 知识面板）
 │   └── src-tauri/           Rust 后端（嵌入 DaemonState）
-├── examples/                示例会话 Markdown
+│   └── （示例会话 Markdown 在 docs/ 下）
 └── *.md                     方案与落地计划文档
 ```
 
@@ -171,7 +179,7 @@ threadock/
 | 决策 | 状态 |
 |---|---|
 | Local-first | ✅ 数据默认留本机 |
-| SQLite WAL | ✅ V3 schema |
+| SQLite WAL | ✅ V10 schema |
 | Tauri 桌面 | ✅ React + TS |
 | Rust 核心 | ✅ |
 | Tantivy 搜索 | ✅ N-gram 中文 |
@@ -180,10 +188,10 @@ threadock/
 | 第三方只读 | ✅ |
 
 
-## 测试
+## 开发模式（桌面端）
 
 ```bash
-lsof -nP -i :1420 -sTCP:LISTEN -t | xargs kill -9
+lsof -nP -i :1420 -sTCP:LISTEN -t | xargs kill -9   # 清理残留 dev server
 cd apps/desktop
 npx tauri dev
 ```

@@ -18,8 +18,11 @@ pub fn seed_conversations(
     n_conversations: usize,
     messages_per_conv: usize,
 ) -> (u128, usize, usize) {
-    repo.upsert_provider(Provider::Generic).expect("upsert failed");
-    let ws_id = repo.upsert_workspace(&Workspace::new("bench-ws")).expect("upsert failed");
+    repo.upsert_provider(Provider::Generic)
+        .expect("upsert failed");
+    let ws_id = repo
+        .upsert_workspace(&Workspace::new("bench-ws"))
+        .expect("upsert failed");
 
     let start = std::time::Instant::now();
     let mut total_messages = 0;
@@ -57,7 +60,9 @@ pub fn bench_fts5_search(repo: &Repository, queries: &[&str], rounds: usize) -> 
     for _ in 0..rounds {
         for q in queries {
             let start = std::time::Instant::now();
-            let _ = repo.search(&SearchQuery::new(*q)).expect("SQL execution failed");
+            let _ = repo
+                .search(&SearchQuery::new(*q))
+                .expect("SQL execution failed");
             latencies.push(start.elapsed().as_secs_f64() * 1000.0);
             count += 1;
         }
@@ -67,7 +72,7 @@ pub fn bench_fts5_search(repo: &Repository, queries: &[&str], rounds: usize) -> 
 }
 
 /// 测量 Tantivy 搜索延迟（多次取 P95）。
-#[must_use] 
+#[must_use]
 pub fn bench_tantivy_search(
     index: &ch_search::SearchIndex,
     queries: &[&str],
@@ -89,7 +94,7 @@ pub fn bench_tantivy_search(
 }
 
 /// 计算百分位数。
-#[must_use] 
+#[must_use]
 pub fn percentile(data: &[f64], p: f64) -> f64 {
     if data.is_empty() {
         return 0.0;

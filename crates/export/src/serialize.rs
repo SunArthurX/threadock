@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// 导出选项。
 #[derive(Debug, Clone, Default)]
+#[allow(clippy::struct_excessive_bools)] // 4 个导出开关即 API 设计
 pub struct ExportOptions {
     /// 是否包含命令事件。
     pub include_commands: bool,
@@ -20,7 +21,7 @@ pub struct ExportOptions {
 }
 
 impl ExportOptions {
-    #[must_use] 
+    #[must_use]
     pub fn everything() -> Self {
         Self {
             include_commands: true,
@@ -29,7 +30,7 @@ impl ExportOptions {
             redact_secrets: true,
         }
     }
-    #[must_use] 
+    #[must_use]
     pub fn messages_only() -> Self {
         Self::default()
     }
@@ -50,7 +51,7 @@ pub struct ExportData {
 }
 
 /// 组装导出数据：按选项过滤事件，并可选脱敏。
-#[must_use] 
+#[must_use]
 pub fn build_export_data(
     workspace: Option<&Workspace>,
     conversation: &Conversation,
@@ -82,11 +83,25 @@ pub fn build_export_data(
             conv.title = Some(r);
             total = merge_stats(total, s);
         }
+        if let Some(t) = conv.user_title.take() {
+            let (r, s) = redact(&t);
+            conv.user_title = Some(r);
+            total = merge_stats(total, s);
+        }
         for m in &mut msgs {
             if let Some(t) = m.content_text.take() {
                 let (r, s) = redact(&t);
                 m.content_text = Some(r);
                 total = merge_stats(total, s);
+            }
+            // 结构化内容同样脱敏：序列化 → 脱敏 → 反解析；
+            // 反解析失败（理论上不会）则置空（fail-closed，宁可少导出不泄露）。
+            if let Some(j) = m.content_json.take() {
+                if let Ok(s) = serde_json::to_string(&j) {
+                    let (r, st) = redact(&s);
+                    total = merge_stats(total, st);
+                    m.content_json = serde_json::from_str(&r).ok();
+                }
             }
         }
         for e in &mut evs {
@@ -127,6 +142,7 @@ pub fn to_json(
     serde_json::to_string_pretty(&data)
 }
 
+#[allow(clippy::needless_pass_by_value)] // 值语义合并，b 为一次性统计
 fn merge_stats(mut a: RedactionStats, b: RedactionStats) -> RedactionStats {
     a.aws_access_key += b.aws_access_key;
     a.aws_secret_key += b.aws_secret_key;
@@ -135,6 +151,11 @@ fn merge_stats(mut a: RedactionStats, b: RedactionStats) -> RedactionStats {
     a.api_key += b.api_key;
     a.email += b.email;
     a.private_ip += b.private_ip;
+    a.slack_token += b.slack_token;
+    a.gitlab_token += b.gitlab_token;
+    a.google_api_key += b.google_api_key;
+    a.jwt += b.jwt;
+    a.private_key += b.private_key;
     a
 }
 
@@ -234,14 +255,40 @@ mod tests {
             redact_secrets: false,
         };
         let data = build_export_data(None, &c, &msgs, &evs, &opts);
-        assert!(data.conversation.title.as_deref().expect("unexpected None").contains("ghp_"));
+        assert!(data
+            .conversation
+            .title
+            .as_deref()
+            .expect("unexpected None")
+            .contains("ghp_"));
         assert!(data.redaction.is_none());
+    }
+
+    #[test]
+    fn export_redacts_content_json() {
+        // content_json 结构化字段里的敏感值也必须脱敏（此前完全绕过）
+        let (c, _msgs, evs) = sample();
+        let mut m = Message::new("c1", Role::User, 1);
+        m.content_json = Some(serde_json::json!({
+            "api_key": "sk-ant-api03-abcdefghijklmnopqrstuv0123456789",
+            "note": "普通内容"
+        }));
+        let data = build_export_data(None, &c, &[m], &evs, &ExportOptions::everything());
+        let json = serde_json::to_string(&data).expect("unexpected None");
+        assert!(
+            !json.contains("sk-ant-api03"),
+            "content_json must be redacted: {json}"
+        );
+        assert!(json.contains("[REDACTED:api_key]"));
+        // 非敏感字段保留
+        assert!(json.contains("普通内容"));
     }
 
     #[test]
     fn to_json_produces_valid_json() {
         let (c, msgs, evs) = sample();
-        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
+        let json =
+            to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
         // 可重新反序列化（数据可移植性，plan §6.6）
         let back: ExportData = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back.format_version, 1);
@@ -251,7 +298,8 @@ mod tests {
     #[test]
     fn export_roundtrips_through_json() {
         let (c, msgs, evs) = sample();
-        let json = to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
+        let json =
+            to_json(None, &c, &msgs, &evs, &ExportOptions::everything()).expect("unexpected None");
         let back: ExportData = serde_json::from_str(&json).expect("parse failed");
         assert_eq!(back.conversation.provider, Provider::Codex);
         assert_eq!(back.conversation.source_conversation_id, "src-1");

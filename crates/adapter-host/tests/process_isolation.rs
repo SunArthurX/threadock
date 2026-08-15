@@ -6,7 +6,9 @@ use ch_adapter_host::{AdapterProcess, HostError};
 
 /// 找到 workspace target/debug 下的 ch-adapter-markdown 二进制。
 fn adapter_binary() -> String {
-    let metadata = cargo_metadata::MetadataCommand::new().exec().expect("unexpected None");
+    let metadata = cargo_metadata::MetadataCommand::new()
+        .exec()
+        .expect("unexpected None");
     let target = metadata.target_directory.join("debug/ch-adapter-markdown");
     target.to_string()
 }
@@ -46,10 +48,7 @@ fn adapter_process_isolates_crash() {
     let mut proc = AdapterProcess::spawn("false").expect("unexpected None");
     let result = proc.handshake();
     assert!(
-        matches!(
-            result,
-            Err(HostError::ProcessExited(_) | HostError::Io(_))
-        ),
+        matches!(result, Err(HostError::ProcessExited(_) | HostError::Io(_))),
         "crashed adapter must be detected, got {result:?}"
     );
     // 主进程（本测试）继续运行——证明隔离生效

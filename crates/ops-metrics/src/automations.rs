@@ -202,9 +202,16 @@ mod tests {
         )
         .expect("unexpected None");
         let recs = collect_automations(dir.path()).expect("unexpected None");
-        let a = recs.iter().find(|r| r.name == "hourly-build").expect("unexpected None");
+        let a = recs
+            .iter()
+            .find(|r| r.name == "hourly-build")
+            .expect("unexpected None");
         assert_eq!(a.schedule.as_deref(), Some("0 * * * *"));
-        assert!(a.detail.as_deref().expect("unexpected None").contains("构建"));
+        assert!(a
+            .detail
+            .as_deref()
+            .expect("unexpected None")
+            .contains("构建"));
     }
 
     #[test]
@@ -230,8 +237,15 @@ mod tests {
         .expect("unexpected None");
         drop(conn);
         let recs = collect_automations(dir.path()).expect("unexpected None");
-        let a = recs.iter().find(|r| r.name == "daily").expect("unexpected None");
+        let a = recs
+            .iter()
+            .find(|r| r.name == "daily")
+            .expect("unexpected None");
         assert_eq!(a.status.as_deref(), Some("completed"));
-        assert!(a.schedule.as_deref().expect("unexpected None").contains("last:"));
+        assert!(a
+            .schedule
+            .as_deref()
+            .expect("unexpected None")
+            .contains("last:"));
     }
 }

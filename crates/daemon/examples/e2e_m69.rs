@@ -2,6 +2,7 @@
 use ch_daemon::{DaemonState, DaemonStateConfig};
 use std::time::Instant;
 
+#[allow(clippy::too_many_lines, clippy::many_single_char_names)]
 fn main() {
     let home = std::env::var("HOME").expect("write to String");
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
@@ -69,7 +70,12 @@ fn main() {
             .collect();
         let _ = repo.replace_provider_automations(&format!("prov_{p}"), &subset);
     }
-    for a in repo.list_automations().expect("write to String").iter().take(5) {
+    for a in repo
+        .list_automations()
+        .expect("write to String")
+        .iter()
+        .take(5)
+    {
         println!(
             "   [{}] {} {} {} {}",
             a.provider,
@@ -82,8 +88,11 @@ fn main() {
 
     // ── M7 成本归因 + 缓存（需要 source_dir：先重灌 usage）──
     let t = Instant::now();
-    let (zu, _) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).expect("write to String");
-    let _ = repo.replace_provider_usage("prov_zcode", &zu).expect("write to String");
+    let (zu, _) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite"))
+        .expect("write to String");
+    let _ = repo
+        .replace_provider_usage("prov_zcode", &zu)
+        .expect("write to String");
     println!(
         "M7 前置 zcode usage 重灌（带 source_dir）: {:?} {} 条",
         t.elapsed(),

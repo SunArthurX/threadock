@@ -55,7 +55,7 @@ pub struct HealthResponse {
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
-#[must_use] 
+#[must_use]
 pub fn encode_bytes(data: &[u8]) -> String {
     STANDARD.encode(data)
 }

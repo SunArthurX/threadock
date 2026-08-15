@@ -20,7 +20,7 @@
 
 use ch_domain::{Provider, Role};
 use ch_normalization::{RawConversation, RawMessage};
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection};
 use std::path::Path;
 use thiserror::Error;
 
@@ -67,11 +67,7 @@ pub struct DiscoveredSession {
 
 /// 只读打开 `MiniMax` runtime-state.sqlite（plan §10.1：只读快照）。
 fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
-    let conn = Connection::open_with_flags(
-        db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    Ok(conn)
+    Ok(ch_adapter_sdk::open_readonly(db_path)?)
 }
 
 /// 列出 `MiniMax` 所有**主任务**会话（parentSessionId 为空），按更新时间降序。
@@ -372,8 +368,8 @@ mod tests {
             "title": "测试会话",
             "agentName": "coder",
             "workspaceDir": "/tmp/proj",
-            "createdAtMs": 1784560908466_i64,
-            "updatedAtMs": 1785594356394_i64
+            "createdAtMs": 1_784_560_908_466_i64,
+            "updatedAtMs": 1_785_594_356_394_i64
         });
         conn.execute(
             "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('mvs_test1', ?1, 1785594356394)",
@@ -383,7 +379,7 @@ mod tests {
 
         let m1 = serde_json::json!({
             "msg_id": "msg-1",
-            "timestamp": 1784560910000_i64,
+            "timestamp": 1_784_560_910_000_i64,
             "role": "user",
             "msg_type": 1,
             "msg_content": "帮我写个排序算法"
@@ -397,7 +393,7 @@ mod tests {
 
         let m2 = serde_json::json!({
             "msg_id": "msg-2",
-            "timestamp": 1784560912000_i64,
+            "timestamp": 1_784_560_912_000_i64,
             "role": "assistant",
             "msg_type": 1,
             "msg_content": "<greeting-message />\n\n好的，这是快速排序：\n```python\ndef qs(a): pass\n```",

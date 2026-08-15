@@ -144,6 +144,7 @@ fn read_first_json_line(path: &Path) -> AdapterResult<serde_json::Value> {
 }
 
 /// 解析单条 Codex 会话。
+#[allow(clippy::too_many_lines)] // JSONL 解析主循环：事件分类与领域装配一体
 pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversation> {
     use std::io::BufRead;
     let path = file_path.as_ref();
@@ -301,24 +302,26 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
     })
 }
 
-/// Codex 注入块判定：环境上下文 / 系统指令 / 插件推荐等 XML 标签开头，或 AGENTS.md。
+/// Codex 注入块标签：环境上下文 / 系统指令 / 插件推荐等（runtime 注入而非用户输入）。
+const INJECTED_TAGS: &[&str] = &[
+    "<environment_context>",
+    "<user_instructions>",
+    "<recommended_plugins>",
+    "<turn_context>",
+    "<turn_aborted>",
+    "<runtime_credentials>",
+    "<IDE_INFORMATION>",
+    "<system-reminder>",
+    "<ENVIRONMENT",
+];
+
+/// Codex 注入块判定：上述 XML 标签开头，或 AGENTS.md 头。
 /// 这些是 runtime 注入而非用户真实输入，不应入库为消息或用作标题。
 fn is_injected_context(text: &str) -> bool {
     let t = text.trim_start();
     if t.starts_with("# AGENTS.md") || t.starts_with("# Systems") {
         return true;
     }
-    const INJECTED_TAGS: &[&str] = &[
-        "<environment_context>",
-        "<user_instructions>",
-        "<recommended_plugins>",
-        "<turn_context>",
-        "<turn_aborted>",
-        "<runtime_credentials>",
-        "<IDE_INFORMATION>",
-        "<system-reminder>",
-        "<ENVIRONMENT",
-    ];
     INJECTED_TAGS.iter().any(|tag| t.starts_with(tag))
 }
 

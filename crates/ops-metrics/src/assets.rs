@@ -26,10 +26,7 @@ fn risky_hits(text: &str) -> i64 {
     ];
     patterns
         .iter()
-        .filter(|p| {
-            regex::Regex::new(p)
-                .is_ok_and(|re| re.is_match(text))
-        })
+        .filter(|p| regex::Regex::new(p).is_ok_and(|re| re.is_match(text)))
         .count() as i64
 }
 
@@ -128,8 +125,7 @@ fn scan_plugins_cache(dir: &Path, provider: Provider, out: &mut Vec<AssetRecord>
                     continue;
                 }
             }
-            let hits = std::fs::read_to_string(pp.join("SKILL.md"))
-                .map_or(0, |b| risky_hits(&b));
+            let hits = std::fs::read_to_string(pp.join("SKILL.md")).map_or(0, |b| risky_hits(&b));
             out.push(AssetRecord {
                 id: format!("ap_{}_{}", provider.as_str(), pname),
                 provider,
@@ -244,7 +240,10 @@ mod tests {
         )
         .expect("unexpected None");
         let recs = collect_agent_assets(dir.path(), Provider::ZCode).expect("unexpected None");
-        let s = recs.iter().find(|r| r.name == "demo").expect("unexpected None");
+        let s = recs
+            .iter()
+            .find(|r| r.name == "demo")
+            .expect("unexpected None");
         assert_eq!(s.kind, "skill");
         assert_eq!(s.description.as_deref(), Some("一个演示"));
         assert!(s.risky_hits >= 1, "rm -rf 应命中危险模式");
@@ -261,7 +260,10 @@ mod tests {
         )
         .expect("unexpected None");
         let recs = collect_agent_assets(dir.path(), Provider::ClaudeCode).expect("unexpected None");
-        let p = recs.iter().find(|r| r.name == "foo").expect("unexpected None");
+        let p = recs
+            .iter()
+            .find(|r| r.name == "foo")
+            .expect("unexpected None");
         assert_eq!(p.kind, "plugin");
         assert_eq!(p.version.as_deref(), Some("1.2.0"));
         assert_eq!(p.installed_at.as_deref(), Some("2026-08-01T00:00:00Z"));
@@ -273,7 +275,8 @@ mod tests {
         let sk = dir.path().join(".minimax/.builtin-skills/docx");
         std::fs::create_dir_all(&sk).expect("file I/O failed");
         std::fs::write(sk.join("SKILL.md"), "---\nname: docx\n---\n内容").expect("file I/O failed");
-        let recs = collect_agent_assets(dir.path(), Provider::MinimaxCode).expect("unexpected None");
+        let recs =
+            collect_agent_assets(dir.path(), Provider::MinimaxCode).expect("unexpected None");
         assert!(recs
             .iter()
             .any(|r| r.kind == "builtin_skill" && r.name == "docx"));

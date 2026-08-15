@@ -29,7 +29,7 @@ pub struct JsonRpcError {
 }
 
 impl JsonRpcResponse {
-    #[must_use] 
+    #[must_use]
     pub fn ok(id: serde_json::Value, result: serde_json::Value) -> Self {
         Self {
             jsonrpc: "2.0".into(),
@@ -39,7 +39,7 @@ impl JsonRpcResponse {
         }
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn err(id: serde_json::Value, code: i64, message: String) -> Self {
         Self {
             jsonrpc: "2.0".into(),

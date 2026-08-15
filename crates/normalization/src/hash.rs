@@ -14,7 +14,7 @@ use ch_domain::{Conversation, Message, Provider, Role};
 /// 输入包括：provider、conversation 占位（用 conversation 的 source id）、
 /// role、文本内容、结构化内容。**不包含** `sequence_number`，
 /// 因为同一条消息在不同导入轮次中序号可能漂移，但内容相同应得同 hash。
-#[must_use] 
+#[must_use]
 pub fn content_hash_for_message(
     provider: Provider,
     conversation_source_id: &str,
@@ -45,7 +45,7 @@ pub fn content_hash_for_message(
 ///
 /// 由 provider + `source_conversation_id` + 所有消息 hash 的拼接构成，
 /// 这样任何一条消息变化都会改变 conversation 的 hash。
-#[must_use] 
+#[must_use]
 pub fn content_hash_for_conversation(
     provider: Provider,
     source_conversation_id: &str,
@@ -65,7 +65,7 @@ pub fn content_hash_for_conversation(
 }
 
 /// 给现有 Message 计算 hash 的便捷方法。
-#[must_use] 
+#[must_use]
 pub fn hash_message(m: &Message, provider: Provider, conversation_source_id: &str) -> String {
     content_hash_for_message(
         provider,
@@ -77,7 +77,7 @@ pub fn hash_message(m: &Message, provider: Provider, conversation_source_id: &st
 }
 
 /// 给现有 Conversation 计算 hash 的便捷方法。
-#[must_use] 
+#[must_use]
 pub fn hash_conversation(c: &Conversation, message_hashes: &[&str]) -> String {
     content_hash_for_conversation(c.provider, &c.source_conversation_id, message_hashes)
 }

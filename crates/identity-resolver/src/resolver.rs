@@ -94,24 +94,24 @@ pub enum Resolution {
 }
 
 impl Resolution {
-    #[must_use] 
+    #[must_use]
     pub fn is_auto_merge(&self) -> bool {
         matches!(self, Resolution::AutoMerge(_))
     }
-    #[must_use] 
+    #[must_use]
     pub fn needs_confirmation(&self) -> bool {
         matches!(self, Resolution::NeedsConfirmation { .. })
     }
-    #[must_use] 
+    #[must_use]
     pub fn is_create_new(&self) -> bool {
         matches!(self, Resolution::CreateNew)
     }
     /// 归并到的 `workspace_id（AutoMerge` 或 `NeedsConfirmation` 的候选）；否则 None。
-    #[must_use] 
+    #[must_use]
     pub fn matched_workspace_id(&self) -> Option<&str> {
         match self {
-            Resolution::AutoMerge(m) => Some(&m.workspace_id),
-            Resolution::NeedsConfirmation {
+            Resolution::AutoMerge(m)
+            | Resolution::NeedsConfirmation {
                 candidate: Some(m), ..
             } => Some(&m.workspace_id),
             _ => None,
@@ -126,7 +126,7 @@ impl Resolution {
 ///
 /// 注意：Manual 由调用方在更上层处理（用户已显式指定 `workspace_id`），
 /// 本函数不处理 Manual，从 `ManifestId` 开始。
-#[must_use] 
+#[must_use]
 pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> Resolution {
     // 各级独立计算命中，最后按优先级选最高
     let mut best: Option<Match> = None;
@@ -275,7 +275,7 @@ fn method_priority(m: MatchMethod) -> u8 {
 }
 
 /// 便利：从候选生成新建统一 workspace 时用的显示名。
-#[must_use] 
+#[must_use]
 pub fn display_name_for_new(candidate: &SourceWorkspaceCandidate) -> String {
     // 优先用目录名，其次原名
     if let Some(p) = &candidate.canonical_path {
@@ -290,7 +290,7 @@ pub fn display_name_for_new(candidate: &SourceWorkspaceCandidate) -> String {
 }
 
 /// 计算用于入库记录的 PathBuf（规范化后）。供 `source_workspaces` 表的 `raw_path` 用。
-#[must_use] 
+#[must_use]
 pub fn canonical_path_buf(raw: &str) -> PathBuf {
     PathBuf::from(canonicalize_path(raw))
 }
@@ -314,13 +314,12 @@ mod tests {
         k.manifest_id = Some("manifest-xyz".into());
         let r = resolve(&c, &[k]);
         assert!(r.is_auto_merge());
-        let m = match r {
-            Resolution::AutoMerge(m) => m,
-            _ => unreachable!(),
+        let Resolution::AutoMerge(m) = r else {
+            unreachable!()
         };
         assert_eq!(m.workspace_id, "ws_1");
         assert_eq!(m.method, MatchMethod::ManifestId);
-        assert_eq!(m.confidence, 1.0);
+        assert!((m.confidence - 1.0).abs() < 1e-9);
     }
 
     // ── Level 3: GitRemote ───────────────────────────────────────────────

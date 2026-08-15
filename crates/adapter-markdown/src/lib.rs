@@ -89,7 +89,7 @@ pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversatio
         }
         if let Some(h2) = line.strip_prefix("## ") {
             // 二级标题：归档上一段，再开新段
-            flush(&current, &buf, &mut messages, &mut events);
+            flush(current.as_ref(), &buf, &mut messages, &mut events);
             buf.clear();
             current = Some(classify_heading(h2.trim()));
             continue;
@@ -103,7 +103,7 @@ pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversatio
         }
     }
     // 文件末尾归档最后一段
-    flush(&current, &buf, &mut messages, &mut events);
+    flush(current.as_ref(), &buf, &mut messages, &mut events);
 
     if messages.is_empty() && events.is_empty() {
         return Err(MarkdownAdapterError::NoSections);
@@ -123,7 +123,7 @@ pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversatio
 
 /// 把当前累积段落写入对应容器。
 fn flush(
-    kind: &Option<SectionKind>,
+    kind: Option<&SectionKind>,
     body: &str,
     messages: &mut Vec<RawMessage>,
     events: &mut Vec<RawEvent>,
@@ -264,7 +264,8 @@ mod tests {
     fn file_roundtrip() {
         use tempfile::NamedTempFile;
         let f = NamedTempFile::new().expect("tempdir creation failed");
-        std::fs::write(f.path(), "## User\nhi from file\n## Assistant\nyo\n").expect("file I/O failed");
+        std::fs::write(f.path(), "## User\nhi from file\n## Assistant\nyo\n")
+            .expect("file I/O failed");
         let raw = parse_file(f.path()).expect("parse failed");
         assert_eq!(raw.messages.len(), 2);
         assert!(raw.messages[0]

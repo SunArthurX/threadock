@@ -553,6 +553,7 @@ dependencies = [
 name = "ch-adapter-cursor"
 version = "0.2.0"
 dependencies = [
+ "ch-adapter-sdk",
  "ch-domain",
  "ch-normalization",
  "rusqlite",
@@ -594,6 +595,7 @@ dependencies = [
 name = "ch-adapter-minimax"
 version = "0.2.0"
 dependencies = [
+ "ch-adapter-sdk",
  "ch-domain",
  "ch-normalization",
  "rusqlite",
@@ -611,6 +613,7 @@ dependencies = [
  "base64 0.22.1",
  "ch-domain",
  "ch-normalization",
+ "rusqlite",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -621,6 +624,7 @@ dependencies = [
 name = "ch-adapter-zcode"
 version = "0.2.0"
 dependencies = [
+ "ch-adapter-sdk",
  "ch-domain",
  "ch-normalization",
  "rusqlite",
@@ -4567,7 +4571,9 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "tempfile",
  "time",
+ "tokio",
  "tracing",
  "tracing-subscriber",
 ]

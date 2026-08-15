@@ -5,9 +5,13 @@ use ch_domain::{Provider, Role};
 use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
+use tantivy::query::{BooleanQuery, Occur, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value};
 use tantivy::tokenizer::{LowerCaser, NgramTokenizer, SimpleTokenizer, TextAnalyzer};
 use tantivy::{doc, Index as TantivyIndex, IndexReader, IndexWriter, ReloadPolicy};
+
+/// IndexWriter 默认堆大小（15 MiB）：单 writer 场景的内存/性能平衡点。
+pub const DEFAULT_WRITER_HEAP: usize = 15_000_000;
 
 /// 单条命中。
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -41,16 +45,17 @@ impl SearchQuery {
             limit: 50,
         }
     }
-    #[must_use] 
+    #[must_use]
     pub fn with_provider(mut self, p: Provider) -> Self {
         self.provider = Some(p);
         self
     }
+    #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
         self
     }
-    #[must_use] 
+    #[must_use]
     pub fn with_limit(mut self, n: usize) -> Self {
         self.limit = n;
         self
@@ -247,7 +252,6 @@ impl SearchIndex {
         };
 
         // 用 BooleanQuery 叠加过滤条件
-        use tantivy::query::{BooleanQuery, Occur, TermQuery};
         let mut clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> =
             vec![(Occur::Must, Box::new(text_query))];
 
@@ -314,7 +318,7 @@ impl SearchIndex {
 
     /// 清空所有索引文档（用于「重置数据」）。
     pub fn clear_all(&self) -> LibResult<()> {
-        let writer = self.writer(15_000_000)?;
+        let writer = self.writer(DEFAULT_WRITER_HEAP)?;
         writer
             .delete_all_documents()
             .map_err(|e| SearchError::Tantivy(e.to_string()))?;
@@ -336,7 +340,6 @@ impl SearchIndex {
 
 fn parse_role(s: &str) -> Role {
     match s {
-        "user" => Role::User,
         "assistant" => Role::Assistant,
         "system" => Role::System,
         "tool" => Role::Tool,
@@ -358,6 +361,7 @@ fn escape_query(input: &str) -> String {
 /// 生成命中片段：截取 body 中包含查询词的部分，用 » « 标记。
 ///
 /// 按字符（非字节）切分，避免中文边界 panic。
+/// 输出经 HTML 转义（前端用 innerHTML 渲染 snippet，防存储型 XSS）。
 fn make_snippet(body: &str, query: &str) -> String {
     if body.is_empty() {
         return String::new();
@@ -380,24 +384,25 @@ fn make_snippet(body: &str, query: &str) -> String {
     } else {
         let end_char = chars.len().min(window_chars);
         let s: String = chars[..end_char].iter().collect();
-        format!("{s}…")
+        format!("{}…", ch_domain::html::escape_html(&s))
     }
 }
 
-/// 大小写不敏感地高亮 segment 中的 query。
+/// 大小写不敏感地高亮 segment 中的 query（输出 HTML 转义）。
 fn highlight_ci(segment: &str, query: &str) -> String {
+    use ch_domain::html::escape_html;
     let lower_seg = segment.to_lowercase();
     let lower_q = query.to_lowercase();
     if let Some(pos) = lower_seg.find(&lower_q) {
         let mut result = String::new();
-        result.push_str(&segment[..pos]);
+        result.push_str(&escape_html(&segment[..pos]));
         result.push('»');
-        result.push_str(&segment[pos..pos + query.len()]);
+        result.push_str(&escape_html(&segment[pos..pos + query.len()]));
         result.push('«');
-        result.push_str(&segment[pos + query.len()..]);
+        result.push_str(&escape_html(&segment[pos + query.len()..]));
         result
     } else {
-        segment.to_string()
+        escape_html(segment)
     }
 }
 
@@ -437,7 +442,9 @@ mod tests {
             ],
         );
 
-        let hits = idx.search(&SearchQuery::new("tauri")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new("tauri"))
+            .expect("SQL execution failed");
         assert!(!hits.is_empty());
         assert_eq!(hits[0].conversation_id, "c1");
         assert!(hits[0].snippet.contains("»"));
@@ -456,7 +463,9 @@ mod tests {
             )],
         );
         // 中文双字查询
-        let hits = idx.search(&SearchQuery::new("后台任务")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new("后台任务"))
+            .expect("SQL execution failed");
         assert!(!hits.is_empty());
     }
 
@@ -464,7 +473,9 @@ mod tests {
     fn search_no_match_returns_empty() {
         let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("m1", "c1", "x", "hello world")]);
-        let hits = idx.search(&SearchQuery::new("zzznotexist")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new("zzznotexist"))
+            .expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
@@ -515,8 +526,10 @@ mod tests {
         m1.workspace_id = Some("ws1".into());
         let mut m2 = msg("m2", "c2", "t", "findme text");
         m2.workspace_id = Some("ws2".into());
-        idx.index_message(&mut writer, &m1).expect("file I/O failed");
-        idx.index_message(&mut writer, &m2).expect("file I/O failed");
+        idx.index_message(&mut writer, &m1)
+            .expect("file I/O failed");
+        idx.index_message(&mut writer, &m2)
+            .expect("file I/O failed");
         idx.commit(writer).expect("file I/O failed");
 
         let in_ws1 = idx
@@ -533,7 +546,9 @@ mod tests {
         index_samples(&idx, std::slice::from_ref(&m));
         // 再次索引同 message_id（应替换而非重复）
         index_samples(&idx, std::slice::from_ref(&m));
-        let hits = idx.search(&SearchQuery::new("unique")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new("unique"))
+            .expect("SQL execution failed");
         assert_eq!(hits.len(), 1, "reindex should replace not duplicate");
     }
 
@@ -543,10 +558,13 @@ mod tests {
         index_samples(&idx, &[msg("m1", "c1", "t", "deletable content")]);
 
         let mut writer = idx.writer(15_000_000).expect("file I/O failed");
-        idx.delete_message(&mut writer, "m1").expect("file I/O failed");
+        idx.delete_message(&mut writer, "m1")
+            .expect("file I/O failed");
         idx.commit(writer).expect("file I/O failed");
 
-        let hits = idx.search(&SearchQuery::new("deletable")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new("deletable"))
+            .expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
@@ -563,9 +581,13 @@ mod tests {
         .expect("unexpected None");
         idx.commit(writer).expect("file I/O failed");
 
-        let old_hits = idx.search(&SearchQuery::new("old")).expect("SQL execution failed");
+        let old_hits = idx
+            .search(&SearchQuery::new("old"))
+            .expect("SQL execution failed");
         assert!(old_hits.is_empty(), "old docs should be cleared");
-        let new_hits = idx.search(&SearchQuery::new("new")).expect("SQL execution failed");
+        let new_hits = idx
+            .search(&SearchQuery::new("new"))
+            .expect("SQL execution failed");
         assert_eq!(new_hits.len(), 1);
     }
 
@@ -576,10 +598,27 @@ mod tests {
     }
 
     #[test]
+    fn snippet_escapes_html() {
+        // 防存储型 XSS：正文里的 HTML 不能原样进入 snippet
+        let s = make_snippet("keyword <img src=x onerror=alert(1)> tail", "keyword");
+        assert!(!s.contains("<img"), "raw HTML must not survive: {s}");
+        assert!(s.contains("&lt;img"), "HTML must be escaped: {s}");
+    }
+
+    #[test]
+    fn snippet_escapes_html_on_truncation_path() {
+        // 截断路径（查询词不命中）也要转义
+        let s = make_snippet("<script>alert(1)</script> no match", "zzz");
+        assert!(!s.contains("<script"), "raw HTML must not survive: {s}");
+    }
+
+    #[test]
     fn empty_query_returns_empty() {
         let idx = SearchIndex::open_in_memory().expect("unexpected None");
         index_samples(&idx, &[msg("m1", "c1", "t", "anything")]);
-        let hits = idx.search(&SearchQuery::new("")).expect("SQL execution failed");
+        let hits = idx
+            .search(&SearchQuery::new(""))
+            .expect("SQL execution failed");
         assert!(hits.is_empty());
     }
 
@@ -596,7 +635,9 @@ mod tests {
         // 第二次：重新打开应能查到
         {
             let idx = SearchIndex::open(&path).expect("unexpected None");
-            let hits = idx.search(&SearchQuery::new("persistent")).expect("SQL execution failed");
+            let hits = idx
+                .search(&SearchQuery::new("persistent"))
+                .expect("SQL execution failed");
             assert_eq!(hits.len(), 1);
         }
     }

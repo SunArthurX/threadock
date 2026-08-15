@@ -276,21 +276,28 @@ mod tests {
 
     fn fresh_conn() -> Connection {
         let conn = Connection::open_in_memory().expect("database connection failed");
-        conn.pragma_update(None, "foreign_keys", "ON").expect("database connection failed");
+        conn.pragma_update(None, "foreign_keys", "ON")
+            .expect("database connection failed");
         conn
     }
 
     #[test]
     fn empty_db_has_version_zero() {
         let conn = fresh_conn();
-        assert_eq!(current_version(&conn).expect("database connection failed"), 0);
+        assert_eq!(
+            current_version(&conn).expect("database connection failed"),
+            0
+        );
     }
 
     #[test]
     fn migrate_creates_tables_and_sets_version() {
         let mut conn = fresh_conn();
         migrate_to_latest(&mut conn).expect("database connection failed");
-        assert_eq!(current_version(&conn).expect("database connection failed"), LATEST_VERSION);
+        assert_eq!(
+            current_version(&conn).expect("database connection failed"),
+            LATEST_VERSION
+        );
 
         // 抽查几张关键表存在
         for table in [
@@ -347,14 +354,17 @@ mod tests {
         migrate_to_latest(&mut conn).expect("database connection failed");
         // 再跑一次不应报错
         migrate_to_latest(&mut conn).expect("database connection failed");
-        assert_eq!(current_version(&conn).expect("database connection failed"), LATEST_VERSION);
+        assert_eq!(
+            current_version(&conn).expect("database connection failed"),
+            LATEST_VERSION
+        );
     }
 
     #[test]
     fn downgrade_is_rejected() {
         let mut conn = fresh_conn();
         migrate_to_latest(&mut conn).expect("database connection failed");
-        let err = migrate_to(&mut conn, 0).unwrap_err();
+        let err = migrate_to(&mut conn, 0).expect_err("version 0 must fail");
         assert!(matches!(err, StorageError::Migration { .. }));
     }
 

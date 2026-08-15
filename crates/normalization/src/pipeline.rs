@@ -74,6 +74,7 @@ pub struct Normalized {
 /// 3. 为 conversation 计算 hash（汇总所有消息 hash）。
 /// 4. 评估完整度（plan §17.3）。
 /// 5. 分配事件序号并归类。
+#[allow(clippy::needless_pass_by_value)] // 管线语义：raw 为一次性输入，按值交接所有权
 pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     if raw.messages.is_empty() {
         return Err(NormalizationError::NoMessages);
@@ -83,10 +84,12 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
 
     // 1. 构造 conversation 骨架
     let mut conversation = Conversation::new(raw.provider, raw.source_conversation_id.clone());
-    conversation.title = raw.title.clone();
-    conversation.model = raw.model.clone();
+    conversation.title.clone_from(&raw.title);
+    conversation.model.clone_from(&raw.model);
     conversation.started_at = raw.started_at;
-    conversation.source_parent_id = raw.source_parent_id.clone();
+    conversation
+        .source_parent_id
+        .clone_from(&raw.source_parent_id);
     // updated_at 取最后一条消息的时间（更准确反映对话更新时刻）
     let last_msg_time = raw.messages.iter().rev().find_map(|m| m.created_at);
     conversation.updated_at = Some(last_msg_time.or(raw.started_at).unwrap_or(now));
@@ -96,9 +99,9 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     let mut message_hashes: Vec<String> = Vec::with_capacity(raw.messages.len());
     for (idx, rm) in raw.messages.iter().enumerate() {
         let mut m = Message::new(&conversation.id, rm.role, (idx as i64) + 1);
-        m.content_text = rm.text.clone();
-        m.content_json = rm.content_json.clone();
-        m.source_message_id = rm.source_message_id.clone();
+        m.content_text.clone_from(&rm.text);
+        m.content_json.clone_from(&rm.content_json);
+        m.source_message_id.clone_from(&rm.source_message_id);
         m.created_at = rm.created_at.or(Some(now));
         let h = hash::content_hash_for_message(
             raw.provider,
@@ -113,7 +116,10 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     }
 
     // 3. conversation hash
-    let hash_refs: Vec<&str> = message_hashes.iter().map(std::string::String::as_str).collect();
+    let hash_refs: Vec<&str> = message_hashes
+        .iter()
+        .map(std::string::String::as_str)
+        .collect();
     let conversation_hash =
         hash::content_hash_for_conversation(raw.provider, &raw.source_conversation_id, &hash_refs);
     conversation.content_hash = Some(conversation_hash.clone());
@@ -122,9 +128,9 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     let mut events = Vec::with_capacity(raw.events.len());
     for (idx, re) in raw.events.iter().enumerate() {
         let mut e = Event::new(&conversation.id, re.event_type, (idx as i64) + 1);
-        e.summary = re.summary.clone();
-        e.payload_json = re.payload_json.clone();
-        e.source_event_id = re.source_event_id.clone();
+        e.summary.clone_from(&re.summary);
+        e.payload_json.clone_from(&re.payload_json);
+        e.source_event_id.clone_from(&re.source_event_id);
         e.created_at = re.created_at.or(Some(now));
         events.push(e);
     }

@@ -16,30 +16,31 @@ pub struct ConversationFilter {
 }
 
 impl ConversationFilter {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
-    #[must_use] 
+    #[must_use]
     pub fn with_provider(mut self, p: Provider) -> Self {
         self.provider = Some(p);
         self
     }
+    #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
         self
     }
-    #[must_use] 
+    #[must_use]
     pub fn favorites_only(mut self) -> Self {
         self.favorite = Some(true);
         self
     }
-    #[must_use] 
+    #[must_use]
     pub fn unarchived_only(mut self) -> Self {
         self.archived = Some(false);
         self
     }
-    #[must_use] 
+    #[must_use]
     pub fn archived_only(mut self) -> Self {
         self.archived = Some(true);
         self

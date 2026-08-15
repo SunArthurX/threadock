@@ -10,14 +10,15 @@ use regex::Regex;
 /// 规则提取器（无状态，线程安全）。
 pub struct RuleExtractor;
 
+#[allow(clippy::unused_self)] // 提取器方法形态保持 API 一致（未来可携带配置）
 impl RuleExtractor {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
     /// 执行提取。
-    #[must_use] 
+    #[must_use]
     pub fn extract(&self, input: &ExtractionInput) -> ExtractionResult {
         let summary = self.summarize(input);
         let todos = self.extract_todos(input);
@@ -93,7 +94,7 @@ impl RuleExtractor {
     // ── TODO：匹配关键词的句子 ─────────────────────────────────────────────
 
     /// TODO 关键词（plan §13.5：TODO 提取）。
-    #[must_use] 
+    #[must_use]
     pub fn todo_keywords() -> &'static [&'static str] {
         &[
             "TODO",

@@ -67,7 +67,10 @@ impl DaemonState {
     /// 清空所有数据。保留 schema 和用户自定义脱敏规则。
     pub fn wipe_all(&self) -> Result<(), DaemonStateError> {
         self.repo.lock().expect("mutex poisoned").clear_all()?;
-        self.search_index.lock().expect("mutex poisoned").clear_all()?;
+        self.search_index
+            .lock()
+            .expect("mutex poisoned")
+            .clear_all()?;
         self.raw_store.lock().expect("mutex poisoned").clear()?;
         Ok(())
     }

@@ -58,15 +58,13 @@ pub fn import_markdown(
     // 3. Normalize
     let normalized = normalize(parsed)?;
 
-    // 确保 provider 记录存在（conversations.provider_id 有外键约束）
-    repo.upsert_provider(normalized.conversation.provider)?;
-
     // 可选 workspace：用身份解析器（plan §4.3）决定归并到已有还是新建。
     // 候选用：显示名 + 源文件父目录作为 canonical_path。
+    // （provider 记录由 import_conversation_batch 在事务内保证存在）
     let workspace_id = if let Some(name) = workspace_name {
         let parent_path = path_ref.parent().map(|p| p.to_string_lossy().into_owned());
         let mut candidate = ch_identity_resolver::SourceWorkspaceCandidate::new(name);
-        candidate.canonical_path = parent_path.clone();
+        candidate.canonical_path.clone_from(&parent_path);
 
         // 把 repo 中已有 workspace 作为 IdentityKey 列表
         let known: Vec<ch_identity_resolver::IdentityKey> = repo
@@ -117,24 +115,18 @@ pub fn import_markdown(
         None
     };
 
-    // 4. 关联 workspace + raw_payload_id 到 conversation
+    // 4. 关联 workspace + raw_payload_id 到 conversation，单事务批量入库
+    //   （旧实现逐条 upsert 每次独立提交，WAL 下每条消息一次 fsync）
     let mut conv = normalized.conversation;
-    conv.workspace_id = workspace_id.clone();
-    conv.raw_payload_id = raw_payload_id.clone();
-    let conversation_id = repo.upsert_conversation(&conv)?;
-
-    // 消息
-    for m in &normalized.messages {
-        let mut m = m.clone();
-        m.conversation_id = conversation_id.clone();
-        repo.upsert_message(&m)?;
-    }
-    // 事件
-    for e in &normalized.events {
-        let mut e = e.clone();
-        e.conversation_id = conversation_id.clone();
-        repo.upsert_event(&e)?;
-    }
+    conv.workspace_id.clone_from(&workspace_id);
+    conv.raw_payload_id.clone_from(&raw_payload_id);
+    let conversation_id = repo.import_conversation_batch(
+        &conv,
+        &normalized.messages,
+        &normalized.events,
+        None,
+        None,
+    )?;
 
     // 提交同步游标（plan §11.2：写库后提交游标）
     repo.upsert_cursor(
@@ -206,7 +198,8 @@ mod tests {
         let f = write_md(
             "# 测试会话\n\n## User\n你好\n## Assistant\n你好啊\n## Command\ncargo build\n",
         );
-        let summary = import_markdown(&repo, None, f.path(), Some("my-web-app")).expect("unexpected None");
+        let summary =
+            import_markdown(&repo, None, f.path(), Some("my-web-app")).expect("unexpected None");
         assert!(summary.conversation_id.starts_with("conv_"));
         assert_eq!(summary.messages_imported, 2);
         assert_eq!(summary.events_imported, 1);
@@ -220,10 +213,17 @@ mod tests {
             .expect("unexpected None");
         assert_eq!(conv.title.as_deref(), Some("测试会话"));
         assert_eq!(
-            repo.list_messages(&summary.conversation_id).expect("unexpected None").len(),
+            repo.list_messages(&summary.conversation_id)
+                .expect("unexpected None")
+                .len(),
             2
         );
-        assert_eq!(repo.list_events(&summary.conversation_id).expect("unexpected None").len(), 1);
+        assert_eq!(
+            repo.list_events(&summary.conversation_id)
+                .expect("unexpected None")
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -240,7 +240,12 @@ mod tests {
             "same conversation id"
         );
         assert_eq!(repo.count_conversations().expect("unexpected None"), 1);
-        assert_eq!(repo.list_messages(&s1.conversation_id).expect("unexpected None").len(), 2);
+        assert_eq!(
+            repo.list_messages(&s1.conversation_id)
+                .expect("unexpected None")
+                .len(),
+            2
+        );
     }
 
     #[test]
@@ -313,7 +318,8 @@ mod tests {
         let (_raw_dir, raw_store) = raw_store();
         let f = write_md("## User\n原始内容\n## Assistant\n回复\n");
 
-        let summary = import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
+        let summary =
+            import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
 
         // raw_payload_id 非空且是 64 hex
         let hash = summary.raw_payload_id.expect("raw should be archived");
@@ -347,7 +353,9 @@ mod tests {
             .expect("unexpected None");
         assert!(conv.raw_payload_id.is_none());
         assert_eq!(
-            repo.list_messages(&summary.conversation_id).expect("unexpected None").len(),
+            repo.list_messages(&summary.conversation_id)
+                .expect("unexpected None")
+                .len(),
             2
         );
     }
@@ -363,7 +371,11 @@ mod tests {
         let s2 = import_markdown(&repo, Some(&raw_store), f.path(), None).expect("unexpected None");
 
         assert_eq!(s1.raw_payload_id, s2.raw_payload_id, "same raw hash");
-        assert_eq!(raw_store.stats().expect("unexpected None").count, 1, "only one raw object");
+        assert_eq!(
+            raw_store.stats().expect("unexpected None").count,
+            1,
+            "only one raw object"
+        );
     }
 
     fn write_jsonl(content: &str) -> NamedTempFile {
@@ -382,7 +394,8 @@ mod tests {
 {"type":"event","event_type":"command_started","summary":"cargo build"}
 "#,
         );
-        let summary = import_markdown(&repo, None, f.path(), Some("jsonl-proj")).expect("unexpected None");
+        let summary =
+            import_markdown(&repo, None, f.path(), Some("jsonl-proj")).expect("unexpected None");
         assert_eq!(summary.messages_imported, 2);
         assert_eq!(summary.events_imported, 1);
 

@@ -36,7 +36,7 @@ pub enum Severity {
 }
 
 impl Severity {
-    #[must_use] 
+    #[must_use]
     pub fn parse(s: &str) -> Severity {
         match s {
             "high" => Severity::High,
@@ -80,7 +80,7 @@ pub struct AuditReport {
 }
 
 /// 内置危险命令规则（name, 正则, 严重级）。
-#[must_use] 
+#[must_use]
 pub fn builtin_dangerous_rules() -> Vec<(&'static str, &'static str, Severity)> {
     vec![
         (
@@ -157,7 +157,7 @@ impl AuditScanner {
     }
 
     /// 扫描一批消息 → 敏感信息发现（片段脱敏）。
-    #[must_use] 
+    #[must_use]
     pub fn scan_message(&self, row: &AuditMessageRow) -> Vec<AuditFinding> {
         let mut out = Vec::new();
         let text = &row.content_text;
@@ -197,11 +197,10 @@ impl AuditScanner {
     }
 
     /// 扫描一条工具调用 → 危险命令发现。
-    #[must_use] 
+    #[must_use]
     pub fn scan_tool_call(&self, tc: &ToolCallRecord) -> Vec<AuditFinding> {
-        let cmd = match &tc.command_text {
-            Some(c) => c,
-            None => return Vec::new(),
+        let Some(cmd) = &tc.command_text else {
+            return Vec::new();
         };
         let mut out = Vec::new();
         for (name, re, sev) in &self.dangerous_rules {
@@ -232,11 +231,11 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
     let mut findings = Vec::new();
     let mut scanned_messages = 0usize;
 
-    // 消息分批
+    // 消息分批（keyset 分页：每批 WHERE m.id > last，避免 OFFSET 的 O(n²) 跳行）
     let batch = 500i64;
-    let mut offset = 0i64;
+    let mut last_id = String::new();
     loop {
-        let rows = repo.list_messages_for_audit(offset, batch)?;
+        let rows = repo.list_messages_for_audit(&last_id, batch)?;
         let n = rows.len();
         if n == 0 {
             break;
@@ -245,7 +244,10 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
             findings.extend(scanner.scan_message(row));
         }
         scanned_messages += n;
-        offset += batch;
+        last_id = rows
+            .last()
+            .map(|r| r.message_id.clone())
+            .unwrap_or_default();
         if (n as i64) < batch {
             break;
         }
@@ -287,6 +289,8 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
 }
 
 /// 毫秒 → 手写 RFC3339（避免 time 格式 trait 的可见性问题）。
+/// 日期换算沿用 Howard Hinnant 的 civil_from_days 算法，单字符变量与原式一致。
+#[allow(clippy::many_single_char_names)]
 fn format_rfc3339(ms: i64) -> String {
     let secs = ms.div_euclid(1000);
     let millis = ms.rem_euclid(1000);
@@ -302,7 +306,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let z = z + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let y = yoe + era * 400;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
@@ -312,7 +316,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// 渲染 HTML 报告（自包含、可直接打开）。
-#[must_use] 
+#[must_use]
 pub fn render_html(report: &AuditReport) -> String {
     let mut html = String::new();
     writeln!(
@@ -367,7 +371,7 @@ pub fn render_html(report: &AuditReport) -> String {
         writeln!(
             html,
             "<tr><td><span class='sev sev-{:?}'>{:?}</span></td><td>{}</td><td><code>{}</code></td><td>{} · {}</td><td><code>{}</code></td></tr>",
-            f.severity, f.severity, f.kind, f.rule, f.provider,
+            f.severity, f.severity, f.kind, html_escape(&f.rule), f.provider,
             title_disp,
             html_escape(&f.snippet)
         )
@@ -378,9 +382,7 @@ pub fn render_html(report: &AuditReport) -> String {
 }
 
 fn html_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
+    ch_domain::html::escape_html(s)
 }
 
 #[cfg(test)]
@@ -408,7 +410,10 @@ mod tests {
             "应命中 github_token: {f:?}"
         );
         // 片段必须脱敏
-        let gh = f.iter().find(|x| x.rule == "github_token").expect("unexpected None");
+        let gh = f
+            .iter()
+            .find(|x| x.rule == "github_token")
+            .expect("unexpected None");
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
         assert!(!gh
             .snippet
@@ -430,7 +435,10 @@ mod tests {
         };
         let findings = sc.scan_message(&row); // 修复前此处 panic
         assert!(findings.iter().any(|f| f.rule == "github_token"));
-        let gh = findings.iter().find(|f| f.rule == "github_token").expect("unexpected None");
+        let gh = findings
+            .iter()
+            .find(|f| f.rule == "github_token")
+            .expect("unexpected None");
         assert!(gh.snippet.contains("[REDACTED:github_token]"));
         // 片段不应包含损坏的 UTF-8（已是 String，天然安全）
         assert!(gh.snippet.chars().count() > 0);

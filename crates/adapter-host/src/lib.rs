@@ -302,13 +302,7 @@ mod tests {
         let mut proc = AdapterProcess::spawn("false").expect("unexpected None");
         // false 立即退出，handshake 应报 ProcessExited 或 Io
         let result = proc.handshake();
-        let is_expected = matches!(
-            result,
-            Err(HostError::ProcessExited(_) | HostError::Io(_))
-        );
-        assert!(
-            is_expected,
-            "expected ProcessExited or Io, got {result:?}"
-        );
+        let is_expected = matches!(result, Err(HostError::ProcessExited(_) | HostError::Io(_)));
+        assert!(is_expected, "expected ProcessExited or Io, got {result:?}");
     }
 }

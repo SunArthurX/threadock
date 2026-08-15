@@ -131,7 +131,7 @@ fn open_ro(db_path: impl AsRef<Path>) -> OpsResult<rusqlite::Connection> {
 }
 
 /// Bash 类命令的破坏性推断规则（非 `ZCode` 来源用）。
-#[must_use] 
+#[must_use]
 pub fn infer_destructive(command: &str) -> bool {
     let c = command.trim();
     let rules = [

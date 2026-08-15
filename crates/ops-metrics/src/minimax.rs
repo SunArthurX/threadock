@@ -83,6 +83,8 @@ mod tests {
 
     #[test]
     fn missing_db_empty() {
-        assert!(collect_minimax("/nonexistent/mm.db").expect("unexpected None").is_empty());
+        assert!(collect_minimax("/nonexistent/mm.db")
+            .expect("unexpected None")
+            .is_empty());
     }
 }

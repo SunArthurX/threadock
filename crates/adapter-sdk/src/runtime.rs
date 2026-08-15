@@ -96,9 +96,8 @@ pub fn serve_stdio<A: ConversationAdapter, R: BufRead, W: Write>(
     let mut line = String::new();
     loop {
         line.clear();
-        let n = match stdin.read_line(&mut line) {
-            Ok(n) => n,
-            Err(_) => break,
+        let Ok(n) = stdin.read_line(&mut line) else {
+            break;
         };
         if n == 0 {
             break; // EOF
@@ -221,7 +220,8 @@ mod tests {
         let out = run(r#"{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}"#);
         let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
         assert_eq!(resp.id, serde_json::json!(1));
-        let hello: HelloResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
+        let hello: HelloResponse =
+            serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert_eq!(hello.metadata.id, "fake");
         assert_eq!(hello.metadata.protocol_version, PROTOCOL_VERSION);
     }
@@ -234,7 +234,8 @@ mod tests {
         );
         let out = run(&req);
         let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
-        let presp: ParseResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
+        let presp: ParseResponse =
+            serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert_eq!(presp.conversation.source_conversation_id, "x.md");
         assert_eq!(presp.conversation.messages.len(), 1);
     }
@@ -243,7 +244,8 @@ mod tests {
     fn health_returns_healthy() {
         let out = run(r#"{"jsonrpc":"2.0","id":3,"method":"health","params":{}}"#);
         let resp: JsonRpcResponse = serde_json::from_str(out.trim()).expect("parse failed");
-        let h: HealthResponse = serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
+        let h: HealthResponse =
+            serde_json::from_value(resp.result.expect("unexpected None")).expect("unexpected None");
         assert!(h.healthy);
     }
 

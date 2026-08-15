@@ -10,13 +10,14 @@ fn main() {
 
     println!("── collect_claude_code（54 文件）──");
     let t = Instant::now();
-    let (u2, t2) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).expect("write to String");
+    let (u2, t2) =
+        ch_ops_metrics::collect_claude_code(format!("{home}/.claude")).expect("write to String");
     println!("  {:?}  usage={} tools={}", t.elapsed(), u2.len(), t2.len());
 
     println!("── collect_zcode ──");
     let t = Instant::now();
-    let (u3, t3) =
-        ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")).expect("write to String");
+    let (u3, t3) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite"))
+        .expect("write to String");
     println!("  {:?}  usage={} tools={}", t.elapsed(), u3.len(), t3.len());
 
     println!("── collect_minimax ──");

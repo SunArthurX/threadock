@@ -7,7 +7,7 @@ use ch_domain::Timestamp;
 use time::OffsetDateTime;
 
 /// 领域时间 → 存储毫秒。None 保持 None。
-#[must_use] 
+#[must_use]
 pub fn to_millis(ts: Option<Timestamp>) -> Option<i64> {
     ts.map(|t| {
         let dur = t - OffsetDateTime::UNIX_EPOCH;
@@ -17,7 +17,7 @@ pub fn to_millis(ts: Option<Timestamp>) -> Option<i64> {
 }
 
 /// 存储毫秒 → 领域时间。
-#[must_use] 
+#[must_use]
 pub fn from_millis(ms: Option<i64>) -> Option<Timestamp> {
     ms.and_then(|m| {
         let secs = m.div_euclid(1000);

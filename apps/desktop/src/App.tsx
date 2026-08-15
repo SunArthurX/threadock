@@ -76,7 +76,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => { autoSync(true); invoke("ops_sync", {force:false}).catch(() => {}); }, 10 * 60 * 1000);
+    const interval = setInterval(() => { autoSync(true); invoke("ops_sync", {force:false}).catch(() => { /* 后台任务失败不打断 UI */ }); }, 10 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -209,7 +209,7 @@ export default function App() {
         const prov = sourcePanel === "minimax" ? "minimax-code" : sourcePanel;
         const conv = await invoke<Conversation | null>("get_conversation_by_source", { provider: prov, sourceConversationId: sessionId });
         if (conv) { setView("chat"); await selectConversation(conv); }
-      } catch { }
+      } catch { /* 失败静默：后台/可选操作 */ }
     } catch (e) { setImporting(false); showError(e); }
   };
 
@@ -274,7 +274,7 @@ export default function App() {
           <h1>Threadock</h1>
           {view === "chat" && (<>
             {syncing ? (
-              <span className="sync-status syncing-chip">⟳ 数据更新中…<button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => {})}>取消</button></span>
+              <span className="sync-status syncing-chip">⟳ 数据更新中…<button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button></span>
             ) : syncResult && <span className="sync-status done">{syncResult}</span>}
             <div className="search-box">
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K)"
@@ -291,7 +291,7 @@ export default function App() {
             {resetting ? "重置中…" : resetArmed ? "确认重置？" : "↻ 重置"}
           </button>
           <button className="action-btn" title="增量导入（10 分钟自动执行）"
-            onClick={async () => { setSyncing(true); try { await invoke("auto_sync", {}); } catch {} setSyncing(false); await loadConversations(); }}>
+            onClick={async () => { setSyncing(true); try { await invoke("auto_sync", {}); } catch { /* 失败静默：后台/可选操作 */ } setSyncing(false); await loadConversations(); }}>
             {syncing ? "⟳" : "⇩ 增量"}
           </button>
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
@@ -328,7 +328,7 @@ export default function App() {
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={extractKnowledge}
-                    onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; })} />
+                    onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
                 : <div className="empty">选择一条会话查看详情</div>}
             </div>
           </div>

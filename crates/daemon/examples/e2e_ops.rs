@@ -30,7 +30,12 @@ fn main() {
         );
     }
     println!("── 模型明细样本:");
-    for m in repo.ops_by_model(Some(30)).expect("write to String").iter().take(6) {
+    for m in repo
+        .ops_by_model(Some(30))
+        .expect("write to String")
+        .iter()
+        .take(6)
+    {
         println!(
             "   {} [{}] in={} out={} err={}",
             m.model, m.provider_id, m.input_tokens, m.output_tokens, m.errors

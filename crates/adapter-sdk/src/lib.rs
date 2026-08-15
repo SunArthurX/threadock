@@ -23,3 +23,16 @@ pub use protocol::{
     ParseResponse, PROTOCOL_VERSION,
 };
 pub use runtime::{serve_stdio, ConversationAdapter};
+
+/// 以只读模式打开来源 SQLite（ZCode/Cursor/MiniMax 等 adapter 共用）。
+///
+/// READ_ONLY：绝不写来源工具的库；NO_MUTEX：连接单线程使用，免去不必要的锁开销。
+pub fn open_readonly(
+    db_path: impl AsRef<std::path::Path>,
+) -> Result<rusqlite::Connection, rusqlite::Error> {
+    use rusqlite::OpenFlags;
+    rusqlite::Connection::open_with_flags(
+        db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+}

@@ -3,7 +3,7 @@ name = "threadock"
 version = "0.2.0"
 description = "Threadock — AI Agent 治理平台"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.88"
 
 [lib]
 name = "threadock_lib"
@@ -26,6 +26,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 time = "0.3"
 regex = "1"
+tokio = { version = "1", features = ["rt"] }
 ch-storage = { path = "../../../crates/storage" }
 ch-domain = { path = "../../../crates/domain" }
 ch-search = { path = "../../../crates/search" }
@@ -50,3 +51,6 @@ custom-protocol = ["tauri/custom-protocol"]
 
 # 独立于主 Rust workspace（Tauri 依赖较重，单独管理）
 [workspace]
+
+[dev-dependencies]
+tempfile = "3"

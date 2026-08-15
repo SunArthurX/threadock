@@ -18,9 +18,10 @@
 use crate::redact::redact;
 use crate::serialize::ExportOptions;
 use ch_domain::{Conversation, Event, EventType, Message, Role};
+use std::fmt::Write;
 
 /// 把会话导出为 Markdown 字符串。
-#[must_use] 
+#[must_use]
 pub fn to_markdown(
     conversation: &Conversation,
     messages: &[Message],
@@ -36,20 +37,22 @@ pub fn to_markdown(
     } else {
         title.to_string()
     };
-    out.push_str(&format!("# {title}\n\n"));
+    let _ = writeln!(out, "# {title}");
+    out.push('\n');
 
     // 元信息
     out.push_str("<!-- meta\n");
-    out.push_str(&format!("provider: {}\n", conversation.provider));
-    out.push_str(&format!(
-        "source_conversation_id: {}\n",
+    let _ = writeln!(out, "provider: {}", conversation.provider);
+    let _ = writeln!(
+        out,
+        "source_conversation_id: {}",
         conversation.source_conversation_id
-    ));
+    );
     if let Some(m) = &conversation.model {
-        out.push_str(&format!("model: {m}\n"));
+        let _ = writeln!(out, "model: {m}");
     }
     if let Some(score) = conversation.completeness_score {
-        out.push_str(&format!("completeness: {score:.2}\n"));
+        let _ = writeln!(out, "completeness: {score:.2}");
     }
     out.push_str("-->\n\n");
 
@@ -63,7 +66,7 @@ pub fn to_markdown(
             Role::System => "System",
             Role::Tool => "Tool",
         };
-        out.push_str(&format!("## {role_label}\n"));
+        let _ = writeln!(out, "## {role_label}");
         let body = m.content_text.clone().unwrap_or_default();
         let body = if options.redact_secrets {
             redact(&body).0
@@ -95,7 +98,7 @@ pub fn to_markdown(
         if !include {
             continue;
         }
-        out.push_str(&format!("## {label}\n"));
+        let _ = writeln!(out, "## {label}");
         let summary = e.summary.clone().unwrap_or_default();
         let summary = if options.redact_secrets {
             redact(&summary).0
@@ -203,6 +206,10 @@ mod tests {
         let raw = parse_str(&md, "exported.md").expect("parse failed");
         assert_eq!(raw.title.as_deref(), Some("测试导出"));
         assert_eq!(raw.messages.len(), 2);
-        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("你好"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .expect("unexpected None")
+            .contains("你好"));
     }
 }

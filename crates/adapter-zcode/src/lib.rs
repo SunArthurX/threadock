@@ -14,7 +14,7 @@
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, Connection};
 use std::path::Path;
 use thiserror::Error;
 
@@ -58,11 +58,7 @@ pub struct DiscoveredSession {
 
 /// 只读打开 `ZCode` 数据库（plan §10.1：只读快照原则）。
 fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
-    let conn = Connection::open_with_flags(
-        db_path,
-        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?;
-    Ok(conn)
+    Ok(ch_adapter_sdk::open_readonly(db_path)?)
 }
 
 /// 列出 `ZCode` 所有**主任务**`会话（parent_id` 为空），按更新时间降序。
@@ -136,6 +132,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
 }
 
 /// 解析单条 `ZCode` 会话。
+#[allow(clippy::too_many_lines)] // 解析主函数：SQL 读取与领域装配一体
 pub fn parse_session(
     db_path: impl AsRef<Path>,
     session_id: &str,
@@ -413,10 +410,18 @@ mod tests {
         assert_eq!(raw.provider, Provider::ZCode);
         assert_eq!(raw.messages.len(), 2);
         assert_eq!(raw.messages[0].role, Role::User);
-        assert!(raw.messages[0].text.as_deref().expect("unexpected None").contains("你好"));
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .expect("unexpected None")
+            .contains("你好"));
         assert_eq!(raw.messages[1].role, Role::Assistant);
         assert!(!raw.events.is_empty());
-        assert!(raw.events[0].summary.as_deref().expect("unexpected None").contains("Bash"));
+        assert!(raw.events[0]
+            .summary
+            .as_deref()
+            .expect("unexpected None")
+            .contains("Bash"));
     }
 
     #[test]
