@@ -17,14 +17,21 @@ export function daysToRange(days: number, now: number = Date.now()): string {
   return `${fmt(start)} ~ ${fmt(end)}`;
 }
 
-/** 热力图单元格颜色（5 档）。 */
+/** 热力图单元格颜色（5 档 sky 渐变）。 */
 export function heatColor(calls: number, max: number): string {
-  if (calls === 0) return "var(--border, #2a2e3a)";
+  if (calls === 0) return "rgba(255, 255, 255, 0.04)";
   const r = max > 0 ? calls / max : 0;
-  if (r > 0.75) return "#1d4ed8";
-  if (r > 0.5) return "#3b82f6";
-  if (r > 0.25) return "#60a5fa";
-  return "#93c5fd";
+  if (r > 0.75) return "#0369a1"; // sky-700
+  if (r > 0.5) return "#0284c7"; // sky-600
+  if (r > 0.25) return "#0ea5e9"; // sky-500
+  if (r > 0.1) return "#38bdf8"; // sky-400
+  return "#7dd3fc"; // sky-300
+}
+
+/** 工作日判定（0=周日）。 */
+export function isWeekend(day: string): boolean {
+  const d = new Date(day + "T00:00:00").getDay();
+  return d === 0 || d === 6;
 }
 
 /** 生成 GitHub 风格热力图布局 + 每列首月份标签。 */
@@ -103,9 +110,62 @@ export function dayPart(hour: number): string {
   return "晚上";
 }
 
+/** 中文星期几。 */
+export function weekdayCN(day: string): string {
+  const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  return names[new Date(day + "T00:00:00").getDay()];
+}
+
+/** YYYY-MM-DD 字符串当天的「今日/最近 7/30」快速聚合。 */
+function dayWindowSum(
+  cells: { day: string; calls: number; sessions: number }[],
+  window: number,
+): { calls: number; sessions: number } {
+  if (cells.length === 0) return { calls: 0, sessions: 0 };
+  const now = Date.now();
+  const cutoff = now - window * 86_400_000;
+  let calls = 0;
+  let sessions = 0;
+  for (const c of cells) {
+    const t = new Date(c.day + "T00:00:00").getTime();
+    if (t >= cutoff) {
+      calls += c.calls;
+      sessions += c.sessions;
+    }
+  }
+  return { calls, sessions };
+}
+
+/** 计算连续活跃天数（从今天往前数 ≥1 次调用的连续天数）。 */
+export function calcStreak(cells: { day: string; calls: number }[]): number {
+  if (cells.length === 0) return 0;
+  const set = new Set(cells.filter((c) => c.calls > 0).map((c) => c.day));
+  let streak = 0;
+  const d = new Date();
+  let todayChecked = false;
+  while (true) {
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (set.has(key)) {
+      streak += 1;
+      d.setDate(d.getDate() - 1);
+      todayChecked = true;
+    } else {
+      // 如果今天没活动，容许从昨天开始算（避免刚启动时 streak=0）
+      if (streak === 0 && !todayChecked) {
+        d.setDate(d.getDate() - 1);
+        todayChecked = true;
+        continue;
+      }
+      break;
+    }
+  }
+  return streak;
+}
+
 export default function ActivityView() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [days, setDays] = useState(365);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -114,40 +174,58 @@ export default function ActivityView() {
     })();
   }, [days]);
 
-  const totalCalls = (stats?.heatmap ?? []).reduce((a, b) => a + b.calls, 0);
-  const activeDays = (stats?.heatmap ?? []).filter((c) => c.calls > 0).length;
+  const heatmapCells = stats?.heatmap ?? [];
+  const totalCalls = heatmapCells.reduce((a, b) => a + b.calls, 0);
+  const activeDays = heatmapCells.filter((c) => c.calls > 0).length;
   const avgPerDay = activeDays > 0 ? Math.round(totalCalls / activeDays) : 0;
   const peak = (stats?.hourly ?? []).reduce((a, b) => (b.calls > (a?.calls ?? -1) ? b : a), { hour: 0, calls: 0 });
-  const grid = buildHeatGrid(stats?.heatmap ?? []);
+  const grid = buildHeatGrid(heatmapCells);
   const labelAt = new Map(grid.labels.map((l) => [l.col, l.label]));
   const rangeText = useMemo(() => daysToRange(days), [days]);
 
-  // 工具趋势：全局 Top3 工具的月度线（BarChart 展示）
-  // 防御性：过滤掉 month 为空/非字符串的脏行——后端早期版本以 tuple 序列化
-  // 时，前端按对象读 month 全是 undefined，会把 byMonth 写成 [undefined]
-  // 然后 `month.slice(2)` 抛 "undefined is not an object"
-  const trend = (() => {
-    if (!stats) return [];
+  // 近期窗口（今日/7 天/30 天）
+  const todayStats = useMemo(() => dayWindowSum(heatmapCells, 1), [heatmapCells]);
+  const week7Stats = useMemo(() => dayWindowSum(heatmapCells, 7), [heatmapCells]);
+  const month30Stats = useMemo(() => dayWindowSum(heatmapCells, 30), [heatmapCells]);
+  const streak = useMemo(() => calcStreak(heatmapCells), [heatmapCells]);
+
+  // 工具 Top 10 列表（带月份切分）
+  // 防御性：过滤掉 month 为空/非字符串的脏行
+  const toolRanking = useMemo<{
+    curMonth: string;
+    prevMonth: string;
+    items: { tool: string; calls: number; cur: number; prev: number; delta: number; barWidth: number }[];
+  }>(() => {
+    if (!stats) return { curMonth: "", prevMonth: "", items: [] };
     const safe = stats.tools_trend.filter((t) => typeof t.month === "string" && /^\d{4}-\d{2}$/.test(t.month));
-    const toolTotals = new Map<string, number>();
+    const months = [...new Set(safe.map((t) => t.month))].sort();
+    const curMonth = months[months.length - 1] ?? "";
+    const prevMonth = months[months.length - 2] ?? "";
+    const cur = new Map<string, number>();
+    const prev = new Map<string, number>();
     for (const t of safe) {
-      toolTotals.set(t.tool, (toolTotals.get(t.tool) ?? 0) + t.calls);
+      if (t.month === curMonth) cur.set(t.tool, (cur.get(t.tool) ?? 0) + t.calls);
+      if (t.month === prevMonth) prev.set(t.tool, (prev.get(t.tool) ?? 0) + t.calls);
     }
-    const top3 = [...toolTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
-    const byMonth = new Map<string, { tool: string; calls: number }[]>();
-    for (const t of safe) {
-      if (!top3.includes(t.tool)) continue;
-      const arr = byMonth.get(t.month) ?? [];
-      arr.push({ tool: t.tool, calls: t.calls });
-      byMonth.set(t.month, arr);
-    }
-    const out: { label: string; value: number }[] = [];
-    for (const [month, tools] of [...byMonth.entries()].sort()) {
-      const yymm = month.slice(2); // 已是防御过滤过的安全字符串
-      for (const t of tools) out.push({ label: `${yymm} ${t.tool}`, value: t.calls });
-    }
-    return out;
-  })();
+    const all = new Map<string, number>();
+    for (const [tool, c] of cur) all.set(tool, c);
+    for (const [tool, p] of prev) all.set(tool, Math.max(all.get(tool) ?? 0, p));
+    const ranked = [...all.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    const max = ranked[0]?.[1] ?? 1;
+    return {
+      curMonth,
+      prevMonth,
+      items: ranked.map(([tool, calls]) => {
+        const c = cur.get(tool) ?? 0;
+        const p = prev.get(tool) ?? 0;
+        const delta = p === 0 ? (c > 0 ? 1 : 0) : (c - p) / p;
+        return { tool, calls, cur: c, prev: p, delta, barWidth: (calls / max) * 100 };
+      }),
+    };
+  }, [stats]);
+
+  // 24h 工作日 vs 周末 对比 — 后端暂未拆分，先只展示整体曲线 + 留扩展位
+  // （如需拆分需在 SQL 加 GROUP BY strftime('%w', ...)，后续可补）
 
   // 时段汇总
   const parts = (() => {
@@ -164,8 +242,26 @@ export default function ActivityView() {
   const hourlyChart = (stats?.hourly ?? []).map((h) => ({
     label: `${h.hour}`,
     value: h.calls,
-    highlight: h.hour === peak.hour && peak.calls > 0,
+    className: h.hour === peak.hour && peak.calls > 0 ? "bar-peak" : undefined,
   }));
+
+  // 选中日详情
+  const selectedCell = selectedDay ? heatmapCells.find((c) => c.day === selectedDay) ?? null : null;
+  const selectedMonthTools = useMemo(() => {
+    if (!selectedDay || !stats) return [];
+    const month = selectedDay.slice(0, 7);
+    const safe = stats.tools_trend.filter((t) => t.month === month);
+    const total = safe.reduce((s, t) => s + t.calls, 0);
+    return safe
+      .sort((a, b) => b.calls - a.calls)
+      .slice(0, 5)
+      .map((t) => ({ ...t, share: total > 0 ? (t.calls / total) * 100 : 0 }));
+  }, [selectedDay, stats]);
+
+  const todayKey = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
 
   return (
     <div className="activity-page">
@@ -186,11 +282,18 @@ export default function ActivityView() {
           <div className="kb-stat" title="至少有 1 次调用的天数"><b>{activeDays}</b><span>活跃天数</span></div>
           <div className="kb-stat" title="总调用 ÷ 活跃天数"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
           <div className="kb-stat" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
+          <div className="kb-stat" title="今日（最近 1 天）总调用"><b>{todayStats.calls.toLocaleString()}</b><span>今日调用 · {todayStats.sessions} 会话</span></div>
+          <div className="kb-stat" title="最近 7 天总调用"><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
+          <div className="kb-stat" title="最近 30 天总调用"><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
+          <div className="kb-stat" title="从今天或昨天起算的连续活跃天数"><b>{streak} 天</b><span>🔥 连续活跃</span></div>
         </div>
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">每日协作热力图</div>
+        <div className="ops-card-title">
+          每日协作热力图
+          <span className="ops-card-sub">点击格子查看当日详情</span>
+        </div>
         {grid.cols.length === 0 ? (
           <div className="ops-table-empty">
             {isEmpty
@@ -200,39 +303,95 @@ export default function ActivityView() {
         ) : (
           <div className="heatmap-wrap">
             <div className="heatmap-scroll">
-              <div className="heatmap-months">
-                {grid.cols.map((_, ci) => (
-                  <span key={ci} className="heat-month-label">{labelAt.get(ci) ?? ""}</span>
-                ))}
+              <div className="heat-months-wrap">
+                <div className="heat-dow-label" />
+                <div className="heatmap-months">
+                  {grid.cols.map((_, ci) => (
+                    <span key={ci} className="heat-month-label">{labelAt.get(ci) ?? ""}</span>
+                  ))}
+                </div>
               </div>
-              <div className="heatmap">
-                {grid.cols.map((col, ci) => (
-                  <div key={ci} className="heatmap-col">
-                    {col.map((cell, ri) => (
-                      <div
-                        key={ri}
-                        className={`heat-cell ${!cell || cell.calls === 0 ? "empty" : ""}`}
-                        style={{ background: cell ? heatColor(cell.calls, grid.max) : "transparent" }}
-                        title={cell ? `${cell.day} · ${cell.calls} 次调用 · ${cell.sessions} 会话` : "无数据"}
-                      />
-                    ))}
-                  </div>
-                ))}
+              <div className="heatmap-grid">
+                <div className="heat-dow-col">
+                  {["", "一", "", "三", "", "五", ""].map((d, ri) => (
+                    <span key={ri} className="heat-dow-label">{d}</span>
+                  ))}
+                </div>
+                <div className="heatmap">
+                  {grid.cols.map((col, ci) => (
+                    <div key={ci} className="heatmap-col">
+                      {col.map((cell, ri) => {
+                        if (!cell) return <span key={ri} className="heat-cell empty" />;
+                        const isSelected = selectedDay === cell.day;
+                        const isToday = cell.day === todayKey;
+                        return (
+                          <div
+                            key={ri}
+                            className={`heat-cell ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${cell.calls === 0 ? "empty" : ""}`}
+                            style={{ background: cell.calls > 0 ? heatColor(cell.calls, grid.max) : undefined }}
+                            title={`${cell.day} ${weekdayCN(cell.day)} · ${cell.calls} 次调用 · ${cell.sessions} 会话${isToday ? "（今天）" : ""}`}
+                            onClick={() => setSelectedDay(isSelected ? null : cell.day)}
+                          />
+                        );
+                      })}
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
             <div className="heat-legend">
               少
-              {[0, 0.25, 0.5, 0.75, 1].map((r) => (
-                <span key={r} className="heat-cell" style={{ background: heatColor(r * grid.max, grid.max) }} />
+              {[0, 0.15, 0.35, 0.6, 0.85, 1].map((r) => (
+                <span key={r} className="heat-legend-cell" style={{ background: heatColor(r * grid.max, grid.max) }} />
               ))}
-              多
+              多 · <span style={{ marginLeft: 12, opacity: 0.6 }}>▢ 今天边框 · ⬛ 选中黄框</span>
             </div>
+
+            {selectedCell && (
+              <div className="day-detail">
+                <div className="day-detail-head">
+                  <span className="day-detail-date">{selectedCell.day}</span>
+                  <span className="day-detail-weekday">{weekdayCN(selectedCell.day)}</span>
+                  {isWeekend(selectedCell.day) && <span className="day-detail-weekday" style={{ background: "rgba(244,114,182,0.18)", color: "#f472b6" }}>周末</span>}
+                  {selectedCell.day === todayKey && <span className="day-detail-weekday" style={{ background: "rgba(96,165,250,0.18)", color: "#60a5fa" }}>今天</span>}
+                  <button className="day-detail-close" onClick={() => setSelectedDay(null)}>✕ 关闭</button>
+                </div>
+                <div className="day-detail-stats">
+                  <div className="day-detail-stat"><b>{selectedCell.calls.toLocaleString()}</b><span>工具调用</span></div>
+                  <div className="day-detail-stat"><b>{selectedCell.sessions}</b><span>活跃会话</span></div>
+                  <div className="day-detail-stat"><b>{selectedCell.sessions > 0 ? (selectedCell.calls / selectedCell.sessions).toFixed(1) : "0"}</b><span>平均每次会话</span></div>
+                </div>
+                {selectedMonthTools.length > 0 ? (
+                  <>
+                    <div className="day-detail-tools-title">当月工具分布（最常调用 Top 5）</div>
+                    <div className="day-detail-tools">
+                      {selectedMonthTools.map((t) => (
+                        <div key={t.tool} className="day-detail-tool-row">
+                          <span className="day-detail-tool-name">{t.tool}</span>
+                          <div className="day-detail-tool-bar">
+                            <div className="day-detail-tool-fill" style={{ width: `${t.share}%` }} />
+                          </div>
+                          <span className="day-detail-tool-count">{t.calls.toLocaleString()} 次 · {t.share.toFixed(0)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="ops-table-empty" style={{ padding: "10px 0" }}>
+                    当月暂无工具分布数据（仅显示日期 + 调用次数；想看更细的日级工具分布需要后端补 SQL）
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">⏰ 24 小时分布{peak.calls > 0 && <span className="ops-card-sub">高峰 {String(peak.hour).padStart(2, "0")}:00 · {peak.calls.toLocaleString()} 次</span>}</div>
+        <div className="ops-card-title">
+          ⏰ 24 小时分布
+          {peak.calls > 0 && <span className="ops-card-sub">高峰 {String(peak.hour).padStart(2, "0")}:00 · {peak.calls.toLocaleString()} 次</span>}
+        </div>
         {(stats?.hourly ?? []).length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
           <>
             <div className="day-parts">
@@ -244,18 +403,50 @@ export default function ActivityView() {
                 </div>
               ))}
             </div>
+            <div className="hourly-split">
+              <div className="hourly-split-item"><span className="hourly-split-dot wd" /> 24h 整体</div>
+              <div className="hourly-split-item" style={{ opacity: 0.55 }}><span className="hourly-split-dot we" /> 工作日 / 周末（待后端拆分）</div>
+            </div>
             <BarChart
-              data={hourlyChart.map((h) => ({ label: h.label, value: h.value, className: h.highlight ? "bar-peak" : undefined }))}
-              height={110}
+              data={hourlyChart.map((h) => ({ label: h.label, value: h.value, className: h.className }))}
+              height={120}
             />
           </>
         )}
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">🔧 Top 工具月度趋势（用量前 3）</div>
-        {trend.length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
-          <BarChart data={trend} height={130} />
+        <div className="ops-card-title">
+          🔧 工具使用 Top 10
+          {toolRanking.curMonth && (
+            <span className="ops-card-sub">
+              {toolRanking.curMonth.slice(2)} 月
+              {toolRanking.prevMonth && <> · 对比 {toolRanking.prevMonth.slice(2)} 月</>}
+            </span>
+          )}
+        </div>
+        {toolRanking.items.length === 0 ? (
+          <div className="ops-table-empty">暂无数据</div>
+        ) : (
+          <div className="tool-rank-list">
+            {toolRanking.items.map((t, i) => {
+              const dCls = !toolRanking.prevMonth ? "flat" : t.delta > 0.05 ? "up" : t.delta < -0.05 ? "down" : "flat";
+              const dText = !toolRanking.prevMonth
+                ? "—"
+                : t.delta > 0.05 ? `↑ ${(t.delta * 100).toFixed(0)}%`
+                : t.delta < -0.05 ? `↓ ${Math.abs(t.delta * 100).toFixed(0)}%`
+                : "持平";
+              return (
+                <div key={t.tool} className="tool-rank-row">
+                  <span className={`tool-rank-num ${i < 3 ? "top" : ""}`}>{i + 1}</span>
+                  <span className="tool-rank-name">{t.tool}</span>
+                  <div className="tool-rank-bar"><div className="tool-rank-fill" style={{ width: `${t.barWidth}%` }} /></div>
+                  <span className="tool-rank-count">{t.calls.toLocaleString()}</span>
+                  <span className={`tool-rank-delta ${dCls}`}>{dText}</span>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
     </div>

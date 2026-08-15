@@ -1,7 +1,7 @@
 // 新页面核心逻辑测试：热力图网格 / 知识提取断言 / 提示词收藏
 import { render } from "@testing-library/react";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { buildHeatGrid, heatColor, dayPart, daysToRange } from "../ActivityView";
+import { buildHeatGrid, heatColor, dayPart, daysToRange, weekdayCN, isWeekend, calcStreak } from "../ActivityView";
 import { loadPromptFavorites, togglePromptFavorite } from "../KnowledgeView";
 import { sortProjects, projectsToCsv } from "../ProjectsView";
 
@@ -40,11 +40,14 @@ describe("热力图（活动节律页）", () => {
     expect(buildHeatGrid([]).cols).toHaveLength(0);
   });
 
-  it("颜色分档：0=边框色，最大=最深", () => {
-    expect(heatColor(0, 10)).toContain("var(");
+  it("颜色分档：0=近透明，最大=最深", () => {
+    expect(heatColor(0, 10)).toBe("rgba(255, 255, 255, 0.04)"); // 空档极淡底
     const darkest = heatColor(10, 10);
     const lightest = heatColor(2, 10);
     expect(darkest).not.toBe(lightest);
+    // 5 档不同
+    expect(heatColor(0, 100)).not.toBe(heatColor(20, 100));
+    expect(heatColor(40, 100)).not.toBe(heatColor(70, 100));
   });
 });
 
@@ -164,6 +167,35 @@ describe("活动页第 6-10 轮优化", () => {
     expect(daysToRange(7, now)).toBe("2026-08-09 ~ 2026-08-16");
     expect(daysToRange(30, now)).toBe("2026-07-17 ~ 2026-08-16");
     expect(daysToRange(365, now)).toBe("2025-08-16 ~ 2026-08-16");
+  });
+
+  it("weekdayCN 返回中文星期几", () => {
+    expect(weekdayCN("2026-08-16")).toBe("周日"); // 2026-08-16 是周日
+    expect(weekdayCN("2026-08-17")).toBe("周一");
+    expect(weekdayCN("2026-08-22")).toBe("周六");
+  });
+
+  it("isWeekend 正确判定周末", () => {
+    expect(isWeekend("2026-08-16")).toBe(true);  // 周日
+    expect(isWeekend("2026-08-17")).toBe(false); // 周一
+    expect(isWeekend("2026-08-22")).toBe(true);  // 周六
+  });
+
+  it("calcStreak 连续活跃天数（容许今天没活动）", () => {
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const yKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
+    const d2 = new Date(today); d2.setDate(today.getDate() - 2);
+    const d2Key = `${d2.getFullYear()}-${String(d2.getMonth() + 1).padStart(2, "0")}-${String(d2.getDate()).padStart(2, "0")}`;
+    // 今天 + 昨天 + 前天 都活跃 → 3 天
+    expect(calcStreak([{ day: todayKey, calls: 1 }, { day: yKey, calls: 1 }, { day: d2Key, calls: 1 }])).toBe(3);
+    // 今天没活动但昨天 + 前天活跃 → 仍算 2 天（容许今天没活动）
+    expect(calcStreak([{ day: yKey, calls: 1 }, { day: d2Key, calls: 1 }])).toBe(2);
+    // 完全没数据 → 0
+    expect(calcStreak([])).toBe(0);
+    // 只有今天活跃 → 1
+    expect(calcStreak([{ day: todayKey, calls: 1 }])).toBe(1);
   });
 });
 
