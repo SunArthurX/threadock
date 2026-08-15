@@ -1,4 +1,5 @@
 // 新页面核心逻辑测试：热力图网格 / 知识提取断言 / 提示词收藏
+import { render } from "@testing-library/react";
 import { describe, expect, it, beforeEach } from "vitest";
 import { buildHeatGrid, heatColor, dayPart } from "../ActivityView";
 import { loadPromptFavorites, togglePromptFavorite } from "../KnowledgeView";
@@ -105,5 +106,35 @@ describe("项目页 5 轮优化", () => {
     expect(sortProjects(rows, "tokens")[0].tokens).toBe(900);
     expect(sortProjects(rows, "sessions")[0].sessions).toBe(5);
     expect(sortProjects(rows, "active")[0].last_active_ms).toBe(300);
+  });
+});
+
+describe("热力图防御（黑屏回归）", () => {
+  it("非法日期串不崩溃（过滤后空网格）", () => {
+    expect(() => buildHeatGrid([{ day: "garbage", calls: 1 }, { day: "", calls: 2 }])).not.toThrow();
+    const r = buildHeatGrid([{ day: "garbage", calls: 1 }]);
+    expect(r.cols).toHaveLength(0);
+  });
+
+  it("合法数据网格与月份标签正常", () => {
+    const r = buildHeatGrid([
+      { day: "2026-08-10", calls: 3 },
+      { day: "2026-08-11", calls: 5 },
+      { day: "2026-08-12", calls: 1 },
+    ]);
+    expect(r.max).toBe(5);
+    expect(r.labels[0].label).toBe("8月");
+    expect(r.cols.length).toBeGreaterThanOrEqual(1);
+    // 08-10 周一：首列首格补 null，第二格为 08-10
+    expect(r.cols[0][0]).toBeNull();
+    expect(r.cols[0][1]?.day).toBe("2026-08-10");
+  });
+
+  it("错误边界捕获渲染错误不黑屏", async () => {
+    const { default: ErrorBoundary } = await import("../ErrorBoundary");
+    const Boom = () => { throw new Error("BOOM"); };
+    const { findByText } = render(<ErrorBoundary><Boom /></ErrorBoundary>);
+    expect(await findByText("⚠ 页面渲染出错")).toBeTruthy();
+    expect(await findByText(/BOOM/)).toBeTruthy();
   });
 });

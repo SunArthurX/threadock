@@ -17,6 +17,7 @@ import ActivityView from "./ActivityView";
 import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
 import { Toasts } from "./Toasts";
+import ErrorBoundary from "./ErrorBoundary";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
@@ -495,6 +496,7 @@ export default function App() {
 
       <div className="app-body">
         {error && <div className="error-banner" onClick={() => setError(null)}>{error} (点击关闭)</div>}
+        <ErrorBoundary>
 
         <div className="topbar">
           <h1>Threadock</h1>
@@ -614,6 +616,7 @@ export default function App() {
             </div>
           </div>
         )}
+        </ErrorBoundary>
       </div>
     </div>
   );

@@ -25,31 +25,60 @@ export function buildHeatGrid(cells: { day: string; calls: number }[]): {
   labels: { col: number; label: string }[];
   max: number;
 } {
-  if (cells.length === 0) return { cols: [], labels: [], max: 0 };
-  const byDay = new Map(cells.map((c) => [c.day, c]));
-  const first = new Date(cells[0].day + "T00:00:00");
-  const last = new Date(cells[cells.length - 1].day + "T00:00:00");
-  const max = Math.max(...cells.map((c) => c.calls), 1);
+  // 纯算术日期序（不依赖 Date 解析：WKWebView 对异常日期串解析为 Invalid
+  // 后 getDay()=NaN，new Array(NaN) 抛 RangeError 曾致整窗黑屏——2026-08-15）
+  const valid = cells.filter((c) => /^\d{4}-\d{2}-\d{2}$/.test(String(c.day)));
+  if (valid.length === 0) return { cols: [], labels: [], max: 0 };
+  const seq = (day: string) => {
+    const [y, m, d] = day.split("-").map(Number);
+    // days from civil（Howard Hinnant 算法）
+    const yy = m <= 2 ? y - 1 : y;
+    const mm = m > 2 ? m - 3 : m + 9;
+    const era = Math.floor(yy / 400);
+    const yoe = yy - era * 400;
+    const doy = Math.floor((153 * mm + 2) / 5) + d - 1;
+    const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+    return era * 146097 + doe - 719468; // 对齐 Unix epoch（1970-01-01 = 0）
+  };
+  const weekday = (day: string) => {
+    const n = seq(day);
+    // 1970-01-01 是周四：归一到周日起始
+    return (n + 4 - 0 + 700000) % 7;
+  };
+  const byDay = new Map(valid.map((c) => [c.day, c]));
+  const sorted = [...valid].sort((a, b) => a.day.localeCompare(b.day));
+  const first = sorted[0].day;
+  const last = sorted[sorted.length - 1].day;
+  const max = Math.max(...valid.map((c) => c.calls), 1);
   const cols: ({ day: string; calls: number } | null)[][] = [];
   const labels: { col: number; label: string }[] = [];
-  let cur: ({ day: string; calls: number } | null)[] = new Array(first.getDay()).fill(null);
+  let cur: ({ day: string; calls: number } | null)[] = new Array(weekday(first)).fill(null);
   let lastMonth = -1;
   let colIdx = 0;
-  const d = new Date(first);
-  while (d <= last) {
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  for (let n = seq(first); n <= seq(last); n += 1) {
+    // 序号 → y-m-d（civil_from_days）
+    const z = n + 719468;
+    const era = Math.floor(z / 146097);
+    const doe = z - era * 146097;
+    const yoe = Math.floor((doe - Math.floor(doe / 1460) + Math.floor(doe / 36524) - Math.floor(doe / 146096)) / 365);
+    const y0 = yoe + era * 400;
+    const doy0 = doe - (365 * yoe + Math.floor(yoe / 4) - Math.floor(yoe / 100));
+    const mp = Math.floor((5 * doy0 + 2) / 153);
+    const d0 = doy0 - Math.floor((153 * mp + 2) / 5) + 1;
+    const m0 = mp < 10 ? mp + 3 : mp - 9;
+    const y1 = y0 + (m0 <= 2 ? 1 : 0);
+    const key = `${y1}-${String(m0).padStart(2, "0")}-${String(d0).padStart(2, "0")}`;
     const c = byDay.get(key);
     cur.push(c ? { day: key, calls: c.calls } : { day: key, calls: 0 });
-    if (d.getMonth() !== lastMonth) {
-      labels.push({ col: colIdx, label: `${d.getMonth() + 1}月` });
-      lastMonth = d.getMonth();
+    if (m0 !== lastMonth) {
+      labels.push({ col: colIdx, label: `${m0}月` });
+      lastMonth = m0;
     }
     if (cur.length === 7) {
       cols.push(cur);
       cur = [];
       colIdx += 1;
     }
-    d.setDate(d.getDate() + 1);
   }
   if (cur.length > 0) {
     while (cur.length < 7) cur.push(null);
