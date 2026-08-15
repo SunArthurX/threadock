@@ -14,7 +14,7 @@
 //!
 //! - 首个 `meta` 行可选，提供 title/model。
 //! - `role`：user / assistant / system / tool（缺省 user）。
-//! - `event_type`：对应 ch_domain::EventType 的 snake_case 名（见 §12.2）。
+//! - `event_type`：对应 `ch_domain::EventType` 的 `snake_case` 名（见 §12.2）。
 //! - 未知 `type` 行被忽略（容错，plan §11.6 不猜测字段）。
 
 use ch_domain::{EventType, Provider, Role};
@@ -85,7 +85,7 @@ pub fn parse_file(path: impl AsRef<Path>) -> AdapterResult<RawConversation> {
     parse_str(content, &path_ref.to_string_lossy())
 }
 
-/// 从字符串解析。`source_id` 用作 source_conversation_id。
+/// 从字符串解析。`source_id` 用作 `source_conversation_id`。
 pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversation> {
     let mut title: Option<String> = None;
     let mut model: Option<String> = None;
@@ -160,8 +160,8 @@ pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversatio
 }
 
 fn parse_role(s: Option<&str>) -> Role {
-    match s.map(|x| x.to_lowercase()).as_deref() {
-        Some("assistant") | Some("ai") | Some("model") => Role::Assistant,
+    match s.map(str::to_lowercase).as_deref() {
+        Some("assistant" | "ai" | "model") => Role::Assistant,
         Some("system") => Role::System,
         Some("tool") => Role::Tool,
         _ => Role::User, // 缺省 user

@@ -304,12 +304,11 @@ mod tests {
         let result = proc.handshake();
         let is_expected = matches!(
             result,
-            Err(HostError::ProcessExited(_)) | Err(HostError::Io(_))
+            Err(HostError::ProcessExited(_) | HostError::Io(_))
         );
         assert!(
             is_expected,
-            "expected ProcessExited or Io, got {:?}",
-            result
+            "expected ProcessExited or Io, got {result:?}"
         );
     }
 }

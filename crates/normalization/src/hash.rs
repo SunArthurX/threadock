@@ -3,7 +3,7 @@
 //! 关键约束（来自 plan）：
 //! - 禁止仅按文本内容去重——同一消息可在不同会话合法出现。
 //! - 因此 message hash 必须绑定 provider + conversation + role 等上下文，
-//!   而 conversation hash 绑定 provider + source_id + 全部消息摘要。
+//!   而 conversation hash 绑定 provider + `source_id` + 全部消息摘要。
 //!
 //! 算法：BLAKE3（plan §9.6）。
 
@@ -12,8 +12,9 @@ use ch_domain::{Conversation, Message, Provider, Role};
 /// 计算单条消息的内容 hash。
 ///
 /// 输入包括：provider、conversation 占位（用 conversation 的 source id）、
-/// role、文本内容、结构化内容。**不包含** sequence_number，
+/// role、文本内容、结构化内容。**不包含** `sequence_number`，
 /// 因为同一条消息在不同导入轮次中序号可能漂移，但内容相同应得同 hash。
+#[must_use] 
 pub fn content_hash_for_message(
     provider: Provider,
     conversation_source_id: &str,
@@ -42,8 +43,9 @@ pub fn content_hash_for_message(
 
 /// 计算 conversation 的内容 hash。
 ///
-/// 由 provider + source_conversation_id + 所有消息 hash 的拼接构成，
+/// 由 provider + `source_conversation_id` + 所有消息 hash 的拼接构成，
 /// 这样任何一条消息变化都会改变 conversation 的 hash。
+#[must_use] 
 pub fn content_hash_for_conversation(
     provider: Provider,
     source_conversation_id: &str,
@@ -63,6 +65,7 @@ pub fn content_hash_for_conversation(
 }
 
 /// 给现有 Message 计算 hash 的便捷方法。
+#[must_use] 
 pub fn hash_message(m: &Message, provider: Provider, conversation_source_id: &str) -> String {
     content_hash_for_message(
         provider,
@@ -74,6 +77,7 @@ pub fn hash_message(m: &Message, provider: Provider, conversation_source_id: &st
 }
 
 /// 给现有 Conversation 计算 hash 的便捷方法。
+#[must_use] 
 pub fn hash_conversation(c: &Conversation, message_hashes: &[&str]) -> String {
     content_hash_for_conversation(c.provider, &c.source_conversation_id, message_hashes)
 }

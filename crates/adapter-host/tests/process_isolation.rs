@@ -48,10 +48,9 @@ fn adapter_process_isolates_crash() {
     assert!(
         matches!(
             result,
-            Err(HostError::ProcessExited(_)) | Err(HostError::Io(_))
+            Err(HostError::ProcessExited(_) | HostError::Io(_))
         ),
-        "crashed adapter must be detected, got {:?}",
-        result
+        "crashed adapter must be detected, got {result:?}"
     );
     // 主进程（本测试）继续运行——证明隔离生效
 }

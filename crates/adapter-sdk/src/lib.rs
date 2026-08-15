@@ -10,7 +10,7 @@
 //!
 //! 每行一个 JSON-RPC 2.0 消息（newline-delimited）。方法：
 //! - `hello` → 返回 AdapterMetadata（启动握手）
-//! - `parse` → 输入文件路径/内容，返回 RawConversation
+//! - `parse` → 输入文件路径/内容，返回 `RawConversation`
 //! - `health` → 健康检查
 //!
 //! 子进程崩溃被 host 检测到（stdout 关闭），不影响主进程（plan §10.4 隔离目标）。

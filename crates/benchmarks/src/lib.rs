@@ -12,7 +12,7 @@ use ch_storage::Repository;
 
 /// 生成 N 条会话，每条含 M 条消息，写入指定 Repository。
 ///
-/// 返回（耗时_ms, 消息总数, 会话总数）。
+/// `返回（耗时_ms`, 消息总数, 会话总数）。
 pub fn seed_conversations(
     repo: &Repository,
     n_conversations: usize,
@@ -49,7 +49,7 @@ pub fn seed_conversations(
 
 /// 测量 FTS5 搜索延迟（多次取 P95）。
 ///
-/// 返回（P95_ms, 查询次数）。
+/// `返回（P95_ms`, 查询次数）。
 pub fn bench_fts5_search(repo: &Repository, queries: &[&str], rounds: usize) -> (f64, usize) {
     use ch_storage::SearchQuery;
     let mut latencies = Vec::new();
@@ -67,6 +67,7 @@ pub fn bench_fts5_search(repo: &Repository, queries: &[&str], rounds: usize) -> 
 }
 
 /// 测量 Tantivy 搜索延迟（多次取 P95）。
+#[must_use] 
 pub fn bench_tantivy_search(
     index: &ch_search::SearchIndex,
     queries: &[&str],
@@ -88,6 +89,7 @@ pub fn bench_tantivy_search(
 }
 
 /// 计算百分位数。
+#[must_use] 
 pub fn percentile(data: &[f64], p: f64) -> f64 {
     if data.is_empty() {
         return 0.0;

@@ -11,11 +11,13 @@ use regex::Regex;
 pub struct RuleExtractor;
 
 impl RuleExtractor {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }
 
     /// 执行提取。
+    #[must_use] 
     pub fn extract(&self, input: &ExtractionInput) -> ExtractionResult {
         let summary = self.summarize(input);
         let todos = self.extract_todos(input);
@@ -48,7 +50,7 @@ impl RuleExtractor {
             .messages
             .iter()
             .filter(|m| m.role == Role::Assistant)
-            .max_by_key(|m| m.content_text.as_ref().map(|t| t.len()).unwrap_or(0))
+            .max_by_key(|m| m.content_text.as_ref().map_or(0, std::string::String::len))
             .and_then(|m| m.content_text.as_deref())
             .unwrap_or("");
 
@@ -91,6 +93,7 @@ impl RuleExtractor {
     // ── TODO：匹配关键词的句子 ─────────────────────────────────────────────
 
     /// TODO 关键词（plan §13.5：TODO 提取）。
+    #[must_use] 
     pub fn todo_keywords() -> &'static [&'static str] {
         &[
             "TODO",

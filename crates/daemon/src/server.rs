@@ -480,7 +480,7 @@ fn parse_by_extension(path: &Path) -> Result<RawConversation, String> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
+        .map(str::to_lowercase)
         .unwrap_or_default();
     match ext.as_str() {
         "jsonl" | "ndjson" => ch_adapter_jsonl::parse_file(path).map_err(|e| e.to_string()),

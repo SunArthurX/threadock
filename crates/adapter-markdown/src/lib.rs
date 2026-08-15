@@ -1,7 +1,7 @@
 //! 通用 Markdown Adapter，对应 plan §10.5「Markdown/JSON Import」与 §22「Markdown Adapter」。
 //!
 //! 它是 plan §29「首个端到端链路」用的最简来源：用一个最朴素的 Markdown 约定
-//! 验证整条 Source → Raw → Normalize → SQLite 流水线。
+//! 验证整条 Source → Raw → Normalize → `SQLite` 流水线。
 //!
 //! ## 支持的 Markdown 约定（v0.1）
 //!
@@ -20,12 +20,12 @@
 //!
 //! - 一级标题（`# `）→ conversation.title
 //! - 二级标题（`## `）按关键词判定角色/事件：
-//!   - `User` / `用户` → Role::User
-//!   - `Assistant` / `助手` / `AI` → Role::Assistant
-//!   - `System` / `系统` → Role::System
+//!   - `User` / `用户` → `Role::User`
+//!   - `Assistant` / `助手` / `AI` → `Role::Assistant`
+//!   - `System` / `系统` → `Role::System`
 //!   - `Command` / `命令` → Command 事件
 //!   - `Diff` / `变更` → Diff 事件
-//!   - `Tool` / `工具` → ToolCall 事件
+//!   - `Tool` / `工具` → `ToolCall` 事件
 //! - 其他二级标题视为 System 消息并保留原标题。
 //!
 //! 这套约定故意简单：plan §29 的目标是「跑通流水线 + 落 Fixture」，
@@ -70,7 +70,7 @@ pub fn parse_file(path: impl AsRef<Path>) -> AdapterResult<RawConversation> {
     parse_str(content, &path_ref.to_string_lossy())
 }
 
-/// 从字符串解析。`source_id` 用作 source_conversation_id（通常为文件路径或哈希）。
+/// 从字符串解析。`source_id` 用作 `source_conversation_id（通常为文件路径或哈希`）。
 pub fn parse_str(content: &str, source_id: &str) -> AdapterResult<RawConversation> {
     let mut title: Option<String> = None;
     let mut messages: Vec<RawMessage> = Vec::new();

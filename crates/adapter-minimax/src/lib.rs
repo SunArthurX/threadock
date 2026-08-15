@@ -1,8 +1,8 @@
-//! MiniMax Code Adapter，对应 plan §10.5「MiniMax Code」。
+//! `MiniMax` Code Adapter，对应 plan §10.5「MiniMax Code」。
 //!
 //! ## 数据源
 //!
-//! MiniMax Code（Mavis agent runtime）把会话存在
+//! `MiniMax` Code（Mavis agent runtime）把会话存在
 //! `~/.minimax/v2/sqlite/runtime-state.sqlite`，核心表：
 //!
 //! - `local_runtime_sessions(session_id, record_json, updated_at_ms)`
@@ -15,8 +15,8 @@
 //!
 //! ## 能力
 //!
-//! - `discover_sessions`：列出所有会话（按 updated_at_ms 降序）
-//! - `parse_session`：读取单条会话的所有消息行，解析为 RawConversation
+//! - `discover_sessions`：列出所有会话（按 `updated_at_ms` 降序）
+//! - `parse_session`：读取单条会话的所有消息行，解析为 `RawConversation`
 
 use ch_domain::{Provider, Role};
 use ch_normalization::{RawConversation, RawMessage};
@@ -47,7 +47,7 @@ pub enum MinimaxError {
 pub const ADAPTER_ID: &str = "minimax";
 pub const PROVIDER: Provider = Provider::MinimaxCode;
 
-/// 发现的 MiniMax 会话。
+/// 发现的 `MiniMax` 会话。
 #[derive(Debug, Clone)]
 pub struct DiscoveredSession {
     pub session_id: String,
@@ -65,7 +65,7 @@ pub struct DiscoveredSession {
     pub parent_session_id: Option<String>,
 }
 
-/// 只读打开 MiniMax runtime-state.sqlite（plan §10.1：只读快照）。
+/// 只读打开 `MiniMax` runtime-state.sqlite（plan §10.1：只读快照）。
 fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     let conn = Connection::open_with_flags(
         db_path,
@@ -74,11 +74,11 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     Ok(conn)
 }
 
-/// 列出 MiniMax 所有**主任务**会话（parentSessionId 为空），按更新时间降序。
+/// 列出 `MiniMax` 所有**主任务**会话（parentSessionId 为空），按更新时间降序。
 ///
-/// MiniMax 的 session 有层级：主任务（`parentSessionId` 为 null）下面挂多个子任务。
+/// `MiniMax` 的 session 有层级：主任务（`parentSessionId` 为 null）下面挂多个子任务。
 /// 只在左侧列表展示主任务，避免子任务刷屏（plan §10.5：会话归并）。
-/// updated_at 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
+/// `updated_at` 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
 pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
     // 只选 parentSessionId 为 null 且有标题的主任务（过滤 runtime 无标题残根）
@@ -119,7 +119,7 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
             .to_string();
         let created_at_ms = obj
             .get("createdAtMs")
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(self_updated_at_ms);
         // 真实更新时间 = max(自身, 所有子任务)
         let updated_at_ms = self_updated_at_ms.max(max_child_updated);
@@ -142,10 +142,10 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
     Ok(v)
 }
 
-/// 列出 MiniMax **所有**会话（主任务 + 子任务），按更新时间降序。
-/// 用于 auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID）。
+/// 列出 `MiniMax` **所有**会话（主任务 + 子任务），按更新时间降序。
+/// 用于 `auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID`）。
 /// 过滤 runtime 内部残留：MiniMax 的子任务 visibility=hidden 是正常形态（保留），
-/// 仅排除 record_json 无 title 字段的空残根（__local_runtime_v2__ 生成）。
+/// 仅排除 `record_json` 无 title 字段的空残根（__`local_runtime_v2`__ 生成）。
 pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn.prepare(
@@ -187,7 +187,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
             .to_string();
         let created_at_ms = obj
             .get("createdAtMs")
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(self_updated_at_ms);
         Ok(DiscoveredSession {
             session_id,
@@ -208,7 +208,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
     Ok(v)
 }
 
-/// 解析单条 MiniMax 会话。
+/// 解析单条 `MiniMax` 会话。
 pub fn parse_session(
     db_path: impl AsRef<Path>,
     session_id: &str,
@@ -230,22 +230,22 @@ pub fn parse_session(
     let title = sess
         .get("title")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
     let agent_name = sess
         .get("agentName")
         .and_then(|v| v.as_str())
         .unwrap_or("minimax");
     let created_at_ms = sess
         .get("createdAtMs")
-        .and_then(|v| v.as_i64())
+        .and_then(serde_json::Value::as_i64)
         .and_then(|ms| {
-            time::OffsetDateTime::from_unix_timestamp_nanos((ms as i128) * 1_000_000).ok()
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).ok()
         });
     // 主子任务链路：parentSessionId 为 null 表示顶层主任务
     let source_parent_id = sess
         .get("parentSessionId")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .map(std::string::ToString::to_string);
 
     // 2. 消息行
     let mut stmt = conn.prepare(
@@ -285,10 +285,10 @@ pub fn parse_session(
         // 优先用 data.timestamp（消息自身时间），否则用行的 created_at_ms
         let ts_ms = data
             .get("timestamp")
-            .and_then(|v| v.as_i64())
+            .and_then(serde_json::Value::as_i64)
             .unwrap_or(created_at_ms);
         let created_at =
-            time::OffsetDateTime::from_unix_timestamp_nanos((ts_ms as i128) * 1_000_000).ok();
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ts_ms) * 1_000_000).ok();
 
         if !text.is_empty() {
             messages.push(RawMessage {
@@ -317,7 +317,7 @@ pub fn parse_session(
     })
 }
 
-/// 清理 MiniMax 消息正文里的装饰标签（如 `<greeting-message />`、`<done />`）。
+/// 清理 `MiniMax` 消息正文里的装饰标签（如 `<greeting-message />`、`<done />`）。
 /// 只过滤「整行就是一个 XML/自闭合标签」的装饰行，保留含标签的正常代码/文本。
 fn clean_content(s: &str) -> String {
     s.lines()
@@ -349,7 +349,7 @@ mod tests {
         let db = dir.join("runtime-state.sqlite");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            r#"CREATE TABLE local_runtime_sessions (
+            r"CREATE TABLE local_runtime_sessions (
                 session_id TEXT PRIMARY KEY,
                 record_json TEXT NOT NULL,
                 updated_at_ms INTEGER NOT NULL
@@ -363,7 +363,7 @@ mod tests {
                 created_at_ms INTEGER NOT NULL,
                 data_json TEXT NOT NULL,
                 UNIQUE(session_id, msg_id)
-            );"#,
+            );",
         )
         .expect("unexpected None");
 

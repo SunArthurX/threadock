@@ -1,4 +1,4 @@
-//! MiniMax ops 采集：`local_runtime_token_usage` → UsageRecord（含 cost_usd）。
+//! `MiniMax` ops 采集：`local_runtime_token_usage` → UsageRecord（含 `cost_usd`）。
 
 use crate::{ms_to_ts, open_ro, OpsResult};
 use ch_domain::{Provider, UsageRecord, UsageStatus};

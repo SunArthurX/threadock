@@ -1,7 +1,7 @@
 //! 全文搜索，对应 plan §13「检索与知识化能力」与 §9.5「FTS5 作为 MVP/降级方案」。
 //!
 //! MVP 实现：
-//! - 用 SQLite FTS5（messages_fts 虚拟表，见 schema）。
+//! - 用 `SQLite` `FTS5（messages_fts` 虚拟表，见 schema）。
 //! - 支持关键词 + provider / workspace 过滤。
 //! - 返回命中片段（snippet）与所属 conversation/message。
 //! - 中文靠 `unicode61` 分词 + 字符级匹配兜底（plan §13：N-gram 兜底在 Tantivy 阶段完善）。
@@ -33,6 +33,7 @@ impl SearchQuery {
             limit: 50,
         }
     }
+    #[must_use] 
     pub fn with_provider(mut self, p: Provider) -> Self {
         self.provider = Some(p);
         self
@@ -41,6 +42,7 @@ impl SearchQuery {
         self.workspace_id = Some(id.into());
         self
     }
+    #[must_use] 
     pub fn with_limit(mut self, n: usize) -> Self {
         self.limit = n;
         self
@@ -67,6 +69,7 @@ pub struct SearchResult {
 ///
 /// 策略：对每个 token 加双引号包裹，避免被当 FTS5 语法（如 `OR`、`*`、`:`）误解析。
 /// 这保证「用户搜什么就匹配什么字面量」，符合 MVP 的可预期性。
+#[must_use] 
 pub fn build_match_expr(user_input: &str) -> String {
     user_input
         .split_whitespace()

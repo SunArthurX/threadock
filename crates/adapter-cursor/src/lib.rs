@@ -2,7 +2,7 @@
 //!
 //! ## 数据源
 //!
-//! Cursor 把会话存在 VS Code 风格的 leveldb 兼容 SQLite 库
+//! Cursor 把会话存在 VS Code 风格的 leveldb 兼容 `SQLite` 库
 //! `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`，
 //! 表 `cursorDiskKV(key TEXT PRIMARY KEY, value BLOB)`。
 //!
@@ -16,7 +16,7 @@
 //! ## 能力
 //!
 //! - `discover_sessions`：列出所有 composerData 对应的会话
-//! - `parse_session`：读取单条会话的所有 bubble，解析为 RawConversation
+//! - `parse_session`：读取单条会话的所有 bubble，解析为 `RawConversation`
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
@@ -91,11 +91,11 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
         let headers = obj
             .get("fullConversationHeadersOnly")
             .and_then(|v| v.as_array());
-        let bubble_count = headers.map(|a| a.len()).unwrap_or(0);
+        let bubble_count = headers.map_or(0, std::vec::Vec::len);
 
         // 首条用户消息的 text 作为 title 候选；时间从 headers[0] 推断需读 bubble，这里先用首 bubble 的 createdAt（若 composerData 内联了）。
         // 多数 composerData 不含 text，title 留空，由 parse 时填充；此处先给个粗标题。
-        let title = format!("Cursor 会话 ({} 条消息)", bubble_count);
+        let title = format!("Cursor 会话 ({bubble_count} 条消息)");
         sessions.push(DiscoveredSession {
             session_id,
             title,
@@ -151,7 +151,7 @@ pub fn parse_session(
         if bubble_id.is_empty() {
             continue;
         }
-        let type_num = h.get("type").and_then(|v| v.as_i64()).unwrap_or(0);
+        let type_num = h.get("type").and_then(serde_json::Value::as_i64).unwrap_or(0);
         let bubble_key = format!("bubbleId:{conversation_id}:{bubble_id}");
 
         let bubble_value: Vec<u8> = match conn.query_row(
@@ -188,11 +188,11 @@ pub fn parse_session(
         // 只在 hasText / isShortPlainText 时把文本当作正文，避免纯 thinking / tool 噪声
         let has_text = grouping
             .and_then(|g| g.get("hasText"))
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
         let is_plain = grouping
             .and_then(|g| g.get("isShortPlainText"))
-            .and_then(|v| v.as_bool())
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
         if !text.is_empty() && (has_text || is_plain || type_num == 1) {
@@ -208,13 +208,13 @@ pub fn parse_session(
         // 工具调用 → 事件
         let cap_type = grouping
             .and_then(|g| g.get("capabilityType"))
-            .and_then(|v| v.as_i64());
+            .and_then(serde_json::Value::as_i64);
         if let Some(ct) = cap_type {
             if ct == 15 {
                 // toolFormerTool
                 let tool = grouping
                     .and_then(|g| g.get("toolFormerTool"))
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 events.push(RawEvent {
                     event_type: EventType::ToolCallStarted,

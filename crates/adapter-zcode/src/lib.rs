@@ -1,16 +1,16 @@
-//! ZCode Adapter，对应 plan §10.5「ZCode」。
+//! `ZCode` Adapter，对应 plan §10.5「ZCode」。
 //!
 //! ## 数据源
 //!
-//! ZCode 把会话存在 `~/.zcode/cli/db/db.sqlite`，表结构：
-//! - `session`：会话元信息（id, title, directory, time_created 等）
-//! - `message`：消息（id, session_id, data 含 role/model）
-//! - `part`：消息内容片段（message_id, data 含 type:text/tool 等）
+//! `ZCode` 把会话存在 `~/.zcode/cli/db/db.sqlite`，表结构：
+//! - `session`：会话元信息（id, title, directory, `time_created` 等）
+//! - `message`：消息（id, `session_id`, data 含 role/model）
+//! - `part`：`消息内容片段（message_id`, data 含 type:text/tool 等）
 //!
 //! ## 能力
 //!
 //! - `discover_sessions`：从 db.sqlite 列出会话（id/title/时间/目录）
-//! - `parse_session`：读取单条会话的所有 message+part，解析为 RawConversation
+//! - `parse_session`：读取单条会话的所有 message+part，解析为 `RawConversation`
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
@@ -56,7 +56,7 @@ pub struct DiscoveredSession {
     pub parent_id: Option<String>,
 }
 
-/// 只读打开 ZCode 数据库（plan §10.1：只读快照原则）。
+/// 只读打开 `ZCode` 数据库（plan §10.1：只读快照原则）。
 fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     let conn = Connection::open_with_flags(
         db_path,
@@ -65,11 +65,11 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     Ok(conn)
 }
 
-/// 列出 ZCode 所有**主任务**会话（parent_id 为空），按更新时间降序。
+/// 列出 `ZCode` 所有**主任务**`会话（parent_id` 为空），按更新时间降序。
 ///
-/// ZCode 的 session 有层级：主任务（`parent_id` 为 null/空）下面挂多个子任务
+/// `ZCode` 的 session 有层级：主任务（`parent_id` 为 null/空）下面挂多个子任务
 /// （`task_type='subagent_child'`）。只在左侧列表展示主任务，避免子任务刷屏。
-/// updated_at 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
+/// `updated_at` 取主任务自身与所有子任务中的最大值，反映真实活跃时间。
 pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(db_path)?;
     // 只选 parent_id 为空的主任务，子任务数和时间取子查询
@@ -103,8 +103,8 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
     Ok(v)
 }
 
-/// 列出 ZCode **所有**会话（主任务 + 子任务），按更新时间降序。
-/// 用于 auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID）。
+/// 列出 `ZCode` **所有**会话（主任务 + 子任务），按更新时间降序。
+/// 用于 `auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID`）。
 pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(db_path)?;
     let mut stmt = conn.prepare(
@@ -135,7 +135,7 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
     Ok(v)
 }
 
-/// 解析单条 ZCode 会话。
+/// 解析单条 `ZCode` 会话。
 pub fn parse_session(
     db_path: impl AsRef<Path>,
     session_id: &str,
@@ -172,7 +172,7 @@ pub fn parse_session(
         })?;
 
     // parent_id 为空字符串时视为无父级（顶层主任务）
-    let source_parent_id = parent_id.filter(|s| !s.is_empty()).map(|s| s.to_string());
+    let source_parent_id = parent_id.filter(|s| !s.is_empty());
 
     let started_at = time::OffsetDateTime::from_unix_timestamp(time_created / 1000).ok();
     let _updated_at = time::OffsetDateTime::from_unix_timestamp(time_updated / 1000).ok();
@@ -308,7 +308,7 @@ mod tests {
         let db = dir.path().join("test.db");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            r#"
+            r"
             CREATE TABLE session (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL DEFAULT '',
@@ -348,7 +348,7 @@ mod tests {
                 data TEXT NOT NULL,
                 sequence INTEGER
             );
-            "#,
+            ",
         )
         .expect("unexpected None");
 

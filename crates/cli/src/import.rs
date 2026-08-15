@@ -5,9 +5,9 @@
 //!
 //! 完整流水线（plan §2.3 Raw + Normalized 双存储）：
 //! 1. 读取原始文件字节 → 写入 Raw Store（BLAKE3 内容寻址 + zstd）。
-//! 2. Adapter 解析为 RawConversation。
+//! 2. Adapter 解析为 `RawConversation`。
 //! 3. Normalize 计算 hash + 完整度。
-//! 4. Repository 入库（标准化数据），conversation.raw_payload_id 指回 Raw。
+//! 4. Repository `入库（标准化数据），conversation.raw_payload_id` 指回 Raw。
 
 use crate::Result;
 use ch_domain::Provider;
@@ -165,7 +165,7 @@ fn parse_by_extension(path: &Path) -> Result<ch_normalization::RawConversation> 
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
+        .map(str::to_lowercase)
         .unwrap_or_default();
     match ext.as_str() {
         "jsonl" | "ndjson" => {
@@ -193,7 +193,7 @@ mod tests {
         f
     }
 
-    /// 构造一个临时 RawStore 用于测试。
+    /// 构造一个临时 `RawStore` 用于测试。
     fn raw_store() -> (TempDir, RawStore) {
         let dir = TempDir::new().expect("tempdir creation failed");
         let store = RawStore::new(dir.path()).expect("unexpected None");

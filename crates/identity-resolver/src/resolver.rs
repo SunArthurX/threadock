@@ -35,7 +35,7 @@ pub struct SourceWorkspaceCandidate {
     pub git_common_dir: Option<String>,
     /// 本地绝对路径（原始，未规范化）。
     pub canonical_path: Option<String>,
-    /// 文件系统对象 ID（inode/st_dev 组合），用于跨 worktree 识别。
+    /// 文件系统对象 `ID（inode/st_dev` 组合），用于跨 worktree 识别。
     pub filesystem_id: Option<String>,
 }
 
@@ -81,10 +81,10 @@ pub struct Match {
 /// 解析结果。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Resolution {
-    /// 高置信度自动归并（confidence >= AUTO_CONFIRM_THRESHOLD）。
+    /// 高置信度自动归并（confidence >= `AUTO_CONFIRM_THRESHOLD`）。
     AutoMerge(Match),
     /// 低置信度候选（名称相似度等），需用户确认。
-    /// 携带最佳候选，若无任何候选则为 None（此时等价于 CreateNew）。
+    /// 携带最佳候选，若无任何候选则为 None（此时等价于 `CreateNew`）。
     NeedsConfirmation {
         candidate: Option<Match>,
         confidence: f64,
@@ -94,16 +94,20 @@ pub enum Resolution {
 }
 
 impl Resolution {
+    #[must_use] 
     pub fn is_auto_merge(&self) -> bool {
         matches!(self, Resolution::AutoMerge(_))
     }
+    #[must_use] 
     pub fn needs_confirmation(&self) -> bool {
         matches!(self, Resolution::NeedsConfirmation { .. })
     }
+    #[must_use] 
     pub fn is_create_new(&self) -> bool {
         matches!(self, Resolution::CreateNew)
     }
-    /// 归并到的 workspace_id（AutoMerge 或 NeedsConfirmation 的候选）；否则 None。
+    /// 归并到的 `workspace_id（AutoMerge` 或 `NeedsConfirmation` 的候选）；否则 None。
+    #[must_use] 
     pub fn matched_workspace_id(&self) -> Option<&str> {
         match self {
             Resolution::AutoMerge(m) => Some(&m.workspace_id),
@@ -118,10 +122,11 @@ impl Resolution {
 /// 把候选与一组已知统一 workspace 比对，返回解析结果。
 ///
 /// 算法：按 plan §4.3 七级优先级逐级尝试，取**最高优先级**（而非最高分数）的命中。
-/// 优先级顺序：Manual > ManifestId > GitRemote > GitCommonDir > CanonicalPath > FilesystemId > NameSimilarity。
+/// 优先级顺序：Manual > `ManifestId` > `GitRemote` > `GitCommonDir` > `CanonicalPath` > `FilesystemId` > `NameSimilarity`。
 ///
-/// 注意：Manual 由调用方在更上层处理（用户已显式指定 workspace_id），
-/// 本函数不处理 Manual，从 ManifestId 开始。
+/// 注意：Manual 由调用方在更上层处理（用户已显式指定 `workspace_id`），
+/// 本函数不处理 Manual，从 `ManifestId` 开始。
+#[must_use] 
 pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> Resolution {
     // 各级独立计算命中，最后按优先级选最高
     let mut best: Option<Match> = None;
@@ -270,6 +275,7 @@ fn method_priority(m: MatchMethod) -> u8 {
 }
 
 /// 便利：从候选生成新建统一 workspace 时用的显示名。
+#[must_use] 
 pub fn display_name_for_new(candidate: &SourceWorkspaceCandidate) -> String {
     // 优先用目录名，其次原名
     if let Some(p) = &candidate.canonical_path {
@@ -283,7 +289,8 @@ pub fn display_name_for_new(candidate: &SourceWorkspaceCandidate) -> String {
     candidate.display_name.clone()
 }
 
-/// 计算用于入库记录的 PathBuf（规范化后）。供 source_workspaces 表的 raw_path 用。
+/// 计算用于入库记录的 PathBuf（规范化后）。供 `source_workspaces` 表的 `raw_path` 用。
+#[must_use] 
 pub fn canonical_path_buf(raw: &str) -> PathBuf {
     PathBuf::from(canonicalize_path(raw))
 }

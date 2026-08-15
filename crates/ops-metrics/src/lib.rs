@@ -1,4 +1,4 @@
-//! CodeAgentOps 采集层（plan codeagent-ops M1）。
+//! `CodeAgentOps` 采集层（plan codeagent-ops M1）。
 //!
 //! 从各 Agent 的本地数据源**只读**提取 ops 指标，统一为
 //! [`UsageRecord`]（模型用量）与 [`ToolCallRecord`]（工具调用）。
@@ -51,33 +51,30 @@ pub fn read_line_capped<R: std::io::BufRead>(
                     oversized,
                 });
             }
-            match available.iter().position(|&b| b == b'\n') {
-                Some(pos) => {
-                    if !oversized {
-                        let room = cap - buf.len();
-                        let want = (pos + 1).min(room);
+            if let Some(pos) = available.iter().position(|&b| b == b'\n') {
+                if !oversized {
+                    let room = cap - buf.len();
+                    let want = (pos + 1).min(room);
+                    buf.extend_from_slice(&available[..want]);
+                    if want <= pos {
+                        oversized = true;
+                    }
+                }
+                (true, pos + 1)
+            } else {
+                if !oversized {
+                    let room = cap - buf.len();
+                    if room > 0 {
+                        let want = available.len().min(room);
                         buf.extend_from_slice(&available[..want]);
-                        if want <= pos {
+                        if want < available.len() {
                             oversized = true;
                         }
+                    } else {
+                        oversized = true;
                     }
-                    (true, pos + 1)
                 }
-                None => {
-                    if !oversized {
-                        let room = cap - buf.len();
-                        if room > 0 {
-                            let want = available.len().min(room);
-                            buf.extend_from_slice(&available[..want]);
-                            if want < available.len() {
-                                oversized = true;
-                            }
-                        } else {
-                            oversized = true;
-                        }
-                    }
-                    (false, available.len())
-                }
+                (false, available.len())
             }
         };
         r.consume(consumed);
@@ -120,11 +117,11 @@ pub enum OpsError {
 
 /// Unix 毫秒 → Timestamp（非法值回退当前时间）。
 fn ms_to_ts(ms: i64) -> Timestamp {
-    time::OffsetDateTime::from_unix_timestamp_nanos(ms as i128 * 1_000_000)
+    time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
         .unwrap_or_else(|_| ch_domain::now_utc())
 }
 
-/// 只读打开 SQLite。
+/// 只读打开 `SQLite`。
 fn open_ro(db_path: impl AsRef<Path>) -> OpsResult<rusqlite::Connection> {
     let conn = rusqlite::Connection::open_with_flags(
         db_path,
@@ -133,7 +130,8 @@ fn open_ro(db_path: impl AsRef<Path>) -> OpsResult<rusqlite::Connection> {
     Ok(conn)
 }
 
-/// Bash 类命令的破坏性推断规则（非 ZCode 来源用）。
+/// Bash 类命令的破坏性推断规则（非 `ZCode` 来源用）。
+#[must_use] 
 pub fn infer_destructive(command: &str) -> bool {
     let c = command.trim();
     let rules = [
@@ -170,7 +168,7 @@ mod tests {
     fn read_line_capped_skips_oversized_and_handles_last_line() {
         use std::io::BufReader;
         let giant = "x".repeat(64);
-        let data = format!("a\nb\n{}\nc", giant); // 最后行无换行
+        let data = format!("a\nb\n{giant}\nc"); // 最后行无换行
         let mut r = BufReader::new(data.as_bytes());
         let mut buf = Vec::new();
         let cap = 32;

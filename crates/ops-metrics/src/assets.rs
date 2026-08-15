@@ -2,10 +2,10 @@
 //!
 //! | Agent | 来源 |
 //! |-------|------|
-//! | ZCode | `~/.zcode/skills/*/SKILL.md` + `~/.zcode/cli/plugins/cache/<市场>/<插件>/<版本>` |
+//! | `ZCode` | `~/.zcode/skills/*/SKILL.md` + `~/.zcode/cli/plugins/cache/<市场>/<插件>/<版本>` |
 //! | Codex | `~/.codex/skills/*/SKILL.md` + `~/.codex/plugins/cache/...` |
 //! | Claude Code | `~/.claude/skills/*/SKILL.md` + `installed_plugins.json`（含版本/安装时间） |
-//! | MiniMax | `~/.minimax/skills/*` + `.builtin-skills/*`（内置） |
+//! | `MiniMax` | `~/.minimax/skills/*` + `.builtin-skills/*`（内置） |
 //!
 //! 安全扫描：SKILL.md 全文按内置危险命令正则计数 → `risky_hits`。
 
@@ -28,8 +28,7 @@ fn risky_hits(text: &str) -> i64 {
         .iter()
         .filter(|p| {
             regex::Regex::new(p)
-                .map(|re| re.is_match(text))
-                .unwrap_or(false)
+                .is_ok_and(|re| re.is_match(text))
         })
         .count() as i64
 }
@@ -130,8 +129,7 @@ fn scan_plugins_cache(dir: &Path, provider: Provider, out: &mut Vec<AssetRecord>
                 }
             }
             let hits = std::fs::read_to_string(pp.join("SKILL.md"))
-                .map(|b| risky_hits(&b))
-                .unwrap_or(0);
+                .map_or(0, |b| risky_hits(&b));
             out.push(AssetRecord {
                 id: format!("ap_{}_{}", provider.as_str(), pname),
                 provider,
@@ -174,10 +172,10 @@ pub fn collect_agent_assets(home: &Path, provider: Provider) -> OpsResult<Vec<As
                                     full_name.split('@').next().unwrap_or(full_name).to_string(),
                                     inst.get("version")
                                         .and_then(|x| x.as_str())
-                                        .map(|s| s.to_string()),
+                                        .map(std::string::ToString::to_string),
                                     inst.get("installedAt")
                                         .and_then(|x| x.as_str())
-                                        .map(|s| s.to_string()),
+                                        .map(std::string::ToString::to_string),
                                 ),
                                 None => (full_name.clone(), None, None),
                             };
@@ -195,7 +193,7 @@ pub fn collect_agent_assets(home: &Path, provider: Provider) -> OpsResult<Vec<As
                                     .and_then(|a| a.first())
                                     .and_then(|i| i.get("installPath"))
                                     .and_then(|x| x.as_str())
-                                    .map(|s| s.to_string()),
+                                    .map(std::string::ToString::to_string),
                             });
                         }
                     }

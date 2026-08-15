@@ -11,7 +11,7 @@
 //!
 //! ## payload 结构（加密前，zstd 压缩后）
 //!
-//! 一个 tar-like 的简单容器：JSON 元信息 + SQLite 数据库文件字节 + Raw Store 文件列表。
+//! 一个 tar-like 的简单容器：JSON 元信息 + `SQLite` 数据库文件字节 + Raw Store 文件列表。
 //! MVP 用最简约定：把整个数据库文件 + raw 目录打包。
 //!
 //! ## 密钥派生
@@ -279,8 +279,7 @@ fn walk_files(dir: &Path) -> BackupResult<Vec<PathBuf>> {
 fn now_millis() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_millis() as i64)
 }
 
 #[cfg(test)]

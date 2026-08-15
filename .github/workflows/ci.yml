@@ -30,7 +30,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings -W clippy::unwrap_used
+        run: cargo clippy --workspace --all-targets -- -D warnings           -W clippy::unwrap_used           -W clippy::pedantic           -A clippy::missing_errors_doc           -A clippy::missing_panics_doc           -A clippy::cast_precision_loss           -A clippy::cast_possible_wrap           -A clippy::cast_sign_loss           -A clippy::cast_possible_truncation           -A clippy::doc_markdown
 
       - name: Clippy (tauri)
         working-directory: apps/desktop/src-tauri

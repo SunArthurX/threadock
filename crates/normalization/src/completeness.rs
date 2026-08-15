@@ -19,6 +19,7 @@ pub enum Completeness {
 }
 
 impl Completeness {
+    #[must_use] 
     pub fn label(self) -> &'static str {
         match self {
             Completeness::Full => "完整",
@@ -31,6 +32,7 @@ impl Completeness {
 /// 根据各字段是否存在计算 0.0~1.0 的完整度分数。
 ///
 /// `has_messages` 通常恒为 true（否则不会入库）；其余维度按权重累加。
+#[must_use] 
 pub fn completeness_score(
     has_messages: bool,
     has_tool_calls: bool,
@@ -58,6 +60,7 @@ pub fn completeness_score(
 }
 
 /// 由分数映射到档位。
+#[must_use] 
 pub fn grade(score: f64) -> Completeness {
     if score >= 0.9 {
         Completeness::Full

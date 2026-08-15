@@ -1,18 +1,18 @@
-//! ZCode ops 采集：`model_usage` → UsageRecord（请求级，含模型名/状态/耗时/重试）；
+//! `ZCode` ops 采集：`model_usage` → UsageRecord（请求级，含模型名/状态/耗时/重试）；
 //! `tool_usage` → ToolCallRecord（原生含 destructive/approval）。
 //!
-//! 注意：model_usage 与 turn_usage 是同一批 tokens 的两种口径
+//! `注意：model_usage` 与 `turn_usage` 是同一批 tokens 的两种口径
 //! （请求级 vs turn 级汇总），只能二选一入库，否则总量翻倍。
-//! 请求级信息更全（模型明细/错误/耗时/重试），故采用 model_usage，
-//! 配合 repository.replace_provider_usage 做整源替换。
+//! 请求级信息更全（模型明细/错误/耗时/重试），故采用 `model_usage`，
+//! 配合 `repository.replace_provider_usage` 做整源替换。
 
 use crate::{ms_to_ts, open_ro, OpsResult};
 use ch_domain::{Provider, ToolCallRecord, UsageRecord, UsageStatus};
 
 use std::path::Path;
 
-/// 采集 ZCode 用量（model_usage 请求级）+ 工具调用。
-/// 返回 (usage, tool_calls)。库不存在时返回空（静默）。
+/// 采集 `ZCode` `用量（model_usage` 请求级）+ 工具调用。
+/// 返回 (usage, `tool_calls)。库不存在时返回空（静默`）。
 pub fn collect_zcode(
     db_path: impl AsRef<Path>,
 ) -> OpsResult<(Vec<UsageRecord>, Vec<ToolCallRecord>)> {

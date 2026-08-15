@@ -1,11 +1,11 @@
-//! Claude Code ops 采集：JSONL 每条 assistant 消息的 `usage` 字段 → UsageRecord。
+//! Claude Code ops 采集：JSONL 每条 assistant 消息的 `usage` 字段 → `UsageRecord`。
 
 use crate::{infer_destructive, OpsResult};
 use ch_domain::{Provider, ToolCallRecord, UsageRecord, UsageStatus};
 use std::path::Path;
 
 /// 采集一个 Claude Code 会话文件的用量。
-/// 返回 (usage, tool_calls)。文件不存在返回空。
+/// 返回 (usage, `tool_calls)。文件不存在返回空`。
 pub fn collect_claude_code_session(
     file_path: impl AsRef<Path>,
     session_id: &str,
@@ -51,15 +51,15 @@ pub fn collect_claude_code_session(
         if rec.get("type").and_then(|v| v.as_str()) == Some("assistant") {
             let u = rec.pointer("/message/usage");
             if let Some(u) = u {
-                let input = u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
-                let output = u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
+                let input = u.get("input_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0);
+                let output = u.get("output_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0);
                 let cache_read = u
                     .get("cache_read_input_tokens")
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 let cache_write = u
                     .get("cache_creation_input_tokens")
-                    .and_then(|v| v.as_i64())
+                    .and_then(serde_json::Value::as_i64)
                     .unwrap_or(0);
                 if input + output + cache_read + cache_write > 0 {
                     usage.push(UsageRecord {
@@ -70,7 +70,7 @@ pub fn collect_claude_code_session(
                         model: rec
                             .pointer("/message/model")
                             .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
+                            .map(std::string::ToString::to_string),
                         ts: ts.unwrap_or_else(ch_domain::now_utc),
                         input_tokens: input,
                         output_tokens: output,
@@ -97,7 +97,7 @@ pub fn collect_claude_code_session(
                     let cmd = item
                         .pointer("/input/command")
                         .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                        .map(std::string::ToString::to_string);
                     tools.push(ToolCallRecord {
                         id: format!("ct_{session_id}_{seq}_{name}"),
                         provider: Provider::ClaudeCode,

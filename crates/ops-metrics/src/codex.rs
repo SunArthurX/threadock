@@ -1,5 +1,5 @@
 //! Codex ops 采集：JSONL `token_count.info.total_token_usage`（累计快照）
-//! → 每会话一条 UsageRecord（取最后一条快照）；`function_call` → ToolCallRecord。
+//! → 每会话一条 UsageRecord（取最后一条快照）；`function_call` → `ToolCallRecord`。
 
 use crate::{infer_destructive, OpsResult};
 use ch_domain::{Provider, ToolCallRecord, UsageRecord, UsageStatus};
@@ -51,7 +51,7 @@ pub fn collect_codex_session(
             source_dir = rec
                 .pointer("/payload/cwd")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
+                .map(std::string::ToString::to_string);
         }
         if rec.get("type").and_then(|v| v.as_str()) == Some("event_msg") {
             let p_type = rec.pointer("/payload/type").and_then(|v| v.as_str());
@@ -60,13 +60,13 @@ pub fn collect_codex_session(
                     if let Some(u) = info.pointer("/total_token_usage") {
                         last_snapshot = Some((
                             ts.unwrap_or_else(ch_domain::now_utc),
-                            u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
-                            u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0),
+                            u.get("input_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0),
+                            u.get("output_tokens").and_then(serde_json::Value::as_i64).unwrap_or(0),
                             u.get("reasoning_output_tokens")
-                                .and_then(|v| v.as_i64())
+                                .and_then(serde_json::Value::as_i64)
                                 .unwrap_or(0),
                             u.get("cached_input_tokens")
-                                .and_then(|v| v.as_i64())
+                                .and_then(serde_json::Value::as_i64)
                                 .unwrap_or(0),
                         ));
                     }
@@ -128,16 +128,16 @@ pub fn collect_codex_session(
     Ok((usage, tools))
 }
 
-/// 从 exec_command 参数中提取 cmd 文本。
+/// 从 `exec_command` 参数中提取 cmd 文本。
 fn extract_cmd_from_args(name: &str, args: &str) -> Option<String> {
     if name == "exec_command" || name == "shell" {
         let v: serde_json::Value = serde_json::from_str(args).unwrap_or_default();
-        return v.get("cmd").and_then(|c| c.as_str()).map(|s| s.to_string());
+        return v.get("cmd").and_then(|c| c.as_str()).map(std::string::ToString::to_string);
     }
     None
 }
 
-/// 采集整个 ~/.codex（sessions/ + archived_sessions/）。
+/// 采集整个 ~/.codex（sessions/ + `archived_sessions`/）。
 /// 文件级并行（按 CPU 数分片，封顶 8 线程）：114 个文件从串行 ~6.5s 降至 ~1s。
 pub fn collect_codex(
     codex_home: impl AsRef<Path>,
@@ -148,11 +148,10 @@ pub fn collect_codex(
     scan_jsonl(&home.join("archived_sessions"), &mut files);
 
     let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
+        .map_or(4, |n| n.get())
         .clamp(1, 8);
     // 按大小交替分片让负载均衡（大文件分散到不同线程）
-    files.sort_by_key(|f| std::cmp::Reverse(std::fs::metadata(f).map(|m| m.len()).unwrap_or(0)));
+    files.sort_by_key(|f| std::cmp::Reverse(std::fs::metadata(f).map_or(0, |m| m.len())));
     let mut shards: Vec<Vec<std::path::PathBuf>> = vec![Vec::new(); n_threads];
     for (i, f) in files.into_iter().enumerate() {
         shards[i % n_threads].push(f);

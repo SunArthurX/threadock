@@ -5,6 +5,7 @@
 ///
 /// 不解析符号链接（那需要文件系统访问），只做词法规范化。
 /// 这样在不同机器上、不同来源记录的同一路径能稳定匹配。
+#[must_use] 
 pub fn canonicalize_path(input: &str) -> String {
     let mut parts: Vec<&str> = Vec::new();
     for seg in input.split(['/', '\\']) {
@@ -32,6 +33,7 @@ pub fn canonicalize_path(input: &str) -> String {
 /// - `git@github.com:org/repo.git` → `github.com/org/repo`
 /// - `https://github.com/org/repo.git` → `github.com/org/repo`
 /// - `https://user@github.com/org/repo` → `github.com/org/repo`
+#[must_use] 
 pub fn canonicalize_git_remote(input: &str) -> String {
     let s = input.trim();
     if s.is_empty() {
@@ -58,11 +60,11 @@ pub fn canonicalize_git_remote(input: &str) -> String {
     // 去 userinfo（user@host → host）。只处理 @ 出现在第一个 / 之前的情况。
     let no_user = if let Some(at) = no_scheme.find('@') {
         let before_at = &no_scheme[..at];
-        if !before_at.contains('/') {
+        if before_at.contains('/') {
+            no_scheme
+        } else {
             // @ 在首个 / 之前 → userinfo
             &no_scheme[at + 1..]
-        } else {
-            no_scheme
         }
     } else {
         no_scheme
@@ -73,6 +75,7 @@ pub fn canonicalize_git_remote(input: &str) -> String {
 }
 
 /// 规范化显示名称用于相似度比较：小写、去常见后缀、去空白与标点。
+#[must_use] 
 pub fn normalized_name(input: &str) -> String {
     let lower = input.to_lowercase();
     lower
@@ -95,7 +98,8 @@ pub fn normalized_name(input: &str) -> String {
 /// - 否则 → 0.0
 ///
 /// plan §4.3 明确「名称相似度仅作为低置信度候选」，0.7 已低于
-/// AUTO_CONFIRM_THRESHOLD(0.75)，会触发用户确认。
+/// `AUTO_CONFIRM_THRESHOLD(0.75)，会触发用户确认`。
+#[must_use] 
 pub fn name_similarity(a: &str, b: &str) -> f64 {
     let na = normalized_name(a);
     let nb = normalized_name(b);

@@ -36,6 +36,7 @@ pub enum Severity {
 }
 
 impl Severity {
+    #[must_use] 
     pub fn parse(s: &str) -> Severity {
         match s {
             "high" => Severity::High,
@@ -48,7 +49,7 @@ impl Severity {
 /// 一条审计发现。
 #[derive(Debug, Clone, Serialize)]
 pub struct AuditFinding {
-    /// sensitive / dangerous_command / destructive_tool
+    /// sensitive / `dangerous_command` / `destructive_tool`
     pub kind: String,
     pub severity: Severity,
     /// 命中的规则名。
@@ -79,6 +80,7 @@ pub struct AuditReport {
 }
 
 /// 内置危险命令规则（name, 正则, 严重级）。
+#[must_use] 
 pub fn builtin_dangerous_rules() -> Vec<(&'static str, &'static str, Severity)> {
     vec![
         (
@@ -119,7 +121,7 @@ pub struct AuditScanner {
 }
 
 impl AuditScanner {
-    /// 构建扫描器：内置规则 + 用户自定义 policy_rules。
+    /// 构建扫描器：内置规则 + 用户自定义 `policy_rules`。
     pub fn build(custom_rules: &[PolicyRuleRecord]) -> AuditResult<Self> {
         let mut sensitive = Vec::new();
         let mut dangerous = Vec::new();
@@ -155,6 +157,7 @@ impl AuditScanner {
     }
 
     /// 扫描一批消息 → 敏感信息发现（片段脱敏）。
+    #[must_use] 
     pub fn scan_message(&self, row: &AuditMessageRow) -> Vec<AuditFinding> {
         let mut out = Vec::new();
         let text = &row.content_text;
@@ -194,6 +197,7 @@ impl AuditScanner {
     }
 
     /// 扫描一条工具调用 → 危险命令发现。
+    #[must_use] 
     pub fn scan_tool_call(&self, tc: &ToolCallRecord) -> Vec<AuditFinding> {
         let cmd = match &tc.command_text {
             Some(c) => c,
@@ -308,6 +312,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// 渲染 HTML 报告（自包含、可直接打开）。
+#[must_use] 
 pub fn render_html(report: &AuditReport) -> String {
     let mut html = String::new();
     writeln!(

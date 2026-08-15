@@ -30,7 +30,7 @@ pub struct SimilarHit {
     pub score: f64,
 }
 
-/// 从消息列表构造 ConversationText。
+/// 从消息列表构造 `ConversationText`。
 pub fn conversation_text(id: &str, title: Option<&str>, messages: &[Message]) -> ConversationText {
     let mut text = String::new();
     for m in messages {
@@ -51,6 +51,7 @@ pub fn conversation_text(id: &str, title: Option<&str>, messages: &[Message]) ->
 /// - `target`：目标会话文本。
 /// - `candidates`：候选池（不含 target 本身）。
 /// - `limit`：返回条数。
+#[must_use] 
 pub fn find_similar(
     target: &ConversationText,
     candidates: &[ConversationText],
@@ -247,15 +248,15 @@ mod tests {
 
     #[test]
     fn jaccard_zero_for_disjoint() {
-        let a: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
-        let b: HashSet<String> = ["c", "d"].iter().map(|s| s.to_string()).collect();
+        let a: HashSet<String> = ["a", "b"].iter().map(|s| (*s).to_string()).collect();
+        let b: HashSet<String> = ["c", "d"].iter().map(|s| (*s).to_string()).collect();
         assert_eq!(jaccard(&a, &b), 0.0);
     }
 
     #[test]
     fn jaccard_half_overlap() {
-        let a: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
-        let b: HashSet<String> = ["b", "c"].iter().map(|s| s.to_string()).collect();
+        let a: HashSet<String> = ["a", "b"].iter().map(|s| (*s).to_string()).collect();
+        let b: HashSet<String> = ["b", "c"].iter().map(|s| (*s).to_string()).collect();
         // 交集 {b}=1，并集 {a,b,c}=3
         assert!((jaccard(&a, &b) - 1.0 / 3.0).abs() < 0.01);
     }

@@ -20,6 +20,7 @@ pub struct ExportOptions {
 }
 
 impl ExportOptions {
+    #[must_use] 
     pub fn everything() -> Self {
         Self {
             include_commands: true,
@@ -28,6 +29,7 @@ impl ExportOptions {
             redact_secrets: true,
         }
     }
+    #[must_use] 
     pub fn messages_only() -> Self {
         Self::default()
     }
@@ -48,6 +50,7 @@ pub struct ExportData {
 }
 
 /// 组装导出数据：按选项过滤事件，并可选脱敏。
+#[must_use] 
 pub fn build_export_data(
     workspace: Option<&Workspace>,
     conversation: &Conversation,

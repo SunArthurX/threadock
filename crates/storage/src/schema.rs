@@ -1,14 +1,14 @@
 //! 数据库 schema，对应 plan §12.1 核心表。
 //!
 //! 设计要点：
-//! - 所有主键为 TEXT（带前缀的 UUID），见 domain::id。
+//! - 所有主键为 TEXT（带前缀的 UUID），见 `domain::id`。
 //! - 时间戳统一存 unix 毫秒（i64）。
 //! - 枚举存为 TEXT（小写字符串），由领域层负责转换。
 //! - `conversations` 上有 UNIQUE 约束保证幂等：见 plan §11.3 幂等键。
 //! - 索引覆盖常用查询路径。
 
 /// V1 建表脚本。每个语句用 `;` 分隔，由 migration 逐条执行。
-pub const SCHEMA_V1: &str = r#"
+pub const SCHEMA_V1: &str = r"
 -- ── 元数据：schema 版本追踪 ────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER PRIMARY KEY,
@@ -216,13 +216,13 @@ CREATE TRIGGER IF NOT EXISTS messages_au_fts AFTER UPDATE ON messages BEGIN
         (SELECT COALESCE(c.user_title, c.title) FROM conversations c WHERE c.id = NEW.conversation_id),
         COALESCE(NEW.content_text, '');
 END;
-"#;
+";
 
 /// V2：收藏、标签、归档（plan §6.3 Workspace 管理 / §6.4 浏览 / §6.5 标签）。
 ///
 /// - `conversations` 新增 `favorite`(INT 0/1)、`is_archived`(INT 0/1) 列。
 /// - 新增 `conversation_tags` 多对多关联表。
-pub const SCHEMA_V2: &str = r#"
+pub const SCHEMA_V2: &str = r"
 -- 收藏与归档标记（向后兼容：默认 0）
 ALTER TABLE conversations ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE conversations ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;
@@ -236,13 +236,13 @@ CREATE TABLE IF NOT EXISTS conversation_tags (
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON conversation_tags(tag);
-"#;
+";
 
 /// V3：知识提取结果持久化（plan §13.5「人工编辑后保留版本，不覆盖原始对话」）。
 ///
 /// 每次提取/编辑存一行，支持多版本（`version` 递增）。`is_current` 标记当前版本。
 /// 提取结果以 JSON 整体存储（ExtractionResult 序列化）。
-pub const SCHEMA_V3: &str = r#"
+pub const SCHEMA_V3: &str = r"
 CREATE TABLE IF NOT EXISTS knowledge_extractions (
     id              TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL,
@@ -256,10 +256,10 @@ CREATE TABLE IF NOT EXISTS knowledge_extractions (
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_conv ON knowledge_extractions(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_knowledge_current ON knowledge_extractions(conversation_id, is_current);
-"#;
+";
 
 /// V4：自定义脱敏规则持久化（plan §14.6「用户可配置忽略正则规则」）。
-pub const SCHEMA_V4: &str = r#"
+pub const SCHEMA_V4: &str = r"
 CREATE TABLE IF NOT EXISTS redaction_rules (
     id         TEXT PRIMARY KEY,
     name       TEXT NOT NULL UNIQUE,
@@ -268,17 +268,17 @@ CREATE TABLE IF NOT EXISTS redaction_rules (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
-"#;
+";
 
-/// V5：会话主子任务关系（source_parent_id）。
+/// `V5：会话主子任务关系（source_parent_id`）。
 /// ALTER TABLE ADD COLUMN 不支持 IF NOT EXISTS，由迁移框架的版本号机制保证只执行一次。
-pub const SCHEMA_V5: &str = r#"
+pub const SCHEMA_V5: &str = r"
 ALTER TABLE conversations ADD COLUMN source_parent_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_conversations_parent ON conversations(source_parent_id);
-"#;
+";
 
 /// V6：CodeAgentOps 指标表（plan codeagent-ops §3.2）。
-pub const SCHEMA_V6: &str = r#"
+pub const SCHEMA_V6: &str = r"
 CREATE TABLE IF NOT EXISTS usage_records (
     id TEXT PRIMARY KEY,
     provider_id TEXT NOT NULL,
@@ -317,10 +317,10 @@ CREATE TABLE IF NOT EXISTS tool_call_records (
 );
 CREATE INDEX IF NOT EXISTS idx_tool_ts ON tool_call_records(ts);
 CREATE INDEX IF NOT EXISTS idx_tool_destructive ON tool_call_records(destructive) WHERE destructive = 1;
-"#;
+";
 
 /// V7：审计策略规则 + 预算设置（plan codeagent-ops M4/M5）。
-pub const SCHEMA_V7: &str = r#"
+pub const SCHEMA_V7: &str = r"
 CREATE TABLE IF NOT EXISTS policy_rules (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
@@ -339,17 +339,17 @@ CREATE TABLE IF NOT EXISTS budget_settings (
     notify_on_exceed INTEGER NOT NULL DEFAULT 1,
     updated_at INTEGER NOT NULL
 );
-"#;
+";
 /// V8：通用键值设置（同步节流时间戳等跨进程持久状态）。
-pub const SCHEMA_V8: &str = r#"
+pub const SCHEMA_V8: &str = r"
 CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-"#;
+";
 
 /// V9：CodeAgentOps M6-M9 —— 资产清单、自动化任务、用量归因扩展。
-pub const SCHEMA_V9: &str = r#"
+pub const SCHEMA_V9: &str = r"
 ALTER TABLE usage_records ADD COLUMN source_dir TEXT;
 ALTER TABLE usage_records ADD COLUMN context_exceeded INTEGER NOT NULL DEFAULT 0;
 
@@ -376,9 +376,9 @@ CREATE TABLE IF NOT EXISTS automation_records (
     detail TEXT,
     UNIQUE(provider_id, name)
 );
-"#;
+";
 /// V10：导入新鲜度状态（「已导入」判定：源更新时间 ≤ 导入时观察时间）。
-pub const SCHEMA_V10: &str = r#"
+pub const SCHEMA_V10: &str = r"
 CREATE TABLE IF NOT EXISTS import_state (
     source_pk TEXT PRIMARY KEY,
     provider_id TEXT NOT NULL,
@@ -387,4 +387,4 @@ CREATE TABLE IF NOT EXISTS import_state (
     imported_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_import_state_provider ON import_state(provider_id);
-"#;
+";

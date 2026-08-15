@@ -231,8 +231,8 @@ impl Repository {
 
     // ── Conversation（幂等核心） ─────────────────────────────────────────
 
-    /// 写入 conversation。幂等键：(provider_id, installation_id, source_conversation_id)。
-    /// 重复写入更新内容字段，但保留 user_title（plan §11.5：用户数据优先）。
+    /// 写入 `conversation。幂等键：(provider_id`, `installation_id`, `source_conversation_id`)。
+    /// 重复写入更新内容字段，但保留 `user_title（plan` §11.5：用户数据优先）。
     pub fn upsert_conversation(&self, c: &Conversation) -> StorageResult<String> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let provider_id = format!("prov_{}", c.provider.as_str());
@@ -347,7 +347,7 @@ impl Repository {
                     wc: &mut Vec<String>,
                     a: &mut Vec<SqlValue>,
                     idx: &mut usize| {
-            wc.push(clause.replace("?", &format!("?{idx}")));
+            wc.push(clause.replace('?', &format!("?{idx}")));
             a.push(val);
             *idx += 1;
         };
@@ -364,7 +364,7 @@ impl Repository {
         if let Some(wsid) = &filter.workspace_id {
             push(
                 "c.workspace_id = ?".to_string(),
-                wsid.to_string().into(),
+                wsid.clone().into(),
                 &mut where_clauses,
                 &mut args,
                 &mut next_idx,
@@ -373,7 +373,7 @@ impl Repository {
         if let Some(fav) = filter.favorite {
             push(
                 "c.favorite = ?".to_string(),
-                (if fav { 1 } else { 0 } as i64).into(),
+                i64::from(i32::from(fav)).into(),
                 &mut where_clauses,
                 &mut args,
                 &mut next_idx,
@@ -382,7 +382,7 @@ impl Repository {
         if let Some(arch) = filter.archived {
             push(
                 "c.is_archived = ?".to_string(),
-                (if arch { 1 } else { 0 } as i64).into(),
+                i64::from(i32::from(arch)).into(),
                 &mut where_clauses,
                 &mut args,
                 &mut next_idx,
@@ -417,8 +417,8 @@ impl Repository {
         Ok(conn.query_row("SELECT COUNT(*) FROM conversations", [], |r| r.get(0))?)
     }
 
-    /// 列出指定父会话的子任务（按 source_parent_id 关联）。
-    /// `parent_source_id` 是父会话的 source_conversation_id，`provider_id` 形如 `prov_zcode`。
+    /// 列出指定父会话的子任务（按 `source_parent_id` 关联）。
+    /// `parent_source_id` 是父会话的 `source_conversation_id`，`provider_id` 形如 `prov_zcode`。
     pub fn list_child_conversations(
         &self,
         parent_source_id: &str,
@@ -454,7 +454,7 @@ impl Repository {
     }
 
     /// 清空所有数据（conversations 级联删除 messages/events/tags/knowledge）。
-    /// 保留 schema 和 redaction_rules（用户自定义规则）。
+    /// 保留 schema 和 `redaction_rules（用户自定义规则`）。
     /// 用于「重置数据」功能。
     pub fn clear_all(&self) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
@@ -612,9 +612,8 @@ impl Repository {
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE {clause}
              GROUP BY u.provider_id ORDER BY 3 DESC",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok(ProviderUsage {
@@ -643,9 +642,8 @@ impl Repository {
              FROM usage_records u
              WHERE {clause}
              GROUP BY model, u.provider_id ORDER BY 4 DESC",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok(ModelUsage {
@@ -674,9 +672,8 @@ impl Repository {
                     COUNT(*)
              FROM usage_records WHERE {clause}
              GROUP BY day ORDER BY day",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|v| v.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok(DailyUsage {
@@ -703,7 +700,6 @@ impl Repository {
                     COALESCE(AVG(duration_ms), 0)
              FROM tool_call_records WHERE {clause}
              GROUP BY tool_name ORDER BY 2 DESC LIMIT ?",
-            clause = clause,
         );
         let mut args: Vec<SqlValue> = Vec::new();
         if let Some(c) = cutoff {
@@ -742,7 +738,6 @@ impl Repository {
              WHERE (destructive = 1 OR status = 'error' OR (exit_code IS NOT NULL AND exit_code != 0))
                AND {clause}
              ORDER BY ts DESC LIMIT ?",
-            clause = clause,
         );
         let mut args: Vec<SqlValue> = Vec::new();
         if let Some(c) = cutoff {
@@ -780,7 +775,7 @@ impl Repository {
     /// 性能关键路径：逐条 upsert 每次独立提交（WAL + synchronous=FULL 下
     /// 每条一次 fsync），大批量导入会拖垮主锁 → UI 卡顿。这里整会话一个事务，
     /// 只在提交时 fsync 一次，快 1-2 个数量级。
-    /// workspace_name 非空时按名查找/创建并挂到会话上。
+    /// `workspace_name` 非空时按名查找/创建并挂到会话上。
     pub fn import_conversation_batch(
         &self,
         conv: &Conversation,
@@ -919,7 +914,7 @@ impl Repository {
                     m.source_message_id,
                     m.role.as_str(),
                     m.content_text,
-                    m.content_json.as_ref().map(|v| v.to_string()),
+                    m.content_json.as_ref().map(std::string::ToString::to_string),
                     m.sequence_number,
                     timestamp::to_millis(m.created_at),
                     m.content_hash,
@@ -953,7 +948,7 @@ impl Repository {
                     e.event_type.as_str(),
                     e.status.map(|s| s.as_str()),
                     e.summary,
-                    e.payload_json.as_ref().map(|v| v.to_string()),
+                    e.payload_json.as_ref().map(std::string::ToString::to_string),
                     e.sequence_number,
                     timestamp::to_millis(e.created_at),
                     timestamp::to_millis(e.completed_at),
@@ -980,7 +975,7 @@ impl Repository {
         Ok(id)
     }
 
-    /// 批量回填/刷新导入新鲜度（auto_sync 对已存在会话也记录当前源时间）。
+    /// `批量回填/刷新导入新鲜度（auto_sync` 对已存在会话也记录当前源时间）。
     pub fn record_import_states(
         &self,
         provider_id: &str,
@@ -1012,7 +1007,7 @@ impl Repository {
         Ok(n)
     }
 
-    /// 读取某 provider 的 {source_id: observed_ms} 新鲜度表。
+    /// 读取某 provider 的 {`source_id`: `observed_ms`} 新鲜度表。
     pub fn import_state_map(
         &self,
         provider_id: &str,
@@ -1033,6 +1028,7 @@ impl Repository {
 
     /// 「已导入」判定：会话存在且源的更新时间不晚于导入时观察时间。
     /// 源时间未知（None）时退化为存在性判断。
+    #[must_use] 
     pub fn is_up_to_date(
         state: &std::collections::HashMap<String, Option<i64>>,
         existing: &std::collections::HashSet<(String, String)>,
@@ -1043,14 +1039,14 @@ impl Repository {
         if !existing.contains(&(provider_id.to_string(), source_id.to_string())) {
             return false;
         }
-        match (source_updated_ms, state.get(source_id).cloned()) {
+        match (source_updated_ms, state.get(source_id).copied()) {
             (Some(src_ms), Some(Some(obs))) => obs >= src_ms,
             _ => true,
         }
     }
 
     /// 修复旧数据的主子链路：当来源侧有 parent 而库内为 NULL/不一致时更新。
-    /// 返回是否实际更新。用于 auto_sync 对已存在会话补 source_parent_id。
+    /// 返回是否实际更新。用于 `auto_sync` 对已存在会话补 `source_parent_id`。
     pub fn repair_conversation_parent(
         &self,
         provider_id: &str,
@@ -1092,7 +1088,7 @@ impl Repository {
         Ok(n)
     }
 
-    /// 已导入会话的 (provider_id, source_id) 全集（auto_sync 幂等快速检查用）。
+    /// 已导入会话的 (`provider_id`, `source_id`) `全集（auto_sync` 幂等快速检查用）。
     pub fn list_conversation_sources(&self) -> StorageResult<Vec<(String, String)>> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt =
@@ -1105,7 +1101,7 @@ impl Repository {
         Ok(v)
     }
 
-    /// 按 provider_id + source_conversation_id 精确查会话（审计跳转用）。
+    /// 按 `provider_id` + `source_conversation_id` 精确查会话（审计跳转用）。
     pub fn find_conversation_by_source(
         &self,
         provider_id: &str,
@@ -1126,7 +1122,7 @@ impl Repository {
         .map_err(Into::into)
     }
 
-    /// 本月（自 cutoff 毫秒起）用量：返回 (tokens, cost_usd)。
+    /// 本月（自 cutoff 毫秒起）用量：返回 (tokens, `cost_usd`)。
     pub fn ops_month_usage_since(&self, cutoff_ms: i64) -> StorageResult<(i64, f64)> {
         let conn = self.conn.lock().expect("mutex poisoned");
         conn.query_row(
@@ -1139,7 +1135,7 @@ impl Repository {
         .map_err(Into::into)
     }
 
-    /// 模型 → (input_tokens, output_tokens) 汇总（成本重算用）。
+    /// 模型 → (`input_tokens`, `output_tokens`) 汇总（成本重算用）。
     pub fn ops_model_token_totals(&self) -> StorageResult<Vec<(String, String, i64, i64)>> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(
@@ -1215,7 +1211,7 @@ impl Repository {
         Ok(n)
     }
 
-    /// 按单价更新该模型每行的 cost_usd（行内 tokens × 单价，行成本可加总）。
+    /// 按单价更新该模型每行的 `cost_usd（行内` tokens × 单价，行成本可加总）。
     pub fn update_model_pricing(
         &self,
         model: &str,
@@ -1395,7 +1391,6 @@ impl Repository {
                     COUNT(*)
              FROM usage_records WHERE {clause}
              GROUP BY d ORDER BY 2 DESC LIMIT ?",
-            clause = clause,
         );
         let mut args: Vec<SqlValue> = Vec::new();
         if let Some(c) = cutoff {
@@ -1418,7 +1413,7 @@ impl Repository {
         Ok(v)
     }
 
-    /// M7：缓存命中率（cache_read / (input + cache_read)）按 provider。
+    /// `M7：缓存命中率（cache_read` / (input + `cache_read)）按` provider。
     pub fn ops_cache_stats(&self, days: Option<i64>) -> StorageResult<Vec<CacheStat>> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let (clause, cutoff) = Self::range_clause(days);
@@ -1429,9 +1424,8 @@ impl Repository {
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE {clause}
              GROUP BY p.name ORDER BY 2 DESC",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             let input: i64 = r.get::<_, Option<i64>>(1)?.unwrap_or(0);
@@ -1466,9 +1460,8 @@ impl Repository {
             "SELECT date(ts/1000,'unixepoch','localtime') AS d, COUNT(*)
              FROM usage_records WHERE status = 'error' AND {clause}
              GROUP BY d ORDER BY d",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let daily: Vec<(String, i64)> = {
             let mut stmt = conn.prepare(&sql)?;
             let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
@@ -1502,7 +1495,6 @@ impl Repository {
             "SELECT source_session_id, SUM(retry_count) AS rc, COUNT(*) AS n
              FROM usage_records WHERE retry_count IS NOT NULL AND retry_count > 0 AND {clause}
              GROUP BY source_session_id HAVING rc >= 5 ORDER BY rc DESC LIMIT 5",
-            clause = clause,
         );
         {
             let mut stmt = conn.prepare(&sql)?;
@@ -1534,7 +1526,6 @@ impl Repository {
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE context_exceeded > 0 AND {clause}
              GROUP BY p.name ORDER BY 2 DESC",
-            clause = clause,
         );
         {
             let mut stmt = conn.prepare(&sql)?;
@@ -1575,9 +1566,8 @@ impl Repository {
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE {clause}
              GROUP BY p.name",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             let total: i64 = r.get(1)?;
@@ -1630,9 +1620,8 @@ impl Repository {
             "SELECT p.name, u.duration_ms FROM usage_records u
              JOIN providers p ON p.id = u.provider_id
              WHERE u.duration_ms IS NOT NULL AND u.duration_ms > 0 AND {clause}",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
@@ -1644,7 +1633,7 @@ impl Repository {
         }
         let mut result = Vec::new();
         for (p, mut ds) in by_p {
-            ds.sort();
+            ds.sort_unstable();
             let n = ds.len();
             result.push(LatencyStat {
                 provider: p,
@@ -1675,9 +1664,8 @@ impl Repository {
              HAVING SUM(u.input_tokens) > 10000 AND SUM(u.output_tokens) > 0
                 AND (CAST(SUM(u.input_tokens) AS REAL) / SUM(u.output_tokens)) > 10
              ORDER BY SUM(u.input_tokens) DESC LIMIT ?",
-            clause = clause,
         );
-        let mut args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let mut args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         args.push(n.into());
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
@@ -1735,9 +1723,8 @@ impl Repository {
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE {clause}
              GROUP BY p.name",
-            clause = clause,
         );
-        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
         let mut stmt = conn.prepare(&sql)?;
         let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
             let total: i64 = r.get(1)?;
@@ -1836,7 +1823,7 @@ impl Repository {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
              ON CONFLICT(name) DO UPDATE SET
                 pattern = ?3, kind = ?4, severity = ?5, enabled = ?6, updated_at = ?7",
-            params![rule.id, rule.name, rule.pattern, rule.kind, rule.severity, rule.enabled as i64, now_ms],
+            params![rule.id, rule.name, rule.pattern, rule.kind, rule.severity, i64::from(rule.enabled), now_ms],
         )?;
         Ok(rule.id.clone())
     }
@@ -1880,7 +1867,7 @@ impl Repository {
              VALUES (1, ?1, ?2, ?3, ?4)
              ON CONFLICT(id) DO UPDATE SET
                 monthly_token_limit = ?1, monthly_cost_limit = ?2, notify_on_exceed = ?3, updated_at = ?4",
-            params![s.monthly_token_limit, s.monthly_cost_limit, s.notify_on_exceed as i64, now_ms],
+            params![s.monthly_token_limit, s.monthly_cost_limit, i64::from(s.notify_on_exceed), now_ms],
         )?;
         Ok(())
     }
@@ -1954,7 +1941,7 @@ impl Repository {
 
     // ── Message（幂等：按 content_hash + sequence 去重） ──────────────────
 
-    /// 写入 message。幂等键：(conversation_id, sequence_number)。
+    /// 写入 `message。幂等键：(conversation_id`, `sequence_number`)。
     pub fn upsert_message(&self, m: &Message) -> StorageResult<String> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let existing: Option<String> = conn
@@ -1981,7 +1968,7 @@ impl Repository {
                 m.source_message_id,
                 m.role.as_str(),
                 m.content_text,
-                m.content_json.as_ref().map(|v| v.to_string()),
+                m.content_json.as_ref().map(std::string::ToString::to_string),
                 m.sequence_number,
                 timestamp::to_millis(m.created_at),
                 m.content_hash,
@@ -2035,7 +2022,7 @@ impl Repository {
                 e.event_type.as_str(),
                 e.status.map(|s| s.as_str()),
                 e.summary,
-                e.payload_json.as_ref().map(|v| v.to_string()),
+                e.payload_json.as_ref().map(std::string::ToString::to_string),
                 e.sequence_number,
                 timestamp::to_millis(e.created_at),
                 timestamp::to_millis(e.completed_at),
@@ -2062,7 +2049,7 @@ impl Repository {
 
     // ── Sync cursor ──────────────────────────────────────────────────────
 
-    /// 写入同步游标。幂等：(provider_id, installation_id, cursor_type)。
+    /// `写入同步游标。幂等：(provider_id`, `installation_id`, `cursor_type`)。
     pub fn upsert_cursor(
         &self,
         provider: Provider,
@@ -2118,7 +2105,7 @@ impl Repository {
         let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET favorite = ?1 WHERE id = ?2",
-            params![if favorite { 1 } else { 0 }, conversation_id],
+            params![i32::from(favorite), conversation_id],
         )?;
         if changed == 0 {
             return Err(StorageError::NotFound {
@@ -2148,7 +2135,7 @@ impl Repository {
         let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
             "UPDATE conversations SET is_archived = ?1 WHERE id = ?2",
-            params![if archived { 1 } else { 0 }, conversation_id],
+            params![i32::from(archived), conversation_id],
         )?;
         if changed == 0 {
             return Err(StorageError::NotFound {
@@ -2225,8 +2212,8 @@ impl Repository {
 
     /// 保存一条知识提取结果（plan §13.5「人工编辑后保留版本」）。
     ///
-    /// 把该 conversation 的旧版本标记 is_current=0，新版本作为 current。
-    /// `result_json` 是 ExtractionResult 的序列化字符串。
+    /// 把该 conversation 的旧版本标记 `is_current=0，新版本作为` current。
+    /// `result_json` 是 `ExtractionResult` 的序列化字符串。
     pub fn save_knowledge(
         &self,
         conversation_id: &str,
@@ -2318,7 +2305,7 @@ impl Repository {
 
     // ── 删除（plan §11.4 删除语义 / §3 用户可完全删除）──────────────────
 
-    /// 软删除：标记 source_status=deleted，保留数据（plan §11.4 默认行为）。
+    /// 软删除：标记 `source_status=deleted，保留数据（plan` §11.4 默认行为）。
     pub fn soft_delete_conversation(&self, conversation_id: &str) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let changed = conn.execute(
@@ -2429,7 +2416,7 @@ pub struct KnowledgeRecord {
     pub conversation_id: String,
     pub version: i64,
     pub extractor: String,
-    /// ExtractionResult 的 JSON 字符串。
+    /// `ExtractionResult` 的 JSON 字符串。
     pub result_json: String,
     pub created_at: ch_domain::Timestamp,
     pub updated_at: ch_domain::Timestamp,

@@ -20,6 +20,7 @@ use crate::serialize::ExportOptions;
 use ch_domain::{Conversation, Event, EventType, Message, Role};
 
 /// 把会话导出为 Markdown 字符串。
+#[must_use] 
 pub fn to_markdown(
     conversation: &Conversation,
     messages: &[Message],

@@ -1,7 +1,7 @@
 //! 自动化/定时任务采集（M8）：
 //! - Codex：`~/.codex/automations/*/*/automation.toml`（name/schedule/prompt 摘要）
-//! - ZCode：`workflow_definition` 表（builtin/user，enabled/trusted）+ `workflow_run` 最近状态
-//! - MiniMax：`~/.minimax/background-tasks/`（目录名即任务，读元数据 json 兜底）
+//! - `ZCode`：`workflow_definition` 表（builtin/user，enabled/trusted）+ `workflow_run` 最近状态
+//! - `MiniMax`：`~/.minimax/background-tasks/`（目录名即任务，读元数据 json 兜底）
 
 use crate::{open_ro, OpsResult};
 use ch_domain::{AutomationRecord, Provider};

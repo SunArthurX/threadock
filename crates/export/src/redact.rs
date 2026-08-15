@@ -34,6 +34,7 @@ pub struct RedactionStats {
 }
 
 impl RedactionStats {
+    #[must_use] 
     pub fn total(&self) -> usize {
         self.aws_access_key
             + self.aws_secret_key
@@ -46,6 +47,7 @@ impl RedactionStats {
 }
 
 /// 内置规则集。
+#[must_use] 
 pub fn builtin_rules() -> Vec<RedactionRule> {
     vec![
         RedactionRule {
@@ -93,6 +95,7 @@ pub fn builtin_rules() -> Vec<RedactionRule> {
 /// 对文本执行脱敏，返回脱敏后的文本与命中统计。
 ///
 /// 同一处命中只算一次（按规则顺序应用）。`[REDACTED:type]` 占位便于审计定位。
+#[must_use] 
 pub fn redact(input: &str) -> (String, RedactionStats) {
     redact_with(input, &[])
 }
@@ -118,6 +121,7 @@ impl CustomRule {
 /// 用内置规则 + 自定义规则执行脱敏（plan §14.6）。
 ///
 /// 自定义规则在内置规则之后应用，允许用户覆盖项目特定的敏感模式。
+#[must_use] 
 pub fn redact_with(input: &str, custom: &[CustomRule]) -> (String, RedactionStats) {
     let mut text = input.to_string();
     let mut stats = RedactionStats::default();

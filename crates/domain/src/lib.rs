@@ -21,6 +21,7 @@ pub type Timestamp = OffsetDateTime;
 /// 生成新的对象 ID（ULID 风格的带前缀 UUID v4）。
 ///
 /// 前缀让人一眼看出对象类型，便于日志和调试。
+#[must_use] 
 pub fn new_id(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
@@ -50,6 +51,7 @@ pub enum Provider {
 
 impl Provider {
     /// 稳定的字符串标识，用于数据库存储和幂等键。
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Provider::Codex => "codex",
@@ -98,6 +100,7 @@ pub enum Role {
 }
 
 impl Role {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Role::User => "user",
@@ -143,6 +146,7 @@ pub enum EventType {
 }
 
 impl EventType {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             EventType::ToolCallStarted => "tool_call_started",
@@ -188,6 +192,7 @@ pub enum Status {
 }
 
 impl Status {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Status::Active => "active",
@@ -239,7 +244,7 @@ impl Installation {
     }
 }
 
-/// 来源 Workspace（未合并的原始 workspace），对应 plan §12.1 source_workspaces。
+/// 来源 Workspace（未合并的原始 workspace），对应 plan §12.1 `source_workspaces`。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceWorkspace {
     pub provider: Provider,
@@ -250,7 +255,7 @@ pub struct SourceWorkspace {
     pub workspace_id: String,
     pub raw_name: Option<String>,
     pub raw_path: Option<String>,
-    /// 合并方式，见 plan §4.3（manual / git_remote / path / ...）。
+    /// 合并方式，见 plan §4.3（manual / `git_remote` / path / ...）。
     pub match_method: Option<MatchMethod>,
     pub match_confidence: Option<f64>,
     pub source_payload_id: Option<String>,
@@ -277,6 +282,7 @@ pub enum MatchMethod {
 }
 
 impl MatchMethod {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             MatchMethod::Manual => "manual",
@@ -310,6 +316,7 @@ pub struct Workspace {
 
 impl Workspace {
     /// 用户可见名称：用户自定义标题优先，否则用展示名。
+    #[must_use] 
     pub fn effective_title(&self) -> &str {
         self.user_title.as_deref().unwrap_or(&self.display_name)
     }
@@ -352,8 +359,8 @@ pub struct Conversation {
     pub completeness_score: Option<f64>,
     pub content_hash: Option<String>,
     pub raw_payload_id: Option<String>,
-    /// 来源侧的父会话 ID（主子任务链路，如 MiniMax 的 parentSessionId）。
-    /// 为 None 表示顶层主任务；为 Some(pid) 表示 pid 是父会话的 source_conversation_id。
+    /// 来源侧的父会话 ID（主子任务链路，如 `MiniMax` 的 parentSessionId）。
+    /// 为 None 表示顶层主任务；为 Some(pid) 表示 pid 是父会话的 `source_conversation_id`。
     pub source_parent_id: Option<String>,
 }
 
@@ -382,6 +389,7 @@ impl Conversation {
     }
 
     /// 用户可见标题。
+    #[must_use] 
     pub fn effective_title(&self) -> &str {
         self.user_title
             .as_deref()
@@ -503,7 +511,7 @@ impl Event {
 pub struct UsageRecord {
     pub id: String,
     pub provider: Provider,
-    /// 来源侧会话 ID（对应 Conversation.source_conversation_id）。
+    /// 来源侧会话 ID（对应 `Conversation.source_conversation_id`）。
     pub source_session_id: String,
     pub turn_id: Option<String>,
     pub model: Option<String>,
@@ -533,6 +541,7 @@ pub enum UsageStatus {
 }
 
 impl UsageStatus {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             UsageStatus::Running => "running",
@@ -542,6 +551,7 @@ impl UsageStatus {
         }
     }
 
+    #[must_use] 
     pub fn parse(s: &str) -> UsageStatus {
         match s {
             "running" => UsageStatus::Running,
@@ -576,7 +586,7 @@ pub struct ToolCallRecord {
 pub struct AssetRecord {
     pub id: String,
     pub provider: Provider,
-    /// skill / plugin / mcp / builtin_skill
+    /// skill / plugin / mcp / `builtin_skill`
     pub kind: String,
     pub name: String,
     pub version: Option<String>,
@@ -601,6 +611,7 @@ pub struct AutomationRecord {
 
 impl UsageRecord {
     /// 计费口径：input + output + reasoning（cache 不计费，单列）。
+    #[must_use] 
     pub fn billable_tokens(&self) -> i64 {
         self.input_tokens + self.output_tokens + self.reasoning_tokens
     }
@@ -611,6 +622,7 @@ impl UsageRecord {
 // ────────────────────────────────────────────────────────────────────────────
 
 /// 当前 UTC 时间。集中一处便于测试替换。
+#[must_use] 
 pub fn now_utc() -> Timestamp {
     OffsetDateTime::now_utc()
 }

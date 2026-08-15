@@ -31,7 +31,7 @@ pub struct HelloResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParseRequest {
-    /// 源标识（文件路径或 URL），用作 source_conversation_id。
+    /// 源标识（文件路径或 URL），用作 `source_conversation_id`。
     pub source_id: String,
     /// 原始内容字节（base64 编码，避免 JSON 里的二进制问题）。
     pub content_base64: String,
@@ -55,6 +55,7 @@ pub struct HealthResponse {
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
+#[must_use] 
 pub fn encode_bytes(data: &[u8]) -> String {
     STANDARD.encode(data)
 }

@@ -66,7 +66,7 @@ pub fn export_conversation(
     let path = Path::new(out_path);
     std::fs::write(path, content.as_bytes())?;
 
-    println!("exported {} → {}", conversation_id, out_path);
+    println!("exported {conversation_id} → {out_path}");
     if let Some(stats) = ch_export::serialize::build_export_data(
         workspace.as_ref(),
         &conv,
@@ -273,7 +273,7 @@ mod tests {
         assert_eq!(summary.files_written, 3);
         let json_files: Vec<_> = std::fs::read_dir(outdir.path())
             .expect("unexpected None")
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
             .collect();
         assert_eq!(json_files.len(), 3);

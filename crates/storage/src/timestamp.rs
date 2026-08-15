@@ -1,12 +1,13 @@
 //! 时间在领域层（OffsetDateTime）与存储层（unix 毫秒 i64）之间的转换。
 //!
 //! 用 unix 毫秒而非秒，足以覆盖 1970±约 2900 万年的精度需求，
-//! 且 SQLite 对 i64 排序/比较天然高效。
+//! 且 `SQLite` 对 i64 排序/比较天然高效。
 
 use ch_domain::Timestamp;
 use time::OffsetDateTime;
 
 /// 领域时间 → 存储毫秒。None 保持 None。
+#[must_use] 
 pub fn to_millis(ts: Option<Timestamp>) -> Option<i64> {
     ts.map(|t| {
         let dur = t - OffsetDateTime::UNIX_EPOCH;
@@ -16,13 +17,14 @@ pub fn to_millis(ts: Option<Timestamp>) -> Option<i64> {
 }
 
 /// 存储毫秒 → 领域时间。
+#[must_use] 
 pub fn from_millis(ms: Option<i64>) -> Option<Timestamp> {
     ms.and_then(|m| {
         let secs = m.div_euclid(1000);
         let nanos = (m.rem_euclid(1000)) as i32 * 1_000_000;
         OffsetDateTime::from_unix_timestamp(secs)
             .ok()
-            .map(|t| t + time::Duration::nanoseconds(nanos as i64))
+            .map(|t| t + time::Duration::nanoseconds(i64::from(nanos)))
     })
 }
 

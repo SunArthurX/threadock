@@ -50,7 +50,8 @@ pub struct FileRef {
     pub source_message_ids: Vec<String>,
 }
 
-/// 用于按 event_type 过滤的便利方法。
+/// 用于按 `event_type` 过滤的便利方法。
+#[must_use] 
 pub fn events_of_type(events: &[Event], t: EventType) -> Vec<&Event> {
     events.iter().filter(|e| e.event_type == t).collect()
 }

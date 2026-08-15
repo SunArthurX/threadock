@@ -12,7 +12,7 @@ fn main() {
 
     // ── 前端治理页同参（range=30 / 全部=60 …）──
     for days in [Some(30i64), Some(7), None] {
-        let label = days.map(|d| d.to_string()).unwrap_or_else(|| "all".into());
+        let label = days.map_or_else(|| "all".into(), |d| d.to_string());
         let ov = repo
             .ops_overview(days)
             .unwrap_or_else(|e| panic!("overview({label}) 失败: {e}"));

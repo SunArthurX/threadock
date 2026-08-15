@@ -15,7 +15,7 @@ pub trait ConversationAdapter: Send + Sync {
     /// 返回元信息。
     fn metadata(&self) -> AdapterMetadata;
 
-    /// 解析原始内容为 RawConversation。
+    /// 解析原始内容为 `RawConversation`。
     fn parse(&self, source_id: &str, content: &[u8]) -> Result<RawConversation, AdapterError>;
 
     /// 健康检查。

@@ -15,9 +15,7 @@ fn main() {
         .init();
 
     // 数据目录：优先 CH_DATA_DIR 环境变量，否则 ./data
-    let data_dir = std::env::var("CH_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("./data"));
+    let data_dir = std::env::var("CH_DATA_DIR").map_or_else(|_| PathBuf::from("./data"), PathBuf::from);
 
     let state = match DaemonState::open(DaemonStateConfig { data_dir }) {
         Ok(s) => s,

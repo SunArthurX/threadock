@@ -1,9 +1,9 @@
 //! Daemon 状态：双连接架构（WAL 模式下读写分离，互不阻塞）。
 //!
-//! write_repo：写连接（auto_sync / 导入 / 重置）
-//! read_repo： 读连接（UI 查询 / 概览 / 会话详情）
+//! `write_repo：写连接（auto_sync` / 导入 / 重置）
+//! `read_repo`： 读连接（UI 查询 / 概览 / 会话详情）
 //!
-//! SQLite WAL 模式支持 N 个读者 + 1 个写者并发，
+//! `SQLite` WAL 模式支持 N 个读者 + 1 个写者并发，
 //! 两个连接各自持有独立 Mutex，读写路径完全解耦 →
 //! 增量导入时 UI 查询零等待。
 
@@ -29,7 +29,7 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
-    /// 在 data_dir 下打开/创建双连接 + SearchIndex + RawStore。
+    /// 在 `data_dir` 下打开/创建双连接 + `SearchIndex` + `RawStore`。
     pub fn open(config: DaemonStateConfig) -> Result<Self, DaemonStateError> {
         std::fs::create_dir_all(&config.data_dir)?;
         let db_path = config.data_dir.join("conversation-hub.db");

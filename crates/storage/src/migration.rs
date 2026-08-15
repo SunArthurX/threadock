@@ -92,7 +92,7 @@ pub fn current_version(conn: &Connection) -> StorageResult<u32> {
     let v: Option<i64> = conn
         .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
         .unwrap_or(None);
-    Ok(v.map(|v| v as u32).unwrap_or(0))
+    Ok(v.map_or(0, |v| v as u32))
 }
 
 /// 把库迁移到 `LATEST_VERSION`。可重入。
@@ -146,7 +146,7 @@ fn apply_migration(conn: &mut Connection, m: &Migration) -> StorageResult<()> {
     tx.execute(
         "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
         rusqlite::params![
-            m.version as i64,
+            i64::from(m.version),
             crate::timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed")
         ],
     )

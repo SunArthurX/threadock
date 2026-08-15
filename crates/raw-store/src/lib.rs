@@ -4,7 +4,7 @@
 //!
 //! 第三方来源（Codex/Cursor/...）的 Schema 会频繁变化。我们同时保存：
 //! - **Raw**：来源原始字节（本文档实现），BLAKE3 内容寻址 + zstd 压缩。
-//! - **Normalized**：标准化后的 SQLite 记录（在 storage crate）。
+//! - **Normalized**：标准化后的 `SQLite` 记录（在 storage crate）。
 //!
 //! 这样未来升级解析器时，可从 Raw 重新标准化，无需再访问第三方应用（plan §12.3）。
 //!

@@ -23,7 +23,7 @@ pub struct SearchHit {
     pub score: f32,
 }
 
-/// 查询条件（与 storage::search::SearchQuery 对齐）。
+/// 查询条件（与 `storage::search::SearchQuery` 对齐）。
 #[derive(Debug, Clone, Default)]
 pub struct SearchQuery {
     pub query: String,
@@ -41,6 +41,7 @@ impl SearchQuery {
             limit: 50,
         }
     }
+    #[must_use] 
     pub fn with_provider(mut self, p: Provider) -> Self {
         self.provider = Some(p);
         self
@@ -49,6 +50,7 @@ impl SearchQuery {
         self.workspace_id = Some(id.into());
         self
     }
+    #[must_use] 
     pub fn with_limit(mut self, n: usize) -> Self {
         self.limit = n;
         self
@@ -116,8 +118,8 @@ fn register_tokenizers(index: &TantivyIndex) {
 
 /// Tantivy 搜索索引。
 ///
-/// 生命周期：open → 多次 index_message/delete_by_message → commit → search。
-/// 与 SQLite 主数据并存；索引可随时从主数据 rebuild（plan §3 Rebuildable index）。
+/// 生命周期：open → 多次 `index_message/delete_by_message` → commit → search。
+/// 与 `SQLite` 主数据并存；索引可随时从主数据 rebuild（plan §3 Rebuildable index）。
 pub struct SearchIndex {
     index: TantivyIndex,
     reader: IndexReader,
@@ -189,7 +191,7 @@ impl SearchIndex {
             .map_err(|e| SearchError::Tantivy(e.to_string()))
     }
 
-    /// 索引一条消息（自动按 message_id 删除旧版本后插入，保证幂等）。
+    /// 索引一条消息（自动按 `message_id` 删除旧版本后插入，保证幂等）。
     pub fn index_message(&self, writer: &mut IndexWriter, m: &IndexableMessage) -> LibResult<()> {
         // 先删旧
         let _ = writer.delete_term(tantivy::Term::from_field_text(
@@ -218,7 +220,7 @@ impl SearchIndex {
         Ok(())
     }
 
-    /// 按 message_id 删除。
+    /// 按 `message_id` 删除。
     pub fn delete_message(&self, writer: &mut IndexWriter, message_id: &str) -> LibResult<()> {
         writer.delete_term(tantivy::Term::from_field_text(
             self.fields.message_id,
@@ -277,7 +279,7 @@ impl SearchIndex {
                 .map_err(|e| SearchError::Tantivy(e.to_string()))?;
             let get = |field: Field| -> Option<String> {
                 doc.get_first(field)
-                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .and_then(|v| v.as_str().map(std::string::ToString::to_string))
             };
             let provider_str = get(f.provider).unwrap_or_default();
             let role_str = get(f.role).unwrap_or_default();

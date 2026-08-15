@@ -66,7 +66,7 @@ pub struct Normalized {
     pub completeness_score: f64,
 }
 
-/// 把 RawConversation 标准化为 Normalized。
+/// 把 `RawConversation` 标准化为 Normalized。
 ///
 /// 步骤（对齐 plan §11.2 流水线后半段）：
 /// 1. 校验至少有一条消息。
@@ -113,7 +113,7 @@ pub fn normalize(raw: RawConversation) -> NormalizationResult<Normalized> {
     }
 
     // 3. conversation hash
-    let hash_refs: Vec<&str> = message_hashes.iter().map(|s| s.as_str()).collect();
+    let hash_refs: Vec<&str> = message_hashes.iter().map(std::string::String::as_str).collect();
     let conversation_hash =
         hash::content_hash_for_conversation(raw.provider, &raw.source_conversation_id, &hash_refs);
     conversation.content_hash = Some(conversation_hash.clone());

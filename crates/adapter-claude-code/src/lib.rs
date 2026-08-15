@@ -9,7 +9,7 @@
 //! ## 能力
 //!
 //! - `discover_sessions`：扫描 `~/.claude/projects/` 找到所有 .jsonl 会话文件。
-//! - `parse_session`：把单个 JSONL 文件解析为 `RawConversation`（含消息 + tool_use 事件）。
+//! - `parse_session`：把单个 JSONL 文件解析为 `RawConversation`（含消息 + `tool_use` 事件）。
 
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
@@ -72,7 +72,7 @@ pub fn discover_sessions(claude_home: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                     .unwrap_or("unknown")
                     .to_string();
                 let meta = f.metadata();
-                let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
                 let mtime_ms = meta
                     .ok()
                     .and_then(|m| m.modified().ok())
@@ -162,13 +162,12 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                     // 判断是否是纯 tool_result（不含 text）——这些不是真正的用户消息
                     let is_pure_tool_result = content_val
                         .and_then(|c| c.as_array())
-                        .map(|arr| {
+                        .is_some_and(|arr| {
                             arr.iter().all(|item| {
                                 item.get("type").and_then(|t| t.as_str())
                                     == Some("tool_result")
                             })
-                        })
-                        .unwrap_or(false);
+                        });
 
                     if !is_pure_tool_result {
                         if let Some(text) = extract_text(content_val) {
@@ -273,7 +272,7 @@ fn parse_iso_timestamp(s: &str) -> Option<time::OffsetDateTime> {
 }
 
 /// 从 content 字段提取纯文本。
-/// content 可能是 string，也可能是 [{type:text, text:...}, {type:tool_use, ...}]。
+/// content 可能是 string，也可能是 [{type:text, text:...}, {`type:tool_use`, ...}]。
 /// 过滤 thinking 类型（内部思考，不是正文）。
 fn extract_text(content: Option<&serde_json::Value>) -> Option<String> {
     let val = content?;

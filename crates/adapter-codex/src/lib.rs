@@ -1,4 +1,4 @@
-//! Codex (ChatGPT CLI / Codex Desktop) Adapter，对应 plan §10.5「Codex」。
+//! Codex (`ChatGPT` CLI / Codex Desktop) Adapter，对应 plan §10.5「Codex」。
 //!
 //! ## 数据源
 //!
@@ -15,7 +15,7 @@
 //!
 //! ## 能力
 //!
-//! - `discover_sessions`：列出 sessions/ 与 archived_sessions/ 下所有 .jsonl
+//! - `discover_sessions`：列出 sessions/ 与 `archived_sessions`/ 下所有 .jsonl
 //! - `parse_session`：读取单条会话 → RawConversation（消息 + 工具事件 + 时间戳）
 
 use ch_domain::{EventType, Provider, Role};
@@ -70,7 +70,7 @@ fn scan_dir(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     }
 }
 
-/// 列出 Codex 所有会话（sessions/ + archived_sessions/，按文件大小降序）。
+/// 列出 Codex 所有会话（sessions/ + `archived_sessions/，按文件大小降序`）。
 pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let home = codex_home.as_ref();
     let mut files = Vec::new();
@@ -86,16 +86,16 @@ pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<Disc
         let session_id = meta_line
             .pointer("/payload/id")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let Some(session_id) = session_id else {
             continue;
         };
         let created_at = meta_line
             .get("timestamp")
             .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         let meta = std::fs::metadata(&f);
-        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+        let size = meta.as_ref().map_or(0, std::fs::Metadata::len);
         let mtime_ms = meta
             .ok()
             .and_then(|m| m.modified().ok())
@@ -193,7 +193,7 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                 session_id = payload
                     .get("id")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                    .map(std::string::ToString::to_string);
                 started_at = payload
                     .get("timestamp")
                     .and_then(|v| v.as_str())
@@ -409,11 +409,11 @@ mod tests {
         let lines = [
             r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"inj1"}}"#,
             // 各种注入块：全应被过滤
-            r##"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/Users/x/proj</cwd>\n</environment_context>"}]}}"##,
-            r##"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\nHere is a list of plugins"}]}}"##,
-            r##"{"timestamp":"2026-08-01T10:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>\nsome rules"}]}}"##,
+            r#"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/Users/x/proj</cwd>\n</environment_context>"}]}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<recommended_plugins>\nHere is a list of plugins"}]}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:03.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>\nsome rules"}]}}"#,
             // 真实对话
-            r##"{"timestamp":"2026-08-01T10:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"好的，我先分析项目结构。"}]}}"##,
+            r#"{"timestamp":"2026-08-01T10:00:10.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"好的，我先分析项目结构。"}]}}"#,
         ];
         std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
 

@@ -49,9 +49,7 @@ fn run() -> Result<()> {
     // Raw Store：与数据库同目录（plan §9.6 布局：<dir>/raw/ab/cd/<hash>.json.zst）
     let data_dir = db_path
         .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+        .filter(|p| !p.as_os_str().is_empty()).map_or_else(|| std::path::PathBuf::from("."), std::path::Path::to_path_buf);
     let raw_store = ch_raw_store::RawStore::new(&data_dir).context("open raw store")?;
 
     // Tantivy 索引：与数据库同目录下的 index/（plan §9.5/§13）
@@ -59,7 +57,7 @@ fn run() -> Result<()> {
         ch_search::SearchIndex::open(data_dir.join("index")).context("open search index")?;
 
     // 把 String slice 转成 &str 方便字面量匹配
-    let sub_str: Vec<&str> = sub.iter().map(|s| s.as_str()).collect();
+    let sub_str: Vec<&str> = sub.iter().map(std::string::String::as_str).collect();
     match sub_str.as_slice() {
         ["import", file] => {
             let summary = import::import_markdown(&repo, Some(&raw_store), file, None)
@@ -256,10 +254,10 @@ fn run() -> Result<()> {
                 &mut std::io::BufWriter::new(std::io::stdout().lock()),
             );
         }
-        ["help"] | ["--help"] | ["-h"] => print_usage(),
+        ["help" | "--help" | "-h"] => print_usage(),
         _ => {
             print_usage();
-            anyhow::bail!("unknown subcommand: {:?}", sub);
+            anyhow::bail!("unknown subcommand: {sub:?}");
         }
     }
     Ok(())
@@ -320,7 +318,7 @@ fn print_conversation_list(convs: &[ch_domain::Conversation]) {
             "{:<34} {:<12} {:<8} {}",
             c.id,
             c.provider,
-            c.status.map(|s| s.as_str()).unwrap_or(""),
+            c.status.map_or("", |s| s.as_str()),
             c.effective_title(),
         );
     }
@@ -336,10 +334,10 @@ fn show_conversation(repo: &ch_storage::Repository, id: &str) -> Result<()> {
     println!("Title:     {}", conv.effective_title());
     println!(
         "Status:    {}",
-        conv.status.map(|s| s.as_str()).unwrap_or("unknown")
+        conv.status.map_or("unknown", |s| s.as_str())
     );
     if let Some(score) = conv.completeness_score {
-        println!("Complete:  {:.2}", score);
+        println!("Complete:  {score:.2}");
     }
     if let Some(h) = &conv.content_hash {
         println!("Hash:      {h}");
@@ -419,7 +417,7 @@ fn import_from_claude_code(
     Ok(())
 }
 
-/// 列出 ZCode 会话。
+/// 列出 `ZCode` 会话。
 fn list_zcode_sessions() -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
@@ -432,7 +430,7 @@ fn list_zcode_sessions() -> Result<()> {
     println!("找到 {} 个 ZCode 会话：", sessions.len());
     println!("{:<42} {:>6} TITLE", "SESSION_ID", "MSGS");
     for s in sessions.iter().take(50) {
-        println!("{:<42} {:>6} {}", s.session_id, s.message_count, s.title,);
+        println!("{:<42} {:>6} {}", s.session_id, s.message_count, s.title);
     }
     if sessions.len() > 50 {
         println!("...（仅显示前 50，共 {} 个）", sessions.len());
@@ -440,7 +438,7 @@ fn list_zcode_sessions() -> Result<()> {
     Ok(())
 }
 
-/// 从 ZCode 导入一条会话。
+/// 从 `ZCode` 导入一条会话。
 fn import_from_zcode(
     repo: &ch_storage::Repository,
     search_index: &ch_search::SearchIndex,
@@ -457,7 +455,7 @@ fn import_from_zcode(
     Ok(())
 }
 
-/// 通用：把 RawConversation 导入到 repo + search_index + raw_store。
+/// 通用：把 `RawConversation` 导入到 repo + `search_index` + `raw_store`。
 fn import_raw(
     repo: &ch_storage::Repository,
     search_index: &ch_search::SearchIndex,
@@ -573,7 +571,7 @@ fn run_tantivy_search(index: &ch_search::SearchIndex, args: &[&str]) -> Result<(
             }
             "--workspace" => {
                 if let Some(v) = args.get(i + 1) {
-                    workspace_id = Some(v.to_string());
+                    workspace_id = Some((*v).to_string());
                     i += 2;
                     continue;
                 }
@@ -638,7 +636,7 @@ fn run_search(repo: &ch_storage::Repository, args: &[&str]) -> Result<()> {
             }
             "--workspace" => {
                 if let Some(v) = args.get(i + 1) {
-                    workspace_id = Some(v.to_string());
+                    workspace_id = Some((*v).to_string());
                     i += 2;
                     continue;
                 }

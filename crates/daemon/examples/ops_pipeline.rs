@@ -80,12 +80,12 @@ fn main() {
         let key = ["glm-5.2", "minimax-m3", "codex", "claude", "zcode"]
             .iter()
             .find(|k| m.contains(**k))
-            .map(|k| k.to_string())
+            .map(|k| (*k).to_string())
             .or_else(|| {
                 fallback
                     .iter()
                     .find(|(p, _)| *p == pid)
-                    .map(|(_, k)| k.to_string())
+                    .map(|(_, k)| (*k).to_string())
             });
         if let Some(k) = key {
             let v = &pricing[&k];
@@ -113,7 +113,7 @@ fn main() {
     }
     let ts = repo.ops_timeseries_daily(Some(7)).expect("write to String");
     println!("── 近7天趋势: {} 天", ts.len());
-    for d in ts.iter() {
+    for d in &ts {
         println!("   {} tokens={}", d.day, d.total_tokens);
     }
     drop(repo);

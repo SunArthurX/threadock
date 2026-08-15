@@ -7,6 +7,7 @@ use crate::error::{DomainError, Result};
 use uuid::Uuid;
 
 /// 生成带前缀的 UUID v4 ID。
+#[must_use] 
 pub fn generate(prefix: &str) -> String {
     format!("{prefix}_{}", Uuid::new_v4().simple())
 }
