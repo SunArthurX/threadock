@@ -139,6 +139,19 @@ interface TokenWaste {
   waste_score: number;
 }
 
+interface AgentBenchmark {
+  provider: string;
+  total_requests: number;
+  total_tokens: number;
+  cost_usd: number;
+  sessions: number;
+  success_rate: number;
+  cache_hit_rate: number;
+  avg_duration_ms: number;
+  cost_per_session: number;
+  tokens_per_session: number;
+}
+
 interface AuditFinding {
   kind: string;
   severity: "low" | "medium" | "high";
@@ -235,6 +248,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
   const [health, setHealth] = useState<AgentHealth[]>([]);
   const [latency, setLatency] = useState<LatencyStat[]>([]);
   const [waste, setWaste] = useState<TokenWaste[]>([]);
+  const [benchmark, setBenchmark] = useState<AgentBenchmark[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -267,6 +281,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       push(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then(setHealth), "health");
       push(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then(setLatency), "latency");
       push(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then(setWaste), "waste");
+      push(invoke<AgentBenchmark[]>("ops_agent_benchmark", { days: range }).then(setBenchmark), "benchmark");
     } else if (sec === "cost") {
       push(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
       push(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
@@ -602,6 +617,54 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
                 ))}
                 {topTools.length === 0 && !loading && <div className="ops-table-empty">暂无数据</div>}
               </div>
+            </div>
+          </div>
+          )}
+
+          {/* ── M13：Agent 横向对比 — 概览 ── */}
+          {section === "overview" && benchmark.length > 1 && (
+          <div className="ops-card">
+            <div className="ops-card-title">
+              📐 Agent 横向对比
+              <span className="ops-card-sub">全指标 side-by-side</span>
+              <button
+                className="action-btn"
+                style={{ marginLeft: "auto", fontSize: 11 }}
+                title="生成 7 天治理周报（HTML）"
+                onClick={async () => {
+                  try {
+                    const html = await invoke<string>("ops_weekly_report");
+                    const path = await save({
+                      defaultPath: `governance-weekly-${new Date().toISOString().slice(0, 10)}.html`,
+                      filters: [{ name: "HTML", extensions: ["html"] }],
+                    });
+                    if (typeof path === "string") {
+                      await invoke("save_text_file", { path, content: html });
+                      setRecalcMsg("周报已导出");
+                      setTimeout(() => setRecalcMsg(null), 3000);
+                    }
+                  } catch (e) { console.error("weekly report failed", e); }
+                }}
+              >
+                📄 周报
+              </button>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table className="ops-table">
+                <thead>
+                  <tr><th>指标</th>{benchmark.map((b, i) => <th key={i}>{meta(b.provider).label}</th>)}</tr>
+                </thead>
+                <tbody>
+                  <tr><td style={{ fontWeight: 600 }}>请求</td>{benchmark.map((b, i) => <td key={i}>{b.total_requests.toLocaleString()}</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>Tokens</td>{benchmark.map((b, i) => <td key={i}>{formatTokens(b.total_tokens)}</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>成本</td>{benchmark.map((b, i) => <td key={i}>{formatCost(b.cost_usd)}</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>会话数</td>{benchmark.map((b, i) => <td key={i}>{b.sessions.toLocaleString()}</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>成功率</td>{benchmark.map((b, i) => <td key={i} style={{ color: b.success_rate > 95 ? "var(--c-codex)" : b.success_rate > 80 ? "var(--warn)" : "var(--danger)" }}>{b.success_rate.toFixed(1)}%</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>缓存命中</td>{benchmark.map((b, i) => <td key={i}>{b.cache_hit_rate.toFixed(1)}%</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>$/会话</td>{benchmark.map((b, i) => <td key={i}>${b.cost_per_session.toFixed(2)}</td>)}</tr>
+                  <tr><td style={{ fontWeight: 600 }}>tok/会话</td>{benchmark.map((b, i) => <td key={i}>{formatTokens(b.tokens_per_session)}</td>)}</tr>
+                </tbody>
+              </table>
             </div>
           </div>
           )}

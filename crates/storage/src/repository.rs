@@ -1619,6 +1619,79 @@ impl Repository {
         Ok(v)
     }
 
+    // ── M13-M14：横向对比 / 周报数据 ─────────────────────────────────────
+
+    /// M13：Agent 横向对比基准（全指标 side-by-side）。
+    /// 聚合各 agent 的用量/成本/健康/延迟/缓存为一张对比表。
+    pub fn ops_agent_benchmark(&self, days: Option<i64>) -> StorageResult<Vec<AgentBenchmark>> {
+        let conn = self.conn.lock().unwrap();
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT p.name,
+                    COUNT(*),
+                    SUM(u.input_tokens + u.output_tokens + u.reasoning_tokens),
+                    SUM(COALESCE(u.cost_usd, 0)),
+                    SUM(CASE WHEN u.status = 'error' THEN 1 ELSE 0 END),
+                    SUM(COALESCE(u.retry_count, 0)),
+                    SUM(u.input_tokens),
+                    SUM(u.cache_read_tokens),
+                    AVG(u.duration_ms),
+                    COUNT(DISTINCT u.source_session_id)
+             FROM usage_records u JOIN providers p ON p.id = u.provider_id
+             WHERE {clause}
+             GROUP BY p.name",
+            clause = clause,
+        );
+        let args: Vec<SqlValue> = cutoff.map(|c| c.into()).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            let total: i64 = r.get(1)?;
+            let tokens: i64 = r.get::<_, Option<i64>>(2)?.unwrap_or(0);
+            let cost: f64 = r.get::<_, Option<f64>>(3)?.unwrap_or(0.0);
+            let errors: i64 = r.get::<_, Option<i64>>(4)?.unwrap_or(0);
+            let retries: i64 = r.get::<_, Option<i64>>(5)?.unwrap_or(0);
+            let _ = retries; // 保留读取占位，避免列偏移
+            let input: i64 = r.get::<_, Option<i64>>(6)?.unwrap_or(0);
+            let cached: i64 = r.get::<_, Option<i64>>(7)?.unwrap_or(0);
+            let avg_dur: f64 = r.get::<_, Option<f64>>(8)?.unwrap_or(0.0);
+            let sessions: i64 = r.get(9)?;
+            let success_rate = if total > 0 { (total - errors) as f64 / total as f64 * 100.0 } else { 0.0 };
+            let cache_hit = if input > 0 { cached as f64 / input as f64 * 100.0 } else { 0.0 };
+            let cost_per_session = if sessions > 0 { cost / sessions as f64 } else { 0.0 };
+            let tokens_per_session = if sessions > 0 { tokens / sessions } else { 0 };
+            Ok(AgentBenchmark {
+                provider: r.get(0)?,
+                total_requests: total,
+                total_tokens: tokens,
+                cost_usd: cost,
+                sessions,
+                success_rate,
+                cache_hit_rate: cache_hit,
+                avg_duration_ms: avg_dur,
+                cost_per_session,
+                tokens_per_session,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows { v.push(r?); }
+        Ok(v)
+    }
+
+    /// M14：周报汇总数据（治理页一键导出用）。
+    /// 聚合 7 天内全部治理指标为一个结构。
+    pub fn ops_weekly_summary(&self) -> StorageResult<WeeklySummary> {
+        let overview = self.ops_overview(Some(7))?;
+        let health = self.ops_agent_health(Some(7))?;
+        let benchmark = self.ops_agent_benchmark(Some(7))?;
+        let waste_count = self.ops_token_waste(Some(7), 100)?.len() as i64;
+        Ok(WeeklySummary {
+            overview,
+            health,
+            benchmark,
+            waste_sessions: waste_count,
+        })
+    }
+
     // ── 审计：策略规则 + 预算设置 + 消息扫描流（plan codeagent-ops M4/M5）──
 
     /// 列出策略规则。
@@ -2504,6 +2577,30 @@ pub struct TokenWaste {
     pub requests: i64,
     pub cache_read: i64,
     pub waste_score: f64,
+}
+
+/// Agent 横向对比基准（M13）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct AgentBenchmark {
+    pub provider: String,
+    pub total_requests: i64,
+    pub total_tokens: i64,
+    pub cost_usd: f64,
+    pub sessions: i64,
+    pub success_rate: f64,
+    pub cache_hit_rate: f64,
+    pub avg_duration_ms: f64,
+    pub cost_per_session: f64,
+    pub tokens_per_session: i64,
+}
+
+/// 周报汇总（M14）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct WeeklySummary {
+    pub overview: OpsOverview,
+    pub health: Vec<AgentHealth>,
+    pub benchmark: Vec<AgentBenchmark>,
+    pub waste_sessions: i64,
 }
 
 fn parse_status(s: &str) -> Status {

@@ -125,6 +125,7 @@ export default function App() {
   const [resetting, setResetting] = useState(false);
   const [resetArmed, setResetArmed] = useState(false);
   const [importMenu, setImportMenu] = useState<"root" | null>(null);
+  const [timelineMode, setTimelineMode] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
     localStorage.getItem("ch-sidebar") === "1"
   );
@@ -997,6 +998,13 @@ export default function App() {
               </div>
               <div className="detail-actions">
                 <button
+                  className={`action-btn ${timelineMode ? "active" : ""}`}
+                  onClick={() => setTimelineMode(!timelineMode)}
+                  title="切换时间线 / 消息视图"
+                >
+                  {timelineMode ? "💬 消息" : "🕐 时间线"}
+                </button>
+                <button
                   className="action-btn"
                   disabled={exporting}
                   onClick={() => exportCurrent("markdown")}
@@ -1017,7 +1025,46 @@ export default function App() {
                   <span>加载对话内容…</span>
                 </div>
               )}
-              {messages.map((m) => (
+              {timelineMode && !msgsLoading && (
+                <div className="conversation-timeline">
+                  {(() => {
+                    // 合并消息+事件为统一时间轴
+                    interface TimelineItem { ts: number | null; kind: "msg" | "event"; data: unknown }
+                    const items: TimelineItem[] = [
+                      ...messages.map((m) => ({ ts: m.created_at_ms, kind: "msg" as const, data: m })),
+                      ...events.map((e) => ({ ts: null, kind: "event" as const, data: e })),
+                    ].filter((i) => i.kind === "event" || (i.data as Message).content_text);
+                    return items.slice(0, 100).map((item, i) => {
+                      if (item.kind === "msg") {
+                        const m = item.data as Message;
+                        return (
+                          <div key={i} className={`tl-item tl-${m.role}`}>
+                            <div className="tl-dot" />
+                            <div className="tl-time">{m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}</div>
+                            <div className="tl-content">
+                              <div className="tl-role">{m.role === "user" ? "👤 用户" : m.role === "assistant" ? "🤖 助手" : m.role}</div>
+                              <div className="tl-text">{(m.content_text ?? "").slice(0, 200)}{(m.content_text ?? "").length > 200 ? "…" : ""}</div>
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        const e = item.data as EventDto;
+                        return (
+                          <div key={i} className="tl-item tl-event">
+                            <div className="tl-dot tl-dot-event" />
+                            <div className="tl-time" />
+                            <div className="tl-content">
+                              <div className="tl-role tl-role-event">⚡ {eventTypeLabel(e.event_type)}</div>
+                              {e.summary && <div className="tl-text mono" style={{ fontSize: 10 }}>{e.summary.slice(0, 80)}</div>}
+                            </div>
+                          </div>
+                        );
+                      }
+                    });
+                  })()}
+                </div>
+              )}
+              {!timelineMode && messages.map((m) => (
                 <div
                   key={m.id}
                   id={`msg-${m.id}`}
