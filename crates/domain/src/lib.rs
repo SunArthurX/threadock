@@ -3,6 +3,7 @@
 //! 对应 plan §4「术语和统一领域模型」与 §12「数据模型」。
 //! 本 crate 只定义类型，不涉及任何存储或解析逻辑。
 
+pub mod app_error;
 pub mod config;
 
 use serde::{Deserialize, Serialize};

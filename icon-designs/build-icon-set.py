@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
 Threadock / Conversation Hub — App icon 套件生成器
-从 icon-designs/option-a-v2-sharp.png (2048x2048) 生成:
+从 icon-designs/option-a-thread-bubbles.png (2048x2048) 生成:
   - icon.png (1024x1024)
   - 32x32.png / 128x128.png / 128x128@2x.png (256x256)
-  - icon.ico (多尺寸打包: 16/32/48/64/128/256)
+  - icon.ico (多尺寸打包: 16/24/32/48/64/128/256)
   - icon.icns (macOS, 由 iconutil 合成)
   - 同时把各尺寸 PNG 也复制到 icons 目录
+
+特点: 自动用色度检测裁掉白边/发光阴影,只保留 squircle 本体,背景透明
 
 输出: apps/desktop/src-tauri/icons/ (Tauri 2 标准)
 """
 from pathlib import Path
 from PIL import Image
+import numpy as np
 import shutil
 import subprocess
 import tempfile
@@ -23,15 +26,34 @@ ICONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # 1. 加载源图
 print(f"📖 加载源图: {SRC_PNG}")
-img = Image.open(SRC_PNG)
+img = Image.open(SRC_PNG).convert("RGBA")
 print(f"   原始尺寸: {img.size} | 模式: {img.mode}")
 assert img.size[0] >= 1024, "源图至少要 1024x1024"
 
-# 2. 生成主图 icon.png (1024x1024)
-master = img.resize((1024, 1024), Image.LANCZOS).convert("RGBA")
+# 2. 自动裁掉白边/发光阴影 —— 用色度检测紫色 squircle 边界
+#    (饱和像素 max-min RGB > 25,白色/灰色阴影色度接近 0)
+arr = np.array(img)
+chroma = arr[:, :, :3].max(axis=2) - arr[:, :, :3].min(axis=2)
+colored_mask = (chroma > 25) & (arr[:, :, 3] > 0)
+ys, xs = np.where(colored_mask)
+bbox = (int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1)
+print(f"🔍 色度裁剪 bbox: {bbox}  尺寸: {bbox[2]-bbox[0]}x{bbox[3]-bbox[1]}")
+img = img.crop(bbox)
+
+# 居中补方 (如果不是 1:1)
+cw, ch = img.size
+if abs(cw - ch) > 5:
+    s = max(cw, ch)
+    sq = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+    sq.paste(img, ((s - cw) // 2, (s - ch) // 2))
+    img = sq
+    print(f"   居中补方: {img.size}")
+
+# 3. 生成主图 icon.png (1024x1024, 透明背景)
+master = img.resize((1024, 1024), Image.LANCZOS)
 master_path = ICONS_DIR / "icon.png"
 master.save(master_path, "PNG", optimize=True)
-print(f"✅ icon.png (1024x1024) → {master_path}")
+print(f"✅ icon.png (1024x1024, 透明背景) → {master_path}")
 
 # 3. 生成标准尺寸 PNG
 sizes = {

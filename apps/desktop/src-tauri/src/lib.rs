@@ -3,6 +3,8 @@
 //! 通过嵌入 DaemonState（plan §8.2 单点写者）访问数据层。
 //! 每个 command 是薄包装，复用 daemon/storage/knowledge 的能力。
 
+#![allow(clippy::redundant_closure)]
+
 use ch_domain::Workspace;
 use ch_normalization::{normalize, RawConversation};
 use ch_daemon::{DaemonState, DaemonStateConfig};
@@ -10,8 +12,19 @@ use ch_storage::SearchResult as DbSearchResult;
 use std::path::Path;
 use tauri::Manager;
 
-/// 全局状态：嵌入 DaemonState（持有 Repository + SearchIndex + RawStore）。
-/// plan §8.2：Daemon 是单点写者，Tauri 通过它访问所有数据层。
+// 全局状态：嵌入 DaemonState（持有 Repository + SearchIndex + RawStore）。
+// plan §8.2：Daemon 是单点写者，Tauri 通过它访问所有数据层。
+
+// ── 统一错误处理：AppError ─────────────────────────────────────────────
+use ch_domain::app_error::{AppError, ErrorCode};
+
+/// 将任何 Display 错误转为 AppError 字符串（替代裸 e.to_string()）。
+/// 前端收到 `[code] message (detail)` 格式。
+/// 通用内部错误
+fn internal_err(e: impl std::fmt::Display) -> String {
+    AppError::new(ErrorCode::Internal, "内部错误").with_detail(e.to_string()).to_string()
+}
+
 
 // ── 前端返回类型（serde 自动派生）──────────────────────────────────────
 
@@ -91,9 +104,9 @@ pub struct SearchResultDto {
 
 #[tauri::command]
 async fn list_workspaces(state: tauri::State<'_, DaemonState>) -> Result<Vec<WorkspaceDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     // 时间取自对话真实时间，按对话最新更新时间倒序
-    let ws = repo.list_workspaces_by_conv_time().map_err(|e| e.to_string())?;
+    let ws = repo.list_workspaces_by_conv_time().map_err(|e| internal_err(e))?;
     Ok(ws.into_iter().map(workspace_dto).collect())
 }
 
@@ -103,10 +116,10 @@ async fn list_conversations(
     workspace_id: Option<String>,
     provider: Option<String>,
 ) -> Result<Vec<ConversationDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let convs = repo
         .list_conversations(workspace_id.as_deref())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     // 只返回顶层主任务（source_parent_id 为空），并统计各自子任务数
     let dtos = convs
         .into_iter()
@@ -136,11 +149,11 @@ async fn list_child_conversations(
     parent_source_id: String,
     provider: String,
 ) -> Result<Vec<ConversationDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let provider_id = format!("prov_{}", provider);
     let convs = repo
         .list_child_conversations(&parent_source_id, &provider_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     Ok(convs.into_iter().map(|c| conversation_dto(c, 0)).collect())
 }
 
@@ -163,9 +176,9 @@ fn cancel_sync() -> Result<(), String> {
 #[tauri::command]
 async fn reset_all_data(state: tauri::State<'_, DaemonState>) -> Result<(), String> {
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("重置中，请稍候…".into());
+        return Err(AppError::busy("重置中，请稍候…").to_string());
     }
-    let result = state.wipe_all().map_err(|e| e.to_string());
+    let result = state.wipe_all().map_err(|e| internal_err(e));
     // 重置后 ops 节流标记必须清零，否则治理页 5 分钟内拿不到新数据
     LAST_OPS_SYNC_MS.store(0, std::sync::atomic::Ordering::SeqCst);
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -177,8 +190,8 @@ async fn list_messages(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<Vec<MessageDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    let msgs = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    let msgs = repo.list_messages(&conversation_id).map_err(|e| internal_err(e))?;
     Ok(msgs.into_iter().map(message_dto).collect())
 }
 
@@ -187,8 +200,8 @@ async fn list_events(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<Vec<EventDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    let events = repo.list_events(&conversation_id).map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    let events = repo.list_events(&conversation_id).map_err(|e| internal_err(e))?;
     Ok(events.into_iter().map(event_dto).collect())
 }
 
@@ -198,15 +211,15 @@ async fn get_conversation_detail(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<ConversationDetailDto, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let conv = repo
         .get_conversation(&conversation_id)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| internal_err(e))?
         .ok_or_else(|| format!("conversation not found: {conversation_id}"))?;
     let messages = repo
         .list_messages(&conversation_id)
-        .map_err(|e| e.to_string())?;
-    let events = repo.list_events(&conversation_id).map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
+    let events = repo.list_events(&conversation_id).map_err(|e| internal_err(e))?;
     let score = conv.completeness_score.unwrap_or(0.0);
     let label = if score >= 0.9 {
         "完整"
@@ -233,13 +246,13 @@ async fn extract_knowledge(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
 ) -> Result<ch_knowledge::ExtractionResult, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let conv = repo
         .get_conversation(&conversation_id)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| internal_err(e))?
         .ok_or_else(|| format!("conversation not found: {conversation_id}"))?;
-    let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
-    let events = repo.list_events(&conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo.list_messages(&conversation_id).map_err(|e| internal_err(e))?;
+    let events = repo.list_events(&conversation_id).map_err(|e| internal_err(e))?;
     let input = ch_knowledge::ExtractionInput {
         title: Some(conv.effective_title().to_string()),
         messages,
@@ -251,7 +264,7 @@ async fn extract_knowledge(
 #[tauri::command]
 async fn search(state: tauri::State<'_, DaemonState>, query: String) -> Result<Vec<SearchResultDto>, String> {
     // 优先走 Tantivy（plan §9.5 主检索），降级 FTS5
-    let idx = state.search_index.lock().map_err(|e| e.to_string())?;
+    let idx = state.search_index.lock().map_err(|e| internal_err(e))?;
     let q = ch_search::SearchQuery::new(&query);
     match idx.search(&q) {
         Ok(hits) if !hits.is_empty() => Ok(hits
@@ -268,9 +281,9 @@ async fn search(state: tauri::State<'_, DaemonState>, query: String) -> Result<V
         _ => {
             // 降级 FTS5
             drop(idx);
-            let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+            let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
             let q = ch_storage::SearchQuery::new(&query);
-            let results = repo.search(&q).map_err(|e| e.to_string())?;
+            let results = repo.search(&q).map_err(|e| internal_err(e))?;
             Ok(results.into_iter().map(search_result_dto).collect())
         }
     }
@@ -296,19 +309,19 @@ async fn import_file(
     let path_ref = Path::new(&path);
 
     // 1. 归档原始到 Raw Store
-    let bytes = std::fs::read(path_ref).map_err(|e| e.to_string())?;
-    let raw_store = state.raw_store.lock().map_err(|e| e.to_string())?;
-    let raw_payload = raw_store.put(&bytes).map_err(|e| e.to_string())?;
+    let bytes = std::fs::read(path_ref).map_err(|e| internal_err(e))?;
+    let raw_store = state.raw_store.lock().map_err(|e| internal_err(e))?;
+    let raw_payload = raw_store.put(&bytes).map_err(|e| internal_err(e))?;
     drop(raw_store);
 
     // 2. 解析（按扩展名）
     let raw = parse_by_extension(path_ref)?;
-    let normalized = normalize(raw).map_err(|e| e.to_string())?;
+    let normalized = normalize(raw).map_err(|e| internal_err(e))?;
 
     // 3. 入库
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
     repo.upsert_provider(normalized.conversation.provider)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
 
     // workspace 归并（复用 resolver）
     let workspace_id = resolve_workspace(&repo, workspace_name.as_deref(), path_ref)?;
@@ -318,26 +331,26 @@ async fn import_file(
     conv.raw_payload_id = Some(raw_payload.hash);
     let conversation_id = repo
         .upsert_conversation(&conv)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     for m in &normalized.messages {
         let mut m = m.clone();
         m.conversation_id = conversation_id.clone();
-        repo.upsert_message(&m).map_err(|e| e.to_string())?;
+        repo.upsert_message(&m).map_err(|e| internal_err(e))?;
     }
     for e in &normalized.events {
         let mut e = e.clone();
         e.conversation_id = conversation_id.clone();
-        repo.upsert_event(&e).map_err(|e| e.to_string())?;
+        repo.upsert_event(&e).map_err(|e| internal_err(e))?;
     }
     // 读取入库后的消息用于索引
-    let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo.list_messages(&conversation_id).map_err(|e| internal_err(e))?;
     let conv_title = conv.effective_title().to_string();
     let provider = conv.provider;
     drop(repo);
 
     // 4. 同步 Tantivy 索引（plan §9.5）
-    let idx = state.search_index.lock().map_err(|e| e.to_string())?;
-    let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
+    let idx = state.search_index.lock().map_err(|e| internal_err(e))?;
+    let mut writer = idx.writer(15_000_000).map_err(|e| internal_err(e))?;
     for m in &messages {
         let im = ch_search::index::IndexableMessage {
             message_id: m.id.clone(),
@@ -348,9 +361,9 @@ async fn import_file(
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
         };
-        idx.index_message(&mut writer, &im).map_err(|e| e.to_string())?;
+        idx.index_message(&mut writer, &im).map_err(|e| internal_err(e))?;
     }
-    idx.commit(writer).map_err(|e| e.to_string())?;
+    idx.commit(writer).map_err(|e| internal_err(e))?;
 
     Ok(ImportResultDto {
         conversation_id,
@@ -647,13 +660,13 @@ async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> 
     }
     CANCEL_SYNC.store(false, std::sync::atomic::Ordering::SeqCst);
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("同步中，请稍候…".into());
+        return Err(AppError::busy("同步中，请稍候…").to_string());
     }
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
     let mut usage_written = 0usize;
     let mut tools_written = 0usize;
     let result = (|| -> Result<(), String> {
-        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        let repo = state.repo.lock().map_err(|e| internal_err(e))?;
         // provider 表需要存在对应行（JOIN 用）
         for p in [
             ch_domain::Provider::ZCode,
@@ -661,28 +674,28 @@ async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> 
             ch_domain::Provider::ClaudeCode,
             ch_domain::Provider::Codex,
         ] {
-            repo.upsert_provider(p).map_err(|e| e.to_string())?;
+            repo.upsert_provider(p).map_err(|e| internal_err(e))?;
         }
 
         // ZCode: turn_usage + tool_usage
         // ZCode：model_usage 请求级口径，整源替换（与 turn 级互斥，防双算）
         if let Ok((u, t)) = ch_ops_metrics::collect_zcode(format!("{home}/.zcode/cli/db/db.sqlite")) {
-            usage_written += repo.replace_provider_usage("prov_zcode", &u).map_err(|e| e.to_string())?;
-            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_zcode", &u).map_err(|e| internal_err(e))?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| internal_err(e))?;
         }
         // MiniMax: token_usage
         if let Ok(u) = ch_ops_metrics::collect_minimax(format!("{home}/.minimax/v2/sqlite/runtime-state.sqlite")) {
-            usage_written += repo.replace_provider_usage("prov_minimax-code", &u).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_minimax-code", &u).map_err(|e| internal_err(e))?;
         }
         // Claude Code: JSONL usage + tool_use
         if let Ok((u, t)) = ch_ops_metrics::collect_claude_code(format!("{home}/.claude")) {
-            usage_written += repo.replace_provider_usage("prov_claude-code", &u).map_err(|e| e.to_string())?;
-            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_claude-code", &u).map_err(|e| internal_err(e))?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| internal_err(e))?;
         }
         // Codex: token_count 快照 + function_call
         if let Ok((u, t)) = ch_ops_metrics::collect_codex(format!("{home}/.codex")) {
-            usage_written += repo.replace_provider_usage("prov_codex", &u).map_err(|e| e.to_string())?;
-            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| e.to_string())?;
+            usage_written += repo.replace_provider_usage("prov_codex", &u).map_err(|e| internal_err(e))?;
+            tools_written += repo.upsert_tool_call_batch(&t).map_err(|e| internal_err(e))?;
         }
         // 自动成本重算：同步后立即按定价出数（此前需手动点重算，成本恒为 0）
         if let Ok(pricing) = ops_pricing_get_inner(&state) {
@@ -706,32 +719,32 @@ async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> 
 
 #[tauri::command]
 async fn ops_overview(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<ch_storage::OpsOverview, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_overview(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_overview(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_by_provider(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ProviderUsage>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_by_provider(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_by_provider(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_by_model(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::ModelUsage>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_by_model(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_by_model(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_timeseries(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::DailyUsage>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_timeseries_daily(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_timeseries_daily(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_tool_toplist(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::ToolUsageRow>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_tool_toplist(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_tool_toplist(days, n.unwrap_or(10)).map_err(|e| internal_err(e))
 }
 
 /// 风险调用 DTO：ts 转毫秒数（此前直接序列化 OffsetDateTime → 前端 Invalid Date）。
@@ -754,8 +767,8 @@ struct RiskyCallDto {
 
 #[tauri::command]
 async fn ops_risky_calls(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<RiskyCallDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    let rows = repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    let rows = repo.ops_risky_calls(days, n.unwrap_or(50)).map_err(|e| internal_err(e))?;
     Ok(rows
         .into_iter()
         .map(|r| RiskyCallDto {
@@ -782,11 +795,11 @@ async fn get_conversation_by_source(
     provider: String,
     source_conversation_id: String,
 ) -> Result<Option<ConversationDto>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let provider_id = format!("prov_{provider}");
     let conn_row = repo
         .find_conversation_by_source(&provider_id, &source_conversation_id)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     Ok(conn_row.map(|c| conversation_dto(c, 0)))
 }
 
@@ -796,31 +809,31 @@ async fn get_conversation_by_source(
 /// catch_unwind 兜底：扫描内部任何 panic 转为错误返回，绝不带崩整个应用。
 #[tauri::command]
 async fn audit_scan(state: tauri::State<'_, DaemonState>) -> Result<ch_audit::AuditReport, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
     }))
     .map_err(|_| "扫描内部错误，请查看日志".to_string())?
-    .map_err(|e| e.to_string())
+    .map_err(|e| internal_err(e))
 }
 
 /// 渲染 HTML 审计报告（前端保存对话框落盘）。同样带 panic 兜底。
 #[tauri::command]
 async fn audit_export_html(state: tauri::State<'_, DaemonState>) -> Result<String, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
     }))
     .map_err(|_| "扫描内部错误，请查看日志".to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| internal_err(e))?;
     Ok(ch_audit::render_html(&report))
 }
 
 /// 策略规则 CRUD（M4/M5：命令黑名单 + 自定义敏感规则）。
 #[tauri::command]
 async fn policy_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::PolicyRuleRecord>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.list_policy_rules().map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.list_policy_rules().map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
@@ -830,35 +843,35 @@ async fn policy_upsert(
 ) -> Result<(), String> {
     // 校验正则合法
     regex::Regex::new(&rule.pattern).map_err(|e| format!("正则无效: {e}"))?;
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.upsert_policy_rule(&rule).map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+    repo.upsert_policy_rule(&rule).map_err(|e| internal_err(e))?;
     Ok(())
 }
 
 #[tauri::command]
 async fn policy_delete(state: tauri::State<'_, DaemonState>, name: String) -> Result<(), String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.delete_policy_rule(&name).map_err(|e| e.to_string())
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+    repo.delete_policy_rule(&name).map_err(|e| internal_err(e))
 }
 
 // ── M5：预算设置 ───────────────────────────────────────────────────────
 
 #[tauri::command]
 async fn budget_get(state: tauri::State<'_, DaemonState>) -> Result<ch_storage::BudgetSettings, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.get_budget_settings().map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.get_budget_settings().map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn budget_set(state: tauri::State<'_, DaemonState>, settings: ch_storage::BudgetSettings) -> Result<(), String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.set_budget_settings(&settings).map_err(|e| e.to_string())
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+    repo.set_budget_settings(&settings).map_err(|e| internal_err(e))
 }
 
 /// 本月（自然月）用量：预算告警用。
 #[tauri::command]
 async fn ops_month_usage(state: tauri::State<'_, DaemonState>) -> Result<serde_json::Value, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let now = ch_domain::now_utc();
     // 本月 1 号 00:00 UTC 的毫秒
     let month_start = time::Date::from_calendar_date(
@@ -866,13 +879,13 @@ async fn ops_month_usage(state: tauri::State<'_, DaemonState>) -> Result<serde_j
         time::Month::try_from(now.month() as u8).unwrap_or(time::Month::January),
         1,
     )
-    .map_err(|e| e.to_string())?
+    .map_err(|e| internal_err(e))?
     .with_time(time::Time::MIDNIGHT)
     .assume_utc();
     let cutoff = (month_start - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     let row = repo
         .ops_month_usage_since(cutoff)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     Ok(serde_json::json!({
         "tokens": row.0,
         "cost_usd": row.1,
@@ -886,7 +899,7 @@ async fn ops_month_usage(state: tauri::State<'_, DaemonState>) -> Result<serde_j
 async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     {
-        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        let repo = state.repo.lock().map_err(|e| internal_err(e))?;
         if !force.unwrap_or(false) {
             if let Ok(Some(v)) = repo.get_setting("last_assets_sync_ms") {
                 if let Ok(last) = v.parse::<i64>() {
@@ -898,15 +911,15 @@ async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) 
         }
     }
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
-    let assets = ch_ops_metrics::collect_assets(&home).map_err(|e| e.to_string())?;
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let assets = ch_ops_metrics::collect_assets(&home).map_err(|e| internal_err(e))?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
     for p in [
         ch_domain::Provider::ZCode,
         ch_domain::Provider::Codex,
         ch_domain::Provider::ClaudeCode,
         ch_domain::Provider::MinimaxCode,
     ] {
-        repo.upsert_provider(p).map_err(|e| e.to_string())?;
+        repo.upsert_provider(p).map_err(|e| internal_err(e))?;
     }
     let mut written = 0;
     for p in [
@@ -918,7 +931,7 @@ async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) 
         let subset: Vec<_> = assets.iter().filter(|a| a.provider == p).cloned().collect();
         written += repo
             .replace_provider_assets(&format!("prov_{}", p.as_str()), &subset)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| internal_err(e))?;
     }
     let _ = repo.set_setting("last_assets_sync_ms", &now_ms.to_string());
     Ok(serde_json::json!({ "written": written }))
@@ -926,8 +939,8 @@ async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) 
 
 #[tauri::command]
 async fn assets_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::AssetRow>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.list_assets().map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.list_assets().map_err(|e| internal_err(e))
 }
 
 /// 同步自动化任务（30 分钟节流）。
@@ -935,7 +948,7 @@ async fn assets_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_stor
 async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     {
-        let repo = state.repo.lock().map_err(|e| e.to_string())?;
+        let repo = state.repo.lock().map_err(|e| internal_err(e))?;
         if !force.unwrap_or(false) {
             if let Ok(Some(v)) = repo.get_setting("last_automations_sync_ms") {
                 if let Ok(last) = v.parse::<i64>() {
@@ -947,14 +960,14 @@ async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bo
         }
     }
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
-    let recs = ch_ops_metrics::collect_automations(&home).map_err(|e| e.to_string())?;
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let recs = ch_ops_metrics::collect_automations(&home).map_err(|e| internal_err(e))?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
     for p in [
         ch_domain::Provider::ZCode,
         ch_domain::Provider::Codex,
         ch_domain::Provider::MinimaxCode,
     ] {
-        repo.upsert_provider(p).map_err(|e| e.to_string())?;
+        repo.upsert_provider(p).map_err(|e| internal_err(e))?;
     }
     let mut written = 0;
     for p in [
@@ -965,7 +978,7 @@ async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bo
         let subset: Vec<_> = recs.iter().filter(|a| a.provider == p).cloned().collect();
         written += repo
             .replace_provider_automations(&format!("prov_{}", p.as_str()), &subset)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| internal_err(e))?;
     }
     let _ = repo.set_setting("last_automations_sync_ms", &now_ms.to_string());
     Ok(serde_json::json!({ "written": written }))
@@ -973,61 +986,61 @@ async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bo
 
 #[tauri::command]
 async fn automations_list(state: tauri::State<'_, DaemonState>) -> Result<Vec<ch_storage::AutomationRow>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.list_automations().map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.list_automations().map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_cost_by_dir(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::DirCost>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_cost_by_dir(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_cost_by_dir(days, n.unwrap_or(10)).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_cache_stats(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::CacheStat>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_cache_stats(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_cache_stats(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_anomalies(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AnomalyRow>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_anomalies(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_anomalies(days).map_err(|e| internal_err(e))
 }
 
 // ── M10-M12：健康度 / 延迟 / Token 浪费 ────────────────────────────────
 
 #[tauri::command]
 async fn ops_agent_health(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentHealth>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_agent_health(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_agent_health(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_latency_stats(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::LatencyStat>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_latency_stats(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_latency_stats(days).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn ops_token_waste(state: tauri::State<'_, DaemonState>, days: Option<i64>, n: Option<i64>) -> Result<Vec<ch_storage::TokenWaste>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_token_waste(days, n.unwrap_or(10)).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_token_waste(days, n.unwrap_or(10)).map_err(|e| internal_err(e))
 }
 
 // ── M13-M14：横向对比 / 周报 ────────────────────────────────────────────
 
 #[tauri::command]
 async fn ops_agent_benchmark(state: tauri::State<'_, DaemonState>, days: Option<i64>) -> Result<Vec<ch_storage::AgentBenchmark>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.ops_agent_benchmark(days).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.ops_agent_benchmark(days).map_err(|e| internal_err(e))
 }
 
 /// M14：生成周报 HTML（7 天治理汇总，自包含可分享）。
 #[tauri::command]
 async fn ops_weekly_report(state: tauri::State<'_, DaemonState>) -> Result<String, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    let s = repo.ops_weekly_summary().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    let s = repo.ops_weekly_summary().map_err(|e| internal_err(e))?;
     let mut html = String::new();
     use std::fmt::Write;
     writeln!(html, "<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><title>Conversation Hub 周报</title>").unwrap();
@@ -1123,10 +1136,10 @@ fn pricing_path(state: &tauri::State<DaemonState>) -> std::path::PathBuf {
 fn ops_pricing_get_inner(state: &DaemonState) -> Result<serde_json::Value, String> {
     let path = state.data_dir.join("pricing.json");
     if !path.exists() {
-        std::fs::write(&path, DEFAULT_PRICING).map_err(|e| e.to_string())?;
+        std::fs::write(&path, DEFAULT_PRICING).map_err(|e| internal_err(e))?;
     }
-    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut pricing: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let content = std::fs::read_to_string(&path).map_err(|e| internal_err(e))?;
+    let mut pricing: serde_json::Value = serde_json::from_str(&content).map_err(|e| internal_err(e))?;
     // 旧文件缺省键合并（如后来新增的 zcode/cursor 兜底价）
     if let (Some(dst), Ok(defs)) = (pricing.as_object_mut(), serde_json::from_str::<serde_json::Value>(DEFAULT_PRICING)) {
         if let Some(def_map) = defs.as_object() {
@@ -1147,8 +1160,8 @@ async fn ops_pricing_get(state: tauri::State<'_, DaemonState>) -> Result<serde_j
 #[tauri::command]
 async fn ops_pricing_set(state: tauri::State<'_, DaemonState>, pricing: serde_json::Value) -> Result<(), String> {
     let path = pricing_path(&state);
-    let content = serde_json::to_string_pretty(&pricing).map_err(|e| e.to_string())?;
-    std::fs::write(&path, content).map_err(|e| e.to_string())
+    let content = serde_json::to_string_pretty(&pricing).map_err(|e| internal_err(e))?;
+    std::fs::write(&path, content).map_err(|e| internal_err(e))
 }
 
 /// 定价应用核心：模型名匹配（前缀/包含）→ 命中；未命中走 provider 兜底价。
@@ -1198,7 +1211,7 @@ fn apply_pricing(repo: &ch_storage::Repository, pricing: &serde_json::Value) -> 
 #[tauri::command]
 async fn ops_cost_recalc(state: tauri::State<'_, DaemonState>) -> Result<serde_json::Value, String> {
     let pricing = ops_pricing_get_inner(&state)?;
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
     let (updated, total_cost) = apply_pricing(&repo, &pricing);
     Ok(serde_json::json!({
         "models_updated": updated,
@@ -1215,7 +1228,7 @@ async fn auto_sync(
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
-        return Err("同步中，请稍候…".into());
+        return Err(AppError::busy("同步中，请稍候…").to_string());
     }
     let result = auto_sync_inner(&state, limit);
     IS_BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1256,8 +1269,8 @@ fn auto_sync_inner(
         std::collections::HashSet<SrcKey>,
         std::collections::HashMap<SrcKey, i64>,
     ) = {
-        let repo = state.repo.lock().map_err(|e| e.to_string())?;
-        let sources = repo.list_conversation_sources().map_err(|e| e.to_string())?;
+        let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+        let sources = repo.list_conversation_sources().map_err(|e| internal_err(e))?;
         let mut set = std::collections::HashSet::new();
         let mut state_map = std::collections::HashMap::new();
         for (pid, sid) in sources {
@@ -1530,17 +1543,17 @@ fn import_raw_inner(
     observed_updated_ms: Option<i64>,
 ) -> Result<ImportOutcome, String> {
     let provider = raw.provider;
-    let raw_bytes = serde_json::to_vec(&raw).map_err(|e| e.to_string())?;
-    let raw_store = state.raw_store.lock().map_err(|e| e.to_string())?;
-    let raw_payload = raw_store.put(&raw_bytes).map_err(|e| e.to_string())?;
+    let raw_bytes = serde_json::to_vec(&raw).map_err(|e| internal_err(e))?;
+    let raw_store = state.raw_store.lock().map_err(|e| internal_err(e))?;
+    let raw_payload = raw_store.put(&raw_bytes).map_err(|e| internal_err(e))?;
     drop(raw_store);
 
-    let normalized = normalize(raw).map_err(|e| e.to_string())?;
+    let normalized = normalize(raw).map_err(|e| internal_err(e))?;
 
     // 挂 raw_payload + 单事务入库
     let mut conv = normalized.conversation.clone();
     conv.raw_payload_id = Some(raw_payload.hash);
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
     let conversation_id = repo
         .import_conversation_batch(
             &conv,
@@ -1549,9 +1562,9 @@ fn import_raw_inner(
             workspace_name,
             observed_updated_ms,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| internal_err(e))?;
     let workspace_id = conv.workspace_id.clone();
-    let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo.list_messages(&conversation_id).map_err(|e| internal_err(e))?;
     let conv_title = conv.effective_title().to_string();
     drop(repo);
 
@@ -1590,12 +1603,12 @@ fn commit_index(
     if docs.is_empty() {
         return Ok(());
     }
-    let idx = state.search_index.lock().map_err(|e| e.to_string())?;
-    let mut writer = idx.writer(15_000_000).map_err(|e| e.to_string())?;
+    let idx = state.search_index.lock().map_err(|e| internal_err(e))?;
+    let mut writer = idx.writer(15_000_000).map_err(|e| internal_err(e))?;
     for im in docs {
-        idx.index_message(&mut writer, im).map_err(|e| e.to_string())?;
+        idx.index_message(&mut writer, im).map_err(|e| internal_err(e))?;
     }
-    idx.commit(writer).map_err(|e| e.to_string())?;
+    idx.commit(writer).map_err(|e| internal_err(e))?;
     Ok(())
 }
 
@@ -1625,13 +1638,13 @@ async fn export_conversation(
     conversation_id: String,
     format: String,
 ) -> Result<ExportOutput, String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
     let conv = repo
         .get_conversation(&conversation_id)
-        .map_err(|e| e.to_string())?
+        .map_err(|e| internal_err(e))?
         .ok_or_else(|| format!("conversation not found: {conversation_id}"))?;
-    let messages = repo.list_messages(&conversation_id).map_err(|e| e.to_string())?;
-    let events = repo.list_events(&conversation_id).map_err(|e| e.to_string())?;
+    let messages = repo.list_messages(&conversation_id).map_err(|e| internal_err(e))?;
+    let events = repo.list_events(&conversation_id).map_err(|e| internal_err(e))?;
     let opts = ch_export::ExportOptions::everything();
     let safe_title: String = conv
         .effective_title()
@@ -1641,7 +1654,7 @@ async fn export_conversation(
         .collect();
     let (content, ext) = match format.as_str() {
         "json" => (
-            ch_export::to_json(None, &conv, &messages, &events, &opts).map_err(|e| e.to_string())?,
+            ch_export::to_json(None, &conv, &messages, &events, &opts).map_err(|e| internal_err(e))?,
             "json",
         ),
         _ => (
@@ -1661,25 +1674,25 @@ async fn export_conversation(
 /// 避免引入 tauri-plugin-fs，用最简方式把导出内容落盘。
 #[tauri::command]
 fn save_text_file(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+    std::fs::write(&path, content.as_bytes()).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn set_favorite(state: tauri::State<'_, DaemonState>, id: String, favorite: bool) -> Result<(), String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.set_favorite(&id, favorite).map_err(|e| e.to_string())
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+    repo.set_favorite(&id, favorite).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn add_tag(state: tauri::State<'_, DaemonState>, id: String, tag: String) -> Result<(), String> {
-    let repo = state.repo.lock().map_err(|e| e.to_string())?;
-    repo.add_tag(&id, &tag).map_err(|e| e.to_string())
+    let repo = state.repo.lock().map_err(|e| internal_err(e))?;
+    repo.add_tag(&id, &tag).map_err(|e| internal_err(e))
 }
 
 #[tauri::command]
 async fn list_tags(state: tauri::State<'_, DaemonState>, id: String) -> Result<Vec<String>, String> {
-    let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
-    repo.list_tags(&id).map_err(|e| e.to_string())
+    let repo = state.read_repo.lock().map_err(|e| internal_err(e))?;
+    repo.list_tags(&id).map_err(|e| internal_err(e))
 }
 
 // ── DTO 转换 ────────────────────────────────────────────────────────────
@@ -1692,8 +1705,8 @@ fn parse_by_extension(path: &Path) -> Result<RawConversation, String> {
         .map(|e| e.to_lowercase())
         .unwrap_or_default();
     match ext.as_str() {
-        "jsonl" | "ndjson" => ch_adapter_jsonl::parse_file(path).map_err(|e| e.to_string()),
-        _ => ch_adapter_markdown::parse_file(path).map_err(|e| e.to_string()),
+        "jsonl" | "ndjson" => ch_adapter_jsonl::parse_file(path).map_err(|e| internal_err(e)),
+        _ => ch_adapter_markdown::parse_file(path).map_err(|e| internal_err(e)),
     }
 }
 
@@ -1712,7 +1725,7 @@ fn resolve_workspace(
 
     let known: Vec<_> = repo
         .list_workspaces()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| internal_err(e))?
         .into_iter()
         .map(|ws| ch_identity_resolver::IdentityKey {
             workspace_id: ws.id,
@@ -1734,7 +1747,7 @@ fn resolve_workspace(
         _ => {
             let mut ws = ch_domain::Workspace::new(name);
             ws.canonical_path = path.parent().map(|p| p.to_string_lossy().into_owned());
-            let id = repo.upsert_workspace(&ws).map_err(|e| e.to_string())?;
+            let id = repo.upsert_workspace(&ws).map_err(|e| internal_err(e))?;
             Ok(Some(id))
         }
     }
