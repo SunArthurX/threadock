@@ -20,3 +20,11 @@ apps/desktop/dist/
 # macOS
 .DS_Store
 
+
+# IDE 状态
+.claude/
+.zcode/
+
+# 运行时索引（Tantivy / Raw Store）
+apps/desktop/src-tauri/index/
+apps/desktop/src-tauri/raw/
