@@ -1,0 +1,305 @@
+//! 洞察页面数据：活动节律 / 项目中心 / 知识库 / 提示词库 / 报告中心。
+//!
+//! 全部为对既有数据的聚合读取（新页面不引入新采集）。
+
+use super::*;
+use ch_daemon::DaemonState;
+use tauri::Emitter;
+
+// ── 活动节律 ────────────────────────────────────────────────────────────
+
+/// 活动节律统计（热力图 / 时段分布 / 工具演化）。
+#[tauri::command]
+pub(crate) async fn activity_stats(
+    state: tauri::State<'_, DaemonState>,
+    days: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let (heat, hours, tools) = repo
+        .activity_stats(days.unwrap_or(365))
+        .map_err(|e| storage_err(e))?;
+    Ok(serde_json::json!({ "heatmap": heat, "hourly": hours, "tools_trend": tools }))
+}
+
+// ── 项目中心 ────────────────────────────────────────────────────────────
+
+/// 项目卡片（usage.source_dir 口径，与成本页一致）。
+#[tauri::command]
+pub(crate) async fn projects_overview(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let rows = repo.projects_overview().map_err(|e| storage_err(e))?;
+    Ok(serde_json::json!({ "projects": rows }))
+}
+
+// ── 提示词库 ────────────────────────────────────────────────────────────
+
+/// 最近用户提问（提示词库语料）。
+#[tauri::command]
+pub(crate) async fn recent_user_prompts(
+    state: tauri::State<'_, DaemonState>,
+    limit: Option<i64>,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let rows = repo
+        .recent_user_prompts(limit.unwrap_or(100))
+        .map_err(|e| storage_err(e))?;
+    Ok(serde_json::json!({ "prompts": rows }))
+}
+
+// ── 报告中心 ────────────────────────────────────────────────────────────
+
+/// reports/ 目录下的历史周报列表。
+#[tauri::command]
+pub(crate) async fn list_reports(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let dir = state.data_dir.join("reports");
+    let mut out = Vec::new();
+    if !dir.exists() {
+        return Ok(out);
+    }
+    for entry in std::fs::read_dir(&dir).map_err(|e| io_err(e))?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".html") {
+            continue;
+        }
+        let meta = entry.metadata().map_err(|e| io_err(e))?;
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        out.push(serde_json::json!({
+            "name": name,
+            "size": meta.len(),
+            "mtime_ms": mtime,
+        }));
+    }
+    out.sort_by(|a, b| {
+        b.get("mtime_ms")
+            .and_then(|v| v.as_i64())
+            .cmp(&a.get("mtime_ms").and_then(|v| v.as_i64()))
+    });
+    Ok(out)
+}
+
+/// 读取一份历史周报内容（文件名白名单校验，防路径穿越）。
+#[tauri::command]
+pub(crate) async fn read_report(
+    state: tauri::State<'_, DaemonState>,
+    name: String,
+) -> Result<String, String> {
+    if name.contains('/') || name.contains('\\') || name.contains("..") || !name.ends_with(".html")
+    {
+        return Err("非法报告文件名".into());
+    }
+    let path = state.data_dir.join("reports").join(&name);
+    std::fs::read_to_string(&path).map_err(|e| io_err(e))
+}
+
+// ── 知识库 ──────────────────────────────────────────────────────────────
+
+/// 全库批量知识提取（幂等：已提取的会话跳过，force 重提）。
+/// 重活：逐会话正则提取，经 sync_progress 事件上报进度。
+#[tauri::command]
+pub(crate) async fn knowledge_extract_all(
+    state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
+    force: Option<bool>,
+) -> Result<serde_json::Value, String> {
+    let force = force.unwrap_or(false);
+    let app_done = app.clone();
+    let r = run_blocking(move || {
+        let convs = {
+            let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+            repo.list_conversations(None).map_err(|e| storage_err(e))?
+        };
+        let total = convs.len() as u64;
+        let mut done: u64 = 0;
+        let mut extracted = 0u64;
+        let mut skipped = 0u64;
+        for c in &convs {
+            if !force {
+                let has = {
+                    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+                    repo.get_knowledge(&c.id)
+                        .map(|k| k.is_some())
+                        .unwrap_or(false)
+                };
+                if has {
+                    skipped += 1;
+                    done += 1;
+                    continue;
+                }
+            }
+            let extracted_json = {
+                let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+                let msgs = match repo.list_messages(&c.id) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        done += 1;
+                        continue;
+                    }
+                };
+                let events = repo.list_events(&c.id).unwrap_or_default();
+                let input = ch_knowledge::ExtractionInput {
+                    title: Some(c.effective_title().to_string()),
+                    messages: msgs,
+                    events,
+                };
+                let result = ch_knowledge::RuleExtractor::new().extract(&input);
+                serde_json::to_string(&result).map_err(|e| import_err(e))?
+            };
+            {
+                let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+                let _ = repo.save_knowledge(&c.id, "rule-v1", &extracted_json);
+            }
+            extracted += 1;
+            done += 1;
+            if done.is_multiple_of(5) || done == total {
+                let _ = app.emit(
+                    "sync_progress",
+                    serde_json::json!({
+                        "current": done,
+                        "total": total,
+                        "detail": "知识提取",
+                        "finished": done == total,
+                    }),
+                );
+            }
+        }
+        Ok::<serde_json::Value, String>(serde_json::json!({
+            "conversations": total,
+            "extracted": extracted,
+            "skipped": skipped,
+        }))
+    })?;
+    // 完成回报（与同步进度条协议一致）
+    let _ = app_done.emit(
+        "sync_progress",
+        serde_json::json!({ "current": 1, "total": 1, "detail": "done", "finished": true }),
+    );
+    Ok(r)
+}
+
+/// 知识库全局聚合：TODO / 决策 / 常用命令 / 文件热度（可跳转原会话）。
+#[tauri::command]
+pub(crate) async fn knowledge_base_list(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let convs = repo.list_conversations(None).map_err(|e| storage_err(e))?;
+    let title_of = |id: &str| -> String {
+        convs
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.effective_title().to_string())
+            .unwrap_or_default()
+    };
+
+    let mut todos: Vec<serde_json::Value> = Vec::new();
+    let mut decisions: Vec<serde_json::Value> = Vec::new();
+    let mut commands: std::collections::HashMap<String, i64> = Default::default();
+    let mut files: std::collections::HashMap<String, i64> = Default::default();
+    let mut extracted = 0u64;
+
+    for c in &convs {
+        let Some(rec) = repo.get_knowledge(&c.id).map_err(|e| storage_err(e))? else {
+            continue;
+        };
+        extracted += 1;
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&rec.result_json) else {
+            continue;
+        };
+        for d in v
+            .get("decisions")
+            .and_then(|x| x.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            if decisions.len() < 200 {
+                decisions.push(serde_json::json!({
+                    "text": d.get("decision").and_then(|x| x.as_str()).unwrap_or(""),
+                    "conversation_id": c.id,
+                    "title": title_of(&c.id),
+                }));
+            }
+        }
+        for t in v
+            .get("todos")
+            .and_then(|x| x.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            if todos.len() < 300 {
+                todos.push(serde_json::json!({
+                    "text": t.get("text").and_then(|x| x.as_str()).unwrap_or(""),
+                    "conversation_id": c.id,
+                    "title": title_of(&c.id),
+                }));
+            }
+        }
+        for cmd in v
+            .get("commands")
+            .and_then(|x| x.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            if let Some(s) = cmd.as_str() {
+                *commands.entry(s.to_string()).or_insert(0) += 1;
+            }
+        }
+        for f in v
+            .get("files")
+            .and_then(|x| x.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            if let Some(s) = f.get("path").and_then(|x| x.as_str()) {
+                *files.entry(s.to_string()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut top_commands: Vec<serde_json::Value> = commands
+        .into_iter()
+        .map(|(cmd, n)| serde_json::json!({ "cmd": cmd, "count": n }))
+        .collect();
+    top_commands.sort_by(|a, b| {
+        b.get("count")
+            .and_then(|v| v.as_i64())
+            .cmp(&a.get("count").and_then(|v| v.as_i64()))
+    });
+    top_commands.truncate(20);
+
+    let mut top_files: Vec<serde_json::Value> = files
+        .into_iter()
+        .map(|(path, n)| serde_json::json!({ "path": path, "count": n }))
+        .collect();
+    top_files.sort_by(|a, b| {
+        b.get("count")
+            .and_then(|v| v.as_i64())
+            .cmp(&a.get("count").and_then(|v| v.as_i64()))
+    });
+    top_files.truncate(20);
+
+    let last_ms = repo
+        .get_setting("last_knowledge_extract_ms")
+        .ok()
+        .flatten()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "extracted": extracted,
+        "total_conversations": convs.len(),
+        "last_extract_ms": last_ms,
+        "todos": todos,
+        "decisions": decisions,
+        "top_commands": top_commands,
+        "top_files": top_files,
+    }))
+}

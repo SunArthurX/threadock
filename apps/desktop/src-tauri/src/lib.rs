@@ -130,6 +130,15 @@ pub fn run() {
             rebuild_search_index,
             sources_new_count,
             ops_usage_summary,
+            activity_stats,
+            projects_overview,
+            recent_user_prompts,
+            list_reports,
+            read_report,
+            knowledge_extract_all,
+            knowledge_base_list,
+            backup_create,
+            backup_restore,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

@@ -12,24 +12,29 @@ import ImportMenu from "./ImportMenu";
 import SettingsView from "./SettingsView";
 import BudgetBar from "./BudgetBar";
 import KnowledgeModal from "./KnowledgeModal";
+import KnowledgeView from "./KnowledgeView";
+import ActivityView from "./ActivityView";
+import ProjectsView from "./ProjectsView";
+import ReportModal from "./ReportModal";
 import { Toasts } from "./Toasts";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
 
-type View = "chat" | "overview" | "cost" | "security" | "assets";
+type View = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
 type SourceKey = "zcode" | "claude-code" | "cursor" | "minimax" | "codex";
 
 const NAV_ITEMS = [
   ["chat", "💬", "对话"], ["overview", "📊", "概览"], ["cost", "💰", "成本"],
   ["security", "🛡", "安全"], ["assets", "🧩", "资产"],
+  ["knowledge", "📚", "知识库"], ["activity", "📆", "活动"], ["projects", "📁", "项目"],
 ] as const;
 
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const v = localStorage.getItem("ch-view");
-    return (["overview","cost","security","assets","chat"] as const).includes(v as View) ? v as View : "chat";
+    return (["overview","cost","security","assets","knowledge","activity","projects","chat"] as const).includes(v as View) ? v as View : "chat";
   });
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
@@ -82,6 +87,7 @@ export default function App() {
     } catch { /* 静默：失败时保持全部 chips */ }
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   // 自动同步间隔（分钟，0 = 关闭）：localStorage 快路径，DB app_settings 持久备份
@@ -553,6 +559,8 @@ export default function App() {
           />
         )}
 
+        {reportsOpen && <ReportModal onClose={() => setReportsOpen(false)} />}
+
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={setTheme}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
@@ -570,8 +578,21 @@ export default function App() {
             onClose={() => setSourcePanel(null)} sourceLabel={sourceLabel} />
         )}
 
-        {view !== "chat" ? (
-          <OpsView section={view} onJumpToConversation={jumpFromAudit} />
+        {view === "knowledge" ? (
+          <KnowledgeView onJump={async (cid) => {
+            setView("chat");
+            try {
+              const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
+              setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+              setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
+            } catch (e) { showError(e); }
+          }} />
+        ) : view === "activity" ? (
+          <ActivityView />
+        ) : view === "projects" ? (
+          <ProjectsView />
+        ) : view !== "chat" ? (
+          <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
           <div className="main">
             <div className="panel">

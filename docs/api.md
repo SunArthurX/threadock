@@ -124,6 +124,60 @@
 |------|------|
 | - | `{messages}` |
 
+### `activity_stats`
+
+| 参数 | 返回 |
+|------|------|
+| days? | `{heatmap, hourly, tools_trend}` |
+
+### `projects_overview`
+
+| 参数 | 返回 |
+|------|------|
+| - | `ProjectRow[]` |
+
+### `recent_user_prompts`
+
+| 参数 | 返回 |
+|------|------|
+| limit? | `PromptRow[]` |
+
+### `list_reports`
+
+| 参数 | 返回 |
+|------|------|
+| - | `ReportFile[]` |
+
+### `read_report`
+
+| 参数 | 返回 |
+|------|------|
+| name | `string` |
+
+### `knowledge_extract_all`
+
+| 参数 | 返回 |
+|------|------|
+| force? | `{conversations, extracted, skipped}` |
+
+### `knowledge_base_list`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{todos, decisions, top_commands, top_files, ...}` |
+
+### `backup_create`
+
+| 参数 | 返回 |
+|------|------|
+| path, password | `{db_size, raw_count, raw_bytes}` |
+
+### `backup_restore`
+
+| 参数 | 返回 |
+|------|------|
+| path, password, targetDir | `{db_size, raw_count}` |
+
 ### `list_conversations`
 
 | 参数 | 返回 |

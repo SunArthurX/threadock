@@ -45,6 +45,7 @@ ch-ops-metrics = { path = "../../../crates/ops-metrics" }
 ch-audit = { path = "../../../crates/audit" }
 ch-knowledge = { path = "../../../crates/knowledge" }
 ch-export = { path = "../../../crates/export" }
+ch-backup = { path = "../../../crates/backup" }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -11,9 +11,11 @@ import type { Section, OpsOverview, ProviderUsage, ModelUsage, DailyUsage, ToolU
 type Props = {
   section: Section;
   onJumpToConversation?: (provider: string, sessionId: string, messageId: string | null) => void;
+  /** 打开报告中心（概览页「报告中心」入口）。 */
+  onOpenReports?: () => void;
 };
 
-export default function OpsView({ section, onJumpToConversation }: Props) {
+export default function OpsView({ section, onJumpToConversation, onOpenReports }: Props) {
   const [range, setRange] = useState<number | null>(30);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -180,7 +182,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
         <OverviewSection cacheTrend={cacheTrend} overview={overview} byProvider={byProvider} byModel={byModel}
           timeseries={timeseries} topTools={topTools} cacheStats={cacheStats}
           health={health} latency={latency} waste={waste} benchmark={benchmark}
-          loading={loading} onWeeklyReport={weeklyReport} />
+          loading={loading} onWeeklyReport={weeklyReport} onOpenReports={onOpenReports} />
       )}
       {section === "cost" && (
         <CostSection summary={usageSummary} dirCosts={dirCosts} budget={budget} monthUsage={monthUsage}

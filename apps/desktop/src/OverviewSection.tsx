@@ -19,6 +19,8 @@ interface Props {
   cacheTrend: { day: string; total_input: number; cache_read: number }[];
   loading: boolean;
   onWeeklyReport: () => void;
+  /** 打开报告中心（应用内查看 + 历史）。 */
+  onOpenReports?: () => void;
 }
 
 
@@ -49,7 +51,7 @@ export function toggleHiddenCard(key: CardKey): Set<string> {
 
 export default function OverviewSection({
   overview, byProvider, byModel, timeseries, topTools, cacheStats,
-  health, latency, waste, benchmark, cacheTrend, loading, onWeeklyReport,
+  health, latency, waste, benchmark, cacheTrend, loading, onWeeklyReport, onOpenReports,
 }: Props) {
   const [hidden, setHidden] = useState<Set<string>>(loadHiddenCards);
   /** 卡片标题右侧的显隐切换（点标题栏切换，随 localStorage 持久化）。 */
@@ -142,7 +144,8 @@ export default function OverviewSection({
         <div className={`ops-card ${hidden.has("benchmark") ? "card-hidden" : ""}`}>
           <div className="ops-card-title">
             📐 Agent 横向对比
-            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onWeeklyReport}>📄 周报</button>
+            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onWeeklyReport}>⤓ 导出周报</button>
+            <button className="action-btn" style={{ fontSize: 11 }} onClick={onOpenReports} title="应用内查看当前周报与历史报告">📊 报告中心</button>
           {vis("benchmark")}</div>
           <div style={{ overflowX: "auto" }}>
             <table className="ops-table">

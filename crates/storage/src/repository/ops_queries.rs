@@ -1289,4 +1289,136 @@ impl Repository {
             all_cost: all.1,
         })
     }
+
+    // ── 洞察页面聚合 ─────────────────────────────────────────────────
+
+    /// 活动节律：按天热力 / 24 小时分布 / 工具月度趋势（新页面，纯聚合）。
+    #[allow(clippy::type_complexity)]
+    pub fn activity_stats(
+        &self,
+        days: i64,
+    ) -> StorageResult<(
+        Vec<(String, i64, i64)>,
+        Vec<(i64, i64)>,
+        Vec<(String, String, i64)>,
+    )> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days * 86_400_000;
+
+        let mut heat = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT date(t.ts/1000,'unixepoch','localtime') AS d,
+                        COUNT(*),
+                        COUNT(DISTINCT t.source_session_id)
+                 FROM tool_call_records t
+                 WHERE t.ts >= ?1 AND t.ts IS NOT NULL
+                 GROUP BY d ORDER BY d",
+            )?;
+            let rows =
+                stmt.query_map(params![cutoff], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            for row in rows {
+                let (d, c, s): (String, i64, i64) = row?;
+                heat.push((d, c, s));
+            }
+        }
+
+        let mut hours = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT strftime('%H', ts/1000,'unixepoch','localtime') AS h, COUNT(*)
+                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+                 GROUP BY h ORDER BY CAST(h AS INTEGER)",
+            )?;
+            let rows = stmt.query_map(params![cutoff], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?)))?;
+            for row in rows {
+                hours.push(row?);
+            }
+        }
+
+        let mut tools = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT strftime('%Y-%m', ts/1000,'unixepoch','localtime') AS m,
+                        tool_name, COUNT(*)
+                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+                 GROUP BY m, tool_name ORDER BY m, 3 DESC",
+            )?;
+            let rows = stmt.query_map(params![cutoff], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })?;
+            for row in rows {
+                tools.push(row?);
+            }
+        }
+        Ok((heat, hours, tools))
+    }
+
+    /// 项目中心：按 source_dir 聚合（与成本页同口径）。
+    pub fn projects_overview(&self) -> StorageResult<Vec<serde_json::Value>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT COALESCE(NULLIF(u.source_dir,''), '(未知目录)') AS dir,
+                    COUNT(DISTINCT u.source_session_id),
+                    SUM(u.input_tokens + u.output_tokens + u.reasoning_tokens),
+                    COALESCE(SUM(u.cost_usd), 0.0),
+                    COUNT(*),
+                    MAX(u.ts),
+                    (SELECT p.name FROM usage_records u2
+                      JOIN providers p ON p.id = u2.provider_id
+                      WHERE u2.source_dir = u.source_dir
+                      GROUP BY p.name ORDER BY COUNT(*) DESC LIMIT 1)
+             FROM usage_records u
+             GROUP BY dir
+             ORDER BY 4 DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(serde_json::json!({
+                "dir": r.get::<_, String>(0)?,
+                "sessions": r.get::<_, i64>(1)?,
+                "tokens": r.get::<_, i64>(2)?,
+                "cost_usd": r.get::<_, f64>(3)?,
+                "requests": r.get::<_, i64>(4)?,
+                "last_active_ms": r.get::<_, Option<i64>>(5)?,
+                "main_agent": r.get::<_, Option<String>>(6)?,
+            }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// 提示词库语料：最近的用户提问（含会话定位）。
+    pub fn recent_user_prompts(&self, limit: i64) -> StorageResult<Vec<serde_json::Value>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.conversation_id,
+                    substr(COALESCE(m.content_text,''), 1, 300),
+                    COALESCE(c.title, c.source_conversation_id, ''),
+                    m.created_at
+             FROM messages m JOIN conversations c ON c.id = m.conversation_id
+             WHERE m.role = 'user' AND m.content_text IS NOT NULL AND length(m.content_text) > 4
+             ORDER BY COALESCE(m.created_at, 0) DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |r| {
+            Ok(serde_json::json!({
+                "message_id": r.get::<_, String>(0)?,
+                "conversation_id": r.get::<_, String>(1)?,
+                "text": r.get::<_, String>(2)?,
+                "title": r.get::<_, String>(3)?,
+                "created_at": r.get::<_, Option<i64>>(4)?,
+            }))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
 }

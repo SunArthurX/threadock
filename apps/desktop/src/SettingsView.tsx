@@ -293,6 +293,11 @@ export default function SettingsView({
               ))}
           </section>
 
+          <section className="settings-section">
+            <h3>加密备份</h3>
+            <BackupSection />
+          </section>
+
           <section className="settings-section danger">
             <h3>数据</h3>
             <div className="settings-hint">
@@ -317,5 +322,51 @@ export default function SettingsView({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 加密备份/恢复（本地，密码仅进程内使用）。 */
+function BackupSection() {
+  const [pw, setPw] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <div className="settings-row">
+        <span>备份密码（≥8 位）</span>
+        <input
+          className="settings-confirm-input"
+          type="password"
+          value={pw}
+          placeholder="备份加密密码"
+          onChange={(e) => setPw(e.target.value)}
+        />
+      </div>
+      <div className="settings-row">
+        <span>创建备份</span>
+        <button
+          className="action-btn"
+          disabled={busy || pw.length < 8}
+          onClick={async () => {
+            const { save } = await import("@tauri-apps/plugin-dialog");
+            const path = await save({
+              defaultPath: `threadock-backup-${new Date().toISOString().slice(0, 10)}.chbak`,
+              filters: [{ name: "Threadock 备份", extensions: ["chbak"] }],
+            });
+            if (typeof path !== "string") return;
+            setBusy(true); setMsg("备份中…");
+            try {
+              const r = await invoke<{ db_size: number; raw_count: number }>("backup_create", { path, password: pw });
+              setMsg(`✓ 已备份（库 ${(r.db_size / 1048576).toFixed(1)}MB · ${r.raw_count} 个归档）`);
+            } catch (e) { setMsg(String(e)); }
+            setBusy(false);
+          }}
+        >⤓ 备份全部数据</button>
+        {msg && <span className="settings-value">{msg}</span>}
+      </div>
+      <div className="settings-hint">
+        备份含数据库与原始归档（Argon2id 加密）。恢复在 CLI：ch restore &lt;file&gt; &lt;dir&gt;（恢复为副本，不影响当前数据）。
+      </div>
+    </>
   );
 }
