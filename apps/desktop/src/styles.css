@@ -2652,6 +2652,15 @@ button {
 .help-shortcuts-desc { font-size: 12.5px; opacity: 0.85; flex: 1; }
 .help-shortcuts-hint { font-size: 11.5px; opacity: 0.55; margin-top: 12px; padding-top: 8px; border-top: 1px solid var(--border, rgba(255,255,255,0.06)); }
 
+/* 更新日志 */
+.changelog-modal { width: min(580px, calc(100vw - 48px)); }
+.changelog-body { max-height: 60vh; overflow-y: auto; }
+.changelog-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.changelog-list { list-style: none; padding: 0; margin: 0; }
+.changelog-list li { padding: 6px 0 6px 0; border-bottom: 1px solid var(--border, rgba(255,255,255,0.04)); font-size: 12.5px; line-height: 1.5; }
+.changelog-list li:last-child { border-bottom: none; }
+.settings-footer { padding: 10px 20px; border-top: 1px solid var(--border, rgba(255,255,255,0.06)); display: flex; justify-content: flex-end; gap: 8px; }
+
 /* 搜索历史下拉 */
 .search-box { position: relative; }
 .search-history-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; min-width: 280px; max-width: 480px; background: var(--bg-modal, var(--bg-1)); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.18); z-index: 100; padding: 4px; }
@@ -2707,6 +2716,10 @@ button {
 .fav-toggle { cursor: pointer; font-size: 14px; opacity: .55; margin-left: auto; }
 .fav-toggle:hover { opacity: 1; }
 .fav-toggle.on { color: #f59e0b; opacity: 1; }
+.pin-toggle { cursor: pointer; font-size: 13px; opacity: .4; }
+.pin-toggle:hover { opacity: 1; }
+.pin-toggle.on { opacity: 1; }
+.pin-star { margin-right: 4px; font-size: 11px; }
 .restore-btn { cursor: pointer; font-size: 11px; color: var(--accent, #4f8cff); margin-left: auto; }
 
 /* 详情治理操作与标签 */
@@ -2881,6 +2894,31 @@ button {
 /* 知识库优化 */
 .todo-check { cursor: pointer; font-size: 14px; opacity: .8; }
 .kb-item.done .kb-text { text-decoration: line-through; opacity: .45; }
+
+/* 知识提取 tabs */
+.knowledge-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 20px 0; border-bottom: 1px solid var(--border, rgba(255,255,255,0.06)); }
+.knowledge-tabs .filter-chip { display: inline-flex; align-items: center; gap: 4px; margin-bottom: -1px; padding: 6px 10px; border-radius: 6px 6px 0 0; font-size: 12px; border: 1px solid transparent; border-bottom: none; background: transparent; }
+.knowledge-tabs .filter-chip.active { background: var(--bg-elevated, rgba(255,255,255,0.05)); border-color: var(--border); color: var(--accent); }
+.knowledge-tabs .filter-chip.disabled { opacity: 0.35; cursor: not-allowed; }
+.knowledge-tabs .tab-icon { font-size: 12px; }
+.knowledge-tabs .tab-count { font-size: 10.5px; opacity: 0.7; padding: 0 5px; border-radius: 8px; background: var(--bg-2); }
+
+/* 热力图工具维度筛选 */
+.heat-tool-filter { flex-wrap: wrap; }
+.heat-tool-select { padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg-2); color: var(--text); font-size: 11px; }
+
+/* 成本周对比 */
+.wow-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.wow-col { padding: 10px 12px; background: var(--bg-elevated, rgba(255,255,255,0.04)); border-radius: 8px; }
+.wow-col.wow-delta { background: var(--bg-2); }
+.wow-label { font-size: 11px; opacity: 0.6; }
+.wow-value { font-size: 18px; font-weight: 660; margin: 2px 0; }
+.wow-value.up { color: #f97316; }
+.wow-value.down { color: #22c55e; }
+.wow-sub { font-size: 11.5px; opacity: 0.7; }
+.wow-sub.up { color: #f97316; }
+.wow-sub.down { color: #22c55e; }
+.ops-table-wrap { overflow-x: auto; }
 
 /* 第 6-10 轮优化：单条复制按钮（默认隐藏，hover 显示） */
 .kb-copy {

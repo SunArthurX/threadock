@@ -47,10 +47,17 @@ interface Props {
   onRetentionDaysChange: (days: number) => void;
   notifyOnExceed: boolean;
   onNotifyOnExceedChange: (v: boolean) => void;
+  numberFormat: "raw" | "k" | "wan" | "yi";
+  onNumberFormatChange: (f: "raw" | "k" | "wan" | "yi") => void;
+  currency: "USD" | "CNY";
+  onCurrencyChange: (c: "USD" | "CNY") => void;
+  dateFormat: "relative" | "absolute" | "iso";
+  onDateFormatChange: (f: "relative" | "absolute" | "iso") => void;
   onNavigate: (view: GovernanceView) => void;
   onReset: () => Promise<void>;
   resetting: boolean;
   onClose: () => void;
+  onShowChangelog: () => void;
 }
 
 const RETENTION_OPTIONS: [number, string][] = [
@@ -95,7 +102,8 @@ export const GOVERNANCE_LABELS: Record<string, string> = {
 export default function SettingsView({
   theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
-  onNavigate, onReset, resetting, onClose,
+  numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
+  onNavigate, onReset, resetting, onClose, onShowChangelog,
 }: Props) {
   const [storage, setStorage] = useState<{ db_bytes: number; raw_count: number; raw_bytes: number; index_bytes: number } | null>(null);
   const [gcResult, setGcResult] = useState<string | null>(null);
@@ -330,7 +338,38 @@ export default function SettingsView({
             <BackupSection />
           </section>
 
-          <AboutSection />
+          <AboutSection onShowChangelog={onShowChangelog} />
+
+          <section className="settings-section">
+            <h3>显示偏好</h3>
+            <div className="settings-row">
+              <span>数字格式</span>
+              <div className="settings-segment">
+                <button className={numberFormat === "raw" ? "active" : ""} onClick={() => onNumberFormatChange("raw")}>1,234,567</button>
+                <button className={numberFormat === "k" ? "active" : ""} onClick={() => onNumberFormatChange("k")}>1.2M</button>
+                <button className={numberFormat === "wan" ? "active" : ""} onClick={() => onNumberFormatChange("wan")}>123.4万</button>
+                <button className={numberFormat === "yi" ? "active" : ""} onClick={() => onNumberFormatChange("yi")}>1.2B / 万</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>货币</span>
+              <div className="settings-segment">
+                <button className={currency === "USD" ? "active" : ""} onClick={() => onCurrencyChange("USD")}>$ USD</button>
+                <button className={currency === "CNY" ? "active" : ""} onClick={() => onCurrencyChange("CNY")}>¥ CNY (1 USD ≈ 7.2)</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>时间显示</span>
+              <div className="settings-segment">
+                <button className={dateFormat === "relative" ? "active" : ""} onClick={() => onDateFormatChange("relative")}>3 分钟前</button>
+                <button className={dateFormat === "absolute" ? "active" : ""} onClick={() => onDateFormatChange("absolute")}>2026-08-12 14:23</button>
+                <button className={dateFormat === "iso" ? "active" : ""} onClick={() => onDateFormatChange("iso")}>ISO</button>
+              </div>
+            </div>
+            <div className="settings-hint">
+              偏好仅影响展示与导出列宽，不影响后端存储；换算 1 USD ≈ 7.2 CNY 后续可接实时汇率 API 替换。
+            </div>
+          </section>
 
           <section className="settings-section danger">
             <h3>按时间重置</h3>
@@ -383,7 +422,7 @@ export default function SettingsView({
 }
 
 /** 关于：版本号 + 关键依赖 + 文档链接。 */
-function AboutSection() {
+function AboutSection({ onShowChangelog }: { onShowChangelog: () => void }) {
   // 依赖版本（与 package.json / Cargo.toml 对齐；本面板帮助用户/客服快速核对环境）
   const deps: { name: string; version: string; role: string }[] = [
     { name: "Tauri", version: "2.x", role: "桌面壳（Rust + WebView）" },
@@ -431,6 +470,10 @@ function AboutSection() {
             {l.label}
           </a>
         ))}
+      </div>
+      <div className="settings-row" style={{ marginTop: 8 }}>
+        <span>查看本版本更新日志</span>
+        <button className="action-btn" onClick={onShowChangelog}>📋 查看更新日志</button>
       </div>
     </section>
   );

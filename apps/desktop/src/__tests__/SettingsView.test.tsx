@@ -25,10 +25,17 @@ const base = {
   onRetentionDaysChange: vi.fn(),
   notifyOnExceed: false,
   onNotifyOnExceedChange: vi.fn(),
+  numberFormat: "raw" as const,
+  onNumberFormatChange: vi.fn(),
+  currency: "USD" as const,
+  onCurrencyChange: vi.fn(),
+  dateFormat: "relative" as const,
+  onDateFormatChange: vi.fn(),
   onNavigate: vi.fn(),
   onReset: vi.fn(async () => {}),
   resetting: false,
   onClose: vi.fn(),
+  onShowChangelog: vi.fn(),
 };
 
 const openSettings = () => render(<SettingsView {...base} />);

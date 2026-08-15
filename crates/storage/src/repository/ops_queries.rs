@@ -42,6 +42,7 @@ pub struct ModelUsage {
     pub input_tokens: i64,
     pub output_tokens: i64,
     pub errors: i64,
+    pub cost_usd: f64,
 }
 
 /// 每日用量。
@@ -421,7 +422,8 @@ impl Repository {
         let sql = format!(
             "SELECT COALESCE(model, '(unknown)'), u.provider_id, COUNT(*),
                     SUM(input_tokens), SUM(output_tokens),
-                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
+                    COALESCE(SUM(cost_usd), 0.0)
              FROM usage_records u
              WHERE {clause}
              GROUP BY model, u.provider_id ORDER BY 4 DESC",
@@ -436,6 +438,7 @@ impl Repository {
                 input_tokens: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
                 output_tokens: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
                 errors: r.get::<_, Option<i64>>(5)?.unwrap_or(0),
+                cost_usd: r.get::<_, Option<f64>>(6)?.unwrap_or(0.0),
             })
         })?;
         let mut v = Vec::new();

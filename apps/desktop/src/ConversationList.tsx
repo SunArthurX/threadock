@@ -1,4 +1,4 @@
-// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开 + 日期范围筛选 + 批量操作）
+// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开 + 日期范围筛选 + 批量操作 + 排序 + Pin 置顶）
 import { useMemo, useState } from "react";
 import { Conversation, sourceLabel, formatTime } from "./types";
 import { showToast } from "./toast";
@@ -9,12 +9,32 @@ export type ListScope = "all" | "favorite" | "archived" | "deleted";
 /** 日期快筛：今日 / 近 7 天 / 近 30 天 / 全部（默认全部）。 */
 export type DateFilter = "all" | "today" | "week" | "month";
 
+/** 排序方式：最新活动（默认）/ 创建时间 / 标题字母序。 */
+export type SortBy = "updated" | "created" | "title";
+
 const DATE_FILTERS: { key: DateFilter; label: string; days: number | null }[] = [
   { key: "all", label: "全部", days: null },
   { key: "today", label: "今日", days: 1 },
   { key: "week", label: "近 7 天", days: 7 },
   { key: "month", label: "近 30 天", days: 30 },
 ];
+
+const SORT_OPTIONS: { key: SortBy; label: string }[] = [
+  { key: "updated", label: "最新活动" },
+  { key: "created", label: "创建时间" },
+  { key: "title", label: "标题字母序" },
+];
+
+const PIN_KEY = "ch-conv-pins";
+
+/** 读取置顶 ID 集合（localStorage 持久化）。 */
+export function loadPinnedIds(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]") as string[]); }
+  catch { return new Set(); }
+}
+function savePinnedIds(s: Set<string>) {
+  try { localStorage.setItem(PIN_KEY, JSON.stringify([...s])); } catch { /* 静默 */ }
+}
 
 interface Props {
   conversations: Conversation[];
@@ -57,7 +77,20 @@ export default function ConversationList({
   onBulkFavorite, onBulkArchive, onBulkDelete,
 }: Props) {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [sortBy, setSortBy] = useState<SortBy>(() => {
+    try { const v = localStorage.getItem("ch-sort-by"); return (["updated","created","title"] as const).includes(v as SortBy) ? v as SortBy : "updated"; }
+    catch { return "updated"; }
+  });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pinned, setPinned] = useState<Set<string>>(loadPinnedIds);
+  const togglePin = (id: string) => {
+    setPinned((p) => {
+      const n = new Set(p);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      savePinnedIds(n);
+      return n;
+    });
+  };
   // 日期过滤：基于 started_at_ms（前端内存过滤，不增加后端请求）
   const dateFiltered = useMemo(() => {
     const cfg = DATE_FILTERS.find((d) => d.key === dateFilter);
@@ -65,6 +98,25 @@ export default function ConversationList({
     const cutoff = Date.now() - cfg.days * 86_400_000;
     return conversations.filter((c) => (c.started_at_ms ?? 0) >= cutoff);
   }, [conversations, dateFilter]);
+
+  // 排序 + Pin 置顶优先（持久排序：state 变化时缓存到 localStorage）
+  const sorted = useMemo(() => {
+    const arr = [...dateFiltered];
+    arr.sort((a, b) => {
+      // Pin 优先：置顶的永远在最前
+      const pa = pinned.has(a.id) ? 0 : 1;
+      const pb = pinned.has(b.id) ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      if (sortBy === "title") {
+        return (a.user_title ?? a.title ?? "").localeCompare(b.user_title ?? b.title ?? "");
+      }
+      const ka = sortBy === "updated" ? (a.updated_at_ms ?? 0) : (a.started_at_ms ?? 0);
+      const kb = sortBy === "updated" ? (b.updated_at_ms ?? 0) : (b.started_at_ms ?? 0);
+      return kb - ka;
+    });
+    return arr;
+  }, [dateFiltered, sortBy, pinned]);
+  const changeSortBy = (s: SortBy) => { setSortBy(s); try { localStorage.setItem("ch-sort-by", s); } catch { /* 静默 */ } };
 
   const toggleSelected = (id: string) => {
     setSelectedIds((cur) => {
@@ -111,6 +163,7 @@ export default function ConversationList({
             </span>
           )}
           {isChild && <span className="child-arrow">↳</span>}
+          {pinned.has(c.id) && !isChild && <span className="pin-star" title="已置顶">📌</span>}
           {c.favorite && <span className="fav-star" title="已收藏">★</span>}
           {c.archived && <span className="arch-badge" title="已归档">🗄</span>}
           {c.user_title ?? c.title ?? "(无标题)"}
@@ -121,13 +174,22 @@ export default function ConversationList({
           {!isChild && c.child_count > 0 && <span className="meta-child">{c.child_count} 子任务</span>}
           {c.model && <span className="meta-model">{c.model}</span>}
           {scope !== "deleted" ? (
-            <span
-              className={`fav-toggle ${c.favorite ? "on" : ""}`}
-              title={c.favorite ? "取消收藏" : "收藏"}
-              onClick={(e) => { e.stopPropagation(); onToggleFavorite(c); }}
-            >
-              {c.favorite ? "★" : "☆"}
-            </span>
+            <>
+              <span
+                className={`pin-toggle ${pinned.has(c.id) ? "on" : ""}`}
+                title={pinned.has(c.id) ? "取消置顶" : "置顶（永远排在最前）"}
+                onClick={(e) => { e.stopPropagation(); togglePin(c.id); }}
+              >
+                {pinned.has(c.id) ? "📌" : "📍"}
+              </span>
+              <span
+                className={`fav-toggle ${c.favorite ? "on" : ""}`}
+                title={c.favorite ? "取消收藏" : "收藏"}
+                onClick={(e) => { e.stopPropagation(); onToggleFavorite(c); }}
+              >
+                {c.favorite ? "★" : "☆"}
+              </span>
+            </>
           ) : (
             <span
               className="restore-btn"
@@ -207,10 +269,23 @@ export default function ConversationList({
           >{d.label}</button>
         ))}
       </div>
+      <div className="filter-bar" style={{ paddingTop: 0 }}>
+        <span style={{ fontSize: 10.5, opacity: 0.55, marginRight: 4 }}>排序</span>
+        {SORT_OPTIONS.map((s) => (
+          <button
+            key={s.key}
+            className={`filter-chip ${sortBy === s.key ? "active" : ""}`}
+            onClick={() => changeSortBy(s.key)}
+          >{s.label}</button>
+        ))}
+        {pinned.size > 0 && (
+          <span style={{ fontSize: 10.5, opacity: 0.55, marginLeft: "auto" }}>📌 {pinned.size} 置顶</span>
+        )}
+      </div>
       {loading && (
         <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载会话…</span></div>
       )}
-      {!loading && dateFiltered.map((c) => renderItem(c))}
+      {!loading && sorted.map((c) => renderItem(c))}
       {!loading && conversations.length === 0 && (
         <div className="empty">
           {scope === "deleted" ? "回收站为空" : selectedWs ? "该项目下暂无会话" : "选择左侧项目"}

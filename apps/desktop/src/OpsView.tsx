@@ -72,6 +72,8 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
     } else if (sec === "cost") {
       p(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
       p(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
+      p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then(setByModel), "model");
+      p(invoke<DailyUsage[]>("ops_timeseries", { days: 14 }).then(setTimeseries), "ts");
     } else if (sec === "security") {
       p(invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }).then(setRisky), "risky");
       p(invoke<AnomalyRow[]>("ops_anomalies", { days: range }).then(setAnomalies), "anomaly");
@@ -187,6 +189,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
       )}
       {section === "cost" && (
         <CostSection summary={usageSummary} dirCosts={dirCosts} byProvider={byProvider}
+          byModel={byModel} timeseries={timeseries}
           budget={budget} monthUsage={monthUsage}
           budgetInput={budgetInput} loading={loading}
           onBudgetInput={(f, v) => setBudgetInput((p) => ({ ...p, [f]: v }))}

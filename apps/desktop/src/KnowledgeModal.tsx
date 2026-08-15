@@ -1,7 +1,9 @@
 // 知识提取弹窗：分区展示会话纪要（摘要/决策/TODO/错误/命令/文件），
 // 一键复制为 Markdown 交接文档，支持重新提取与 Esc 关闭。
-// 增强：每 section 加单 section 复制按钮（只复制决策 / 只复制 TODO 等）。
+// 增强：类型筛选 tabs（点击只看一类）+ JSON/Markdown 文件下载导出。
 import { useEffect, useState } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import type { ExtractionResult } from "./types";
 import { showToast } from "./toast";
 
@@ -12,6 +14,17 @@ interface Props {
   onClose: () => void;
   onReextract: () => void;
 }
+
+type Tab = "all" | "summary" | "decisions" | "todos" | "errors" | "commands" | "files";
+const TABS: { value: Tab; label: string; icon: string }[] = [
+  { value: "all", label: "全部", icon: "📚" },
+  { value: "summary", label: "摘要", icon: "📖" },
+  { value: "decisions", label: "决策", icon: "🎯" },
+  { value: "todos", label: "TODO", icon: "📋" },
+  { value: "errors", label: "错误", icon: "❌" },
+  { value: "commands", label: "命令", icon: "⚙️" },
+  { value: "files", label: "文件", icon: "📄" },
+];
 
 /** 单 section 复制（仅复制某块的内容）。 */
 async function copyOne(label: string, text: string) {
@@ -51,8 +64,23 @@ export function knowledgeToMarkdown(k: {
   return lines.join("\n");
 }
 
+/** 知识提取结果 → JSON 字符串（用于程序化处理 / 二次提取）。 */
+export function knowledgeToJson(k: ExtractionResult): string {
+  return JSON.stringify({
+    summary: k.summary ?? "",
+    decisions: k.decisions ?? [],
+    todos: k.todos ?? [],
+    errors: k.errors ?? [],
+    commands: k.commands ?? [],
+    files: k.files ?? [],
+    extractor: k.extractor ?? "unknown",
+    exported_at: new Date().toISOString(),
+  }, null, 2);
+}
+
 export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextract }: Props) {
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<Tab>("all");
 
   // Esc 关闭（与设置弹窗一致的交互习惯）
   useEffect(() => {
@@ -63,13 +91,19 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  const isEmpty =
-    (knowledge.summary ?? "").length === 0
-    && (knowledge.decisions ?? []).length === 0
-    && (knowledge.todos ?? []).length === 0
-    && (knowledge.errors ?? []).length === 0
-    && (knowledge.commands ?? []).length === 0
-    && (knowledge.files ?? []).length === 0;
+  // 计数（用于 tab 徽标）
+  const counts: Record<Tab, number> = {
+    all: 0,
+    summary: (knowledge.summary ?? "").trim() ? 1 : 0,
+    decisions: (knowledge.decisions ?? []).length,
+    todos: (knowledge.todos ?? []).length,
+    errors: (knowledge.errors ?? []).length,
+    commands: (knowledge.commands ?? []).length,
+    files: (knowledge.files ?? []).length,
+  };
+  counts.all = counts.summary + counts.decisions + counts.todos + counts.errors + counts.commands + counts.files;
+
+  const isEmpty = counts.all === 0;
 
   // 复制单 section 的小函数（仅生成纯文本）
   const summaryText = (knowledge.summary ?? "").trim();
@@ -78,6 +112,27 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
   const errorsMd = (knowledge.errors ?? []).map((e) => `- ${e.error}`).join("\n");
   const commandsMd = (knowledge.commands ?? []).map((c) => `- \`${c}\``).join("\n");
   const filesMd = (knowledge.files ?? []).map((f) => `- ${f.path}`).join("\n");
+
+  /** 导出文件（弹保存对话框，写入磁盘）。 */
+  const exportFile = async (fmt: "md" | "json") => {
+    try {
+      const content = fmt === "md" ? knowledgeToMarkdown(knowledge) : knowledgeToJson(knowledge);
+      const ext = fmt;
+      const stamp = new Date().toISOString().slice(0, 10);
+      const safeTitle = (convTitle ?? "knowledge").replace(/[\\/:*?"<>|]/g, "_").slice(0, 40);
+      const path = await save({
+        defaultPath: `${safeTitle}-${stamp}.${ext}`,
+        filters: [{ name: fmt.toUpperCase(), extensions: [ext] }],
+      });
+      if (typeof path !== "string") return;
+      await invoke("save_text_file", { path, content });
+      showToast(`✓ 已导出 ${ext.toUpperCase()}（${(content.length / 1024).toFixed(1)} KB）`, "info");
+    } catch (e) {
+      showToast(`导出失败：${typeof e === "string" ? e : String(e)}`, "error");
+    }
+  };
+
+  const showBlock = (k: Tab) => tab === "all" || tab === k;
 
   return (
     <div className="settings-backdrop" onClick={onClose}>
@@ -89,6 +144,8 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
           </h2>
           <div className="knowledge-modal-actions">
             <button className="action-btn" onClick={onReextract}>↻ 重新提取</button>
+            <button className="action-btn" onClick={() => exportFile("md")} title="导出为 Markdown 文件">⤓ MD</button>
+            <button className="action-btn" onClick={() => exportFile("json")} title="导出为 JSON 文件">⤓ JSON</button>
             <button
               className="action-btn"
               onClick={async () => {
@@ -105,6 +162,24 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
             <button className="settings-close" onClick={onClose}>✕</button>
           </div>
         </div>
+        {/* 类型筛选 tabs（带计数徽标） */}
+        {!isEmpty && (
+          <div className="knowledge-tabs">
+            {TABS.map((t) => (
+              <button
+                key={t.value}
+                className={`filter-chip ${tab === t.value ? "active" : ""} ${counts[t.value] === 0 && t.value !== "all" ? "disabled" : ""}`}
+                onClick={() => setTab(t.value)}
+                disabled={counts[t.value] === 0 && t.value !== "all"}
+                title={counts[t.value] === 0 ? `${t.label}（无内容）` : `只看${t.label}`}
+              >
+                <span className="tab-icon">{t.icon}</span>
+                {t.label}
+                <span className="tab-count">{counts[t.value]}</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="settings-body">
           {isEmpty && (
             <div className="knowledge-empty">
@@ -112,7 +187,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               代码/工程类会话提取效果更明显。
             </div>
           )}
-          {summaryText && (
+          {showBlock("summary") && summaryText && (
             <div className="knowledge-block summary">
               <div className="knowledge-label">
                 📖 摘要
@@ -121,7 +196,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               <div className="knowledge-text">{summaryText}</div>
             </div>
           )}
-          {(knowledge.decisions ?? []).length > 0 && (
+          {showBlock("decisions") && (knowledge.decisions ?? []).length > 0 && (
             <div className="knowledge-block decisions">
               <div className="knowledge-label">
                 🎯 决策（{(knowledge.decisions ?? []).length}）
@@ -132,7 +207,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               ))}
             </div>
           )}
-          {(knowledge.todos ?? []).length > 0 && (
+          {showBlock("todos") && (knowledge.todos ?? []).length > 0 && (
             <div className="knowledge-block todos">
               <div className="knowledge-label">
                 📋 TODO（{(knowledge.todos ?? []).length}）
@@ -143,7 +218,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               ))}
             </div>
           )}
-          {(knowledge.errors ?? []).length > 0 && (
+          {showBlock("errors") && (knowledge.errors ?? []).length > 0 && (
             <div className="knowledge-block errors">
               <div className="knowledge-label">
                 ❌ 错误（{(knowledge.errors ?? []).length}）
@@ -154,7 +229,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               ))}
             </div>
           )}
-          {(knowledge.commands ?? []).length > 0 && (
+          {showBlock("commands") && (knowledge.commands ?? []).length > 0 && (
             <div className="knowledge-block commands">
               <div className="knowledge-label">
                 ⚙️ 命令（{(knowledge.commands ?? []).length}）
@@ -165,7 +240,7 @@ export default function KnowledgeModal({ knowledge, convTitle, onClose, onReextr
               ))}
             </div>
           )}
-          {(knowledge.files ?? []).length > 0 && (
+          {showBlock("files") && (knowledge.files ?? []).length > 0 && (
             <div className="knowledge-block files">
               <div className="knowledge-label">
                 📄 涉及文件（{(knowledge.files ?? []).length}）

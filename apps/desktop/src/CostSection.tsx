@@ -1,8 +1,8 @@
-// 成本 Section：按项目成本 + 按 Provider 成本 + 预算卡 + 重算 + 超支预测
+// 成本 Section：按项目成本 + 按 Provider 成本 + 按模型成本 + 预算卡 + 重算 + 超支预测 + 周对比
 import { useMemo } from "react";
 import { formatTokens, formatCost } from "./charts";
 import { BarChart } from "./charts";
-import type { DirCost, BudgetSettings, ProviderUsage } from "./ops-types";
+import type { DirCost, BudgetSettings, ProviderUsage, ModelUsage, DailyUsage } from "./ops-types";
 import { meta } from "./ops-types";
 
 
@@ -33,9 +33,43 @@ export function calcProjection(
   };
 }
 
+/** 本周 vs 上周成本对比。
+ *  - timeseries 至少 7 天（无上次则 lastWeek=0，对比显示「+∞%」不可靠 → 返回 null）
+ *  - costRatio: 每 1M tokens 单价（默认 4 美元，对 Claude/Sonnet 中位粗估，仅作对比展示）
+ *  - 返回 {thisWeek, lastWeek, costDelta, tokenDelta, costPct, tokenPct} */
+export function weekOverWeek(
+  timeseries: { day: string; total_tokens: number; requests: number }[] | null | undefined,
+  costPerMTokens: number = 4,
+): {
+  thisWeek: { cost: number; tokens: number; requests: number };
+  lastWeek: { cost: number; tokens: number; requests: number };
+  costDelta: number; tokenDelta: number;
+  costPct: number; tokenPct: number;
+} | null {
+  if (!timeseries || timeseries.length < 14) return null;
+  const last = timeseries.slice(-7);
+  const prev = timeseries.slice(-14, -7);
+  const t = (arr: typeof timeseries) => arr.reduce((s, x) => s + (x.total_tokens || 0), 0);
+  const r = (arr: typeof timeseries) => arr.reduce((s, x) => s + (x.requests || 0), 0);
+  const thisT = t(last); const prevT = t(prev);
+  const thisR = r(last); const prevR = r(prev);
+  const thisC = (thisT / 1_000_000) * costPerMTokens;
+  const prevC = (prevT / 1_000_000) * costPerMTokens;
+  return {
+    thisWeek: { tokens: thisT, requests: thisR, cost: thisC },
+    lastWeek: { tokens: prevT, requests: prevR, cost: prevC },
+    costDelta: thisC - prevC,
+    tokenDelta: thisT - prevT,
+    costPct: prevC > 0 ? (thisC - prevC) / prevC : 0,
+    tokenPct: prevT > 0 ? (thisT - prevT) / prevT : 0,
+  };
+}
+
 interface Props {
   dirCosts: DirCost[];
   byProvider: ProviderUsage[];
+  byModel?: ModelUsage[];
+  timeseries?: DailyUsage[];
   budget: BudgetSettings;
   summary: UsageSummary | null;
   monthUsage: { tokens: number; cost_usd: number } | null;
@@ -47,7 +81,7 @@ interface Props {
 }
 
 export default function CostSection({
-  dirCosts, byProvider, budget, summary, monthUsage, budgetInput, loading,
+  dirCosts, byProvider, byModel, timeseries, budget, summary, monthUsage, budgetInput, loading,
   onBudgetInput, onSaveBudget, onRecalc,
 }: Props) {
   const tokenPct = budget.monthly_token_limit && monthUsage ? Math.min((monthUsage.tokens / budget.monthly_token_limit) * 100, 999) : null;
@@ -55,6 +89,9 @@ export default function CostSection({
 
   // 超支预测（逻辑抽到 calcProjection 单测覆盖）
   const projection = useMemo(() => calcProjection(monthUsage), [monthUsage]);
+
+  // 本周 vs 上周对比（纯函数，可单测）
+  const wow = useMemo(() => weekOverWeek(timeseries), [timeseries]);
   const projTokenOver = budget.monthly_token_limit && projection ? projection.tokens - budget.monthly_token_limit : null;
   const projCostOver = budget.monthly_cost_limit && projection ? projection.cost - budget.monthly_cost_limit : null;
 
@@ -194,6 +231,61 @@ export default function CostSection({
               );
             }}
           />
+        </div>
+      )}
+
+      {/* 按模型成本 Top10（看清哪个模型最烧钱） */}
+      {byModel && byModel.length > 0 && (
+        <div className="ops-card">
+          <div className="ops-card-title">按模型成本 Top10</div>
+          <div className="ops-table-wrap">
+            <table className="ops-table">
+              <thead><tr><th>模型</th><th>Provider</th><th>成本</th><th>Tokens</th><th>请求</th><th>错误</th></tr></thead>
+              <tbody>
+                {byModel.slice(0, 10).map((m, i) => (
+                  <tr key={i}>
+                    <td className="mono" title={m.model}>{m.model.length > 28 ? m.model.slice(0, 28) + "…" : m.model}</td>
+                    <td><span className={`badge source ${m.provider_id}`}>{meta(m.provider_id).label}</span></td>
+                    <td><b>{formatCost(m.cost_usd)}</b></td>
+                    <td>{formatTokens(m.input_tokens + m.output_tokens)}</td>
+                    <td>{m.requests.toLocaleString()}</td>
+                    <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 本周 vs 上周 对比卡（无数据时隐藏） */}
+      {wow && (
+        <div className="ops-card">
+          <div className="ops-card-title">
+            📅 本周 vs 上周
+            <span className="ops-card-sub">成本按 ${4}/M tokens 中位估算</span>
+          </div>
+          <div className="wow-grid">
+            <div className="wow-col">
+              <div className="wow-label">本周</div>
+              <div className="wow-value">{formatCost(wow.thisWeek.cost)}</div>
+              <div className="wow-sub">{formatTokens(wow.thisWeek.tokens)} · {wow.thisWeek.requests.toLocaleString()} 请求</div>
+            </div>
+            <div className="wow-col">
+              <div className="wow-label">上周</div>
+              <div className="wow-value">{formatCost(wow.lastWeek.cost)}</div>
+              <div className="wow-sub">{formatTokens(wow.lastWeek.tokens)} · {wow.lastWeek.requests.toLocaleString()} 请求</div>
+            </div>
+            <div className="wow-col wow-delta">
+              <div className="wow-label">变化</div>
+              <div className={`wow-value ${wow.costDelta > 0 ? "up" : wow.costDelta < 0 ? "down" : ""}`}>
+                {wow.costDelta >= 0 ? "▲" : "▼"} {formatCost(Math.abs(wow.costDelta))}
+              </div>
+              <div className={`wow-sub ${wow.tokenDelta > 0 ? "up" : wow.tokenDelta < 0 ? "down" : ""}`}>
+                {wow.tokenDelta >= 0 ? "+" : ""}{formatTokens(wow.tokenDelta)}（{(wow.tokenPct * 100).toFixed(1)}%）
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </>

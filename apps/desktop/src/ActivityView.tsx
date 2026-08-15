@@ -221,6 +221,23 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayConvs, setDayConvs] = useState<Conversation[] | null>(null);
   const [dayConvsLoading, setDayConvsLoading] = useState(false);
+  // 热力图维度：all=全工具 / 单一工具
+  const [toolFilter, setToolFilter] = useState<string | "all">("all");
+  // 工具维度下，热力值 = 当天该工具的调用数；非选中工具的热力 = 全工具值（保留对比）
+  // 但色阶按当前工具的 max 计算（视觉一致）
+  const filteredHeatmap = useMemo(() => {
+    if (toolFilter === "all" || !stats) return stats?.heatmap ?? [];
+    if (!stats.tool_daily || stats.tool_daily.length === 0) return stats?.heatmap ?? [];
+    const byDay = new Map<string, number>();
+    for (const t of stats.tool_daily) {
+      if (t.tool === toolFilter) byDay.set(t.day, (byDay.get(t.day) ?? 0) + t.calls);
+    }
+    return (stats.heatmap ?? []).map((c) => ({ ...c, calls: byDay.get(c.day) ?? 0 }));
+  }, [toolFilter, stats]);
+  const toolList = useMemo(() => {
+    if (!stats?.tool_daily) return [] as string[];
+    return [...new Set(stats.tool_daily.map((t) => t.tool))].sort();
+  }, [stats]);
 
   useEffect(() => {
     (async () => {
@@ -229,7 +246,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
     })();
   }, [days]);
 
-  const heatmapCells = stats?.heatmap ?? [];
+  const heatmapCells = filteredHeatmap;
   const totalCalls = heatmapCells.reduce((a, b) => a + b.calls, 0);
   const activeDays = heatmapCells.filter((c) => c.calls > 0).length;
   const avgPerDay = activeDays > 0 ? Math.round(totalCalls / activeDays) : 0;
@@ -418,6 +435,27 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         <div className="ops-card-title">
           每日协作热力图
           <span className="ops-card-sub">点击格子查看当日详情</span>
+          {toolList.length > 0 && (
+            <span className="heat-tool-filter" style={{ marginLeft: "auto", display: "inline-flex", gap: 4, alignItems: "center" }}>
+              <span style={{ fontSize: 11, opacity: 0.6 }}>维度：</span>
+              <button
+                className={`filter-chip ${toolFilter === "all" ? "active" : ""}`}
+                onClick={() => setToolFilter("all")}
+                style={{ fontSize: 11 }}
+              >全部工具</button>
+              <select
+                value={toolFilter === "all" ? "" : toolFilter}
+                onChange={(e) => setToolFilter(e.target.value || "all")}
+                className="heat-tool-select"
+                title="只看某工具的活跃度"
+              >
+                <option value="">指定工具…</option>
+                {toolList.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </span>
+          )}
         </div>
         {grid.cols.length === 0 ? (
           <div className="ops-table-empty">

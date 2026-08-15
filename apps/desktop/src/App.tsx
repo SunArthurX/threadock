@@ -17,10 +17,12 @@ import ActivityView from "./ActivityView";
 import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
 import HelpShortcuts from "./HelpShortcuts";
+import ChangelogModal, { shouldShowChangelog } from "./ChangelogModal";
 import { Toasts } from "./Toasts";
 import ErrorBoundary from "./ErrorBoundary";
 import { CommandPalette, type Page } from "./CommandPalette";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
+import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
@@ -80,6 +82,8 @@ export default function App() {
   const [cmdOpen, setCmdOpen] = useState(false);
   // 快捷键速查（⌘? 唤起）
   const [helpOpen, setHelpOpen] = useState(false);
+  // 更新日志：版本变化时启动自动显示一次
+  const [changelogOpen, setChangelogOpen] = useState(() => shouldShowChangelog());
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
 
@@ -141,6 +145,13 @@ export default function App() {
   // 保留策略（天，0 = 关闭）与预算通知：localStorage 即时生效
   const [retentionDays, setRetentionDays] = useState(() => Number(localStorage.getItem("ch-retention-days") ?? "0") || 0);
   const [notifyOnExceed, setNotifyOnExceed] = useState(() => localStorage.getItem("ch-budget-notify") === "1");
+  // 显示偏好（数字格式 / 货币 / 日期格式）
+  const [numberFormat, setNumberFormat] = useState<NumberFormat>(loadNumberFormat);
+  const [currency, setCurrency] = useState<Currency>(loadCurrency);
+  const [dateFormat, setDateFormat] = useState<DateFormat>(loadDateFormat);
+  const changeNumberFormat = (f: NumberFormat) => { setNumberFormat(f); saveNumberFormat(f); };
+  const changeCurrency = (c: Currency) => { setCurrency(c); saveCurrency(c); };
+  const changeDateFormat = (f: DateFormat) => { setDateFormat(f); saveDateFormat(f); };
 
   // source panel
   const [sourcePanel, setSourcePanel] = useState<SourceKey | null>(null);
@@ -243,6 +254,20 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
         e.preventDefault();
         setHelpOpen((v) => !v);
+        return;
+      }
+      // ⌘F / Ctrl+F 焦点搜索框（preventDefault 屏蔽浏览器默认页内查找）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      // ⌘R / Ctrl+R 手动刷新（preventDefault 屏蔽浏览器刷新；走数据重载流程）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        runManualSync();
+        showToast("↻ 已触发数据刷新", "info", 2000);
         return;
       }
       // ⌘1..8 直接跳页
@@ -705,14 +730,20 @@ export default function App() {
 
         {helpOpen && <HelpShortcuts onClose={() => setHelpOpen(false)} />}
 
+        {changelogOpen && <ChangelogModal onClose={() => setChangelogOpen(false)} />}
+
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={setTheme}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
             retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
             notifyOnExceed={notifyOnExceed} onNotifyOnExceedChange={changeNotifyOnExceed}
+            numberFormat={numberFormat} onNumberFormatChange={changeNumberFormat}
+            currency={currency} onCurrencyChange={changeCurrency}
+            dateFormat={dateFormat} onDateFormatChange={changeDateFormat}
             onNavigate={(v) => setView(v)}
             onReset={resetData} resetting={false}
-            onClose={() => setSettingsOpen(false)} />
+            onClose={() => setSettingsOpen(false)}
+            onShowChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }} />
         )}
 
         {sourcePanel && (

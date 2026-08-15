@@ -5,7 +5,7 @@ export interface OpsOverview {
   destructive_calls: number; total_tool_calls: number;
 }
 export interface ProviderUsage { provider: string; requests: number; total_tokens: number; output_tokens: number; errors: number; cost_usd: number; }
-export interface ModelUsage { model: string; provider_id: string; requests: number; input_tokens: number; output_tokens: number; errors: number; }
+export interface ModelUsage { model: string; provider_id: string; requests: number; input_tokens: number; output_tokens: number; errors: number; cost_usd: number; }
 export interface DailyUsage { day: string; total_tokens: number; requests: number; }
 export interface ToolUsageRow { tool_name: string; calls: number; destructive: number; errors: number; avg_duration_ms: number; }
 export interface RiskyCall {
