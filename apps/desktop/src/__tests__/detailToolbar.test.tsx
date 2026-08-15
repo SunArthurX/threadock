@@ -71,7 +71,7 @@ describe("知识渲染防御（需求 2）", () => {
     expect(() =>
       render(<ConversationDetail {...baseDetail} knowledge={partial} />)
     ).not.toThrow();
-    expect(screen.getByText("本会话未提取到知识要点")).toBeTruthy();
+    expect(screen.getByText(/未提取到知识要点/)).toBeTruthy();
   });
 
   it("正常结果渲染各分区", () => {
@@ -112,5 +112,35 @@ describe("provider chips 显隐（需求 3）", () => {
   it("未加载（空集合）时显示全部来源", () => {
     render(<ConversationList {...listProps} />);
     expect(screen.getByText("Cursor")).toBeTruthy();
+  });
+});
+
+describe("知识功能可用性", () => {
+  it("knowledgeToMarkdown 生成分区纪要（复制用途）", async () => {
+    const { knowledgeToMarkdown } = await import("../ConversationDetail");
+    const md = knowledgeToMarkdown({
+      summary: "做了 X",
+      decisions: [{ decision: "用 SQLite" }],
+      todos: [{ text: "写测试" }],
+      errors: [],
+      commands: ["cargo build"],
+      files: [{ path: "src/main.rs" }],
+      extractor: "rule-v1",
+    });
+    expect(md).toContain("# 会话纪要");
+    expect(md).toContain("## 摘要\n做了 X");
+    expect(md).toContain("- 用 SQLite");
+    expect(md).toContain("- [ ] 写测试");
+    expect(md).toContain("- `cargo build`");
+    expect(md).toContain("- src/main.rs");
+  });
+
+  it("提取结果出现时展示工具栏（复制纪要入口）", () => {
+    const full = {
+      summary: "s", decisions: [], todos: [], errors: [], commands: [], files: [], extractor: "r",
+    };
+    render(<ConversationDetail {...baseDetail} knowledge={full} />);
+    expect(screen.getByText("🧠 知识提取结果")).toBeTruthy();
+    expect(screen.getByText(/复制为纪要/)).toBeTruthy();
   });
 });

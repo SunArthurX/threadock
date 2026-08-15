@@ -118,20 +118,53 @@ pub(crate) fn import_ctx(state: &DaemonState) -> ImportCtx {
     ImportCtx { existing, states }
 }
 
-/// 「已导入」= 存在 且 源更新时间 ≤ 导入时观察时间（源有新对话 → false，可再导入）。
+/// 活跃宽限：源在近 N 分钟内更新过的会话（正在使用的 agent 会话文件
+/// mtime 持续前移，observed 永远追不上）视为已导入，避免红点常亮、
+/// 面板把活跃会话永远标为「未导入」。
+pub(crate) const ACTIVE_GRACE_MS: i64 = 5 * 60 * 1000;
+
+/// 「已导入」= 存在 且（源更新时间 ≤ 导入时观察时间 或 源处于活跃宽限期内）。
+/// 面板 imported 标记、红点计数、菜单副标题共用本口径。
 pub(crate) fn imported_flag(
     ctx: &ImportCtx,
     provider_id: &str,
     source_id: &str,
     src_ms: Option<i64>,
 ) -> bool {
-    ch_storage::Repository::is_up_to_date(
+    let up_to_date = ch_storage::Repository::is_up_to_date(
         ctx.states.get(provider_id).unwrap_or(&Default::default()),
         &ctx.existing,
         provider_id,
         source_id,
         src_ms,
-    )
+    );
+    if up_to_date {
+        return true;
+    }
+    // 从未导入但当前源版本已尝试处理过（parse 失败/空会话记录的 observed
+    // 恰等于当前 src_ms）：重复尝试只会重复失败，不计为「未导入」；
+    // 源真正更新（src_ms 前移）后自动恢复为可导入。
+    if let Some(Some(obs)) = ctx.states.get(provider_id).and_then(|m| m.get(source_id)) {
+        if let Some(ms) = src_ms {
+            if *obs == ms {
+                return true;
+            }
+        }
+    }
+    // 已导入但 stale：若源更新发生在宽限期内（活跃会话正在写入），视同已导入
+    if ctx
+        .existing
+        .contains(&(provider_id.to_string(), source_id.to_string()))
+    {
+        if let Some(ms) = src_ms {
+            let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH)
+                .whole_milliseconds() as i64;
+            if now_ms - ms <= ACTIVE_GRACE_MS {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// 列出 ZCode 会话。
@@ -696,12 +729,26 @@ pub(crate) fn auto_sync_inner(
                             }
                         }
                         Err(e) => {
-                            tracing::warn!(session = %item.session_id, error = %e, "import failed")
+                            // 空会话（NoMessages）等失败：记录当前源版本为已观察，
+                            // 不再每轮重试/计入红点；源真正更新后会再试。
+                            tracing::warn!(session = %item.session_id, error = %e, "import skipped");
+                            if let Ok(repo) = state.repo.lock() {
+                                let _ = repo.record_import_states(
+                                    src.provider_id,
+                                    &[(item.session_id.clone(), Some(item.src_ms))],
+                                );
+                            }
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::warn!(session = %item.session_id, error = %e, "parse failed")
+                    tracing::warn!(session = %item.session_id, error = %e, "parse skipped");
+                    if let Ok(repo) = state.repo.lock() {
+                        let _ = repo.record_import_states(
+                            src.provider_id,
+                            &[(item.session_id.clone(), Some(item.src_ms))],
+                        );
+                    }
                 }
             }
         }
@@ -912,15 +959,9 @@ pub(crate) async fn sources_new_count(
     run_blocking(move || sources_new_count_inner(&state))
 }
 
-/// 活跃宽限：已导入且源在近 N 分钟内更新过的会话（正在使用的活跃会话）
-/// 不计为「新内容」——否则正在运行的 agent 会话会让红点永不熄灭。
-const ACTIVE_GRACE_MS: i64 = 5 * 60 * 1000;
-
 fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, String> {
     let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
     let ctx = import_ctx(state);
-    let now_ms =
-        (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     let mut map = serde_json::Map::new();
     let mut total = 0u64;
     for src in source_table(&home) {
@@ -931,27 +972,10 @@ fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, Str
                 continue;
             }
         };
-        let empty: std::collections::HashMap<String, Option<i64>> = Default::default();
-        let states = ctx.states.get(src.provider_id).unwrap_or(&empty);
+        // 与面板/菜单同口径（imported_flag 含活跃宽限）
         let n = items
             .iter()
-            .filter(|it| {
-                if !ctx
-                    .existing
-                    .contains(&(src.provider_id.to_string(), it.session_id.clone()))
-                {
-                    return true; // 从未导入 = 真·新内容
-                }
-                // 已导入：仅当「源有更新且已冷却」才算新（活跃会话不闪红点）
-                let up_to_date = ch_storage::Repository::is_up_to_date(
-                    states,
-                    &ctx.existing,
-                    src.provider_id,
-                    &it.session_id,
-                    Some(it.src_ms),
-                );
-                !up_to_date && (now_ms - it.src_ms) > ACTIVE_GRACE_MS
-            })
+            .filter(|it| !imported_flag(&ctx, src.provider_id, &it.session_id, Some(it.src_ms)))
             .count() as u64;
         map.insert(src.stat_key.to_string(), serde_json::json!(n));
         total += n;
