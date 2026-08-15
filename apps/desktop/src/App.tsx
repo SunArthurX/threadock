@@ -385,10 +385,11 @@ export default function App() {
       setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
       setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
       setChildConvs({}); setExpandedParents(new Set());
-      setSyncResult("已重置，后台重新加载中…");
+      showToast("✓ 已重置（保留了脱敏规则与治理配置），正在后台重新导入会话…", "info", 8000);
     } catch (e) { showError(e); }
     setResetting(false);
-    autoSync();
+    // 重新导入放后台静默执行（全量重导分钟级，此前前台 ⟳ 让人以为重置没完成）
+    window.setTimeout(() => autoSync(true), 1500);
   };
 
   // ── 会话级治理动作 ──

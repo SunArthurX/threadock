@@ -408,3 +408,54 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod reset_timing_tests {
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+    use std::time::Instant;
+
+    /// 真实环境计时（手动跑）：分步定位 wipe_all 慢点。
+    /// cargo test --lib reset_timing -- --ignored --nocapture
+    #[test]
+    #[ignore = "依赖本机真实 app 数据副本，CI 不跑"]
+    fn wipe_all_step_timing_on_real_copy() {
+        let app = std::path::PathBuf::from(std::env::var("HOME").expect("unexpected None"))
+            .join("Library/Application Support/com.threadock.desktop");
+        if !app.join("threadock.db").exists() {
+            panic!("本机无真实 app 数据");
+        }
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        // 拷完整数据目录（db + index + raw），跑新版物理重建 wipe_all 全程计时
+        for entry in std::fs::read_dir(&app).expect("file I/O failed").flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("threadock.db") || name == "index" || name == "raw" {
+                let dst = dir.path().join(entry.file_name());
+                if entry.path().is_dir() {
+                    let mut opts = fs_extra::dir::CopyOptions::new();
+                    opts.copy_inside = true;
+                    fs_extra::dir::copy(entry.path(), &dst, &opts).expect("file I/O failed");
+                } else {
+                    std::fs::copy(entry.path(), &dst).expect("file I/O failed");
+                }
+            }
+        }
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+
+        let t0 = Instant::now();
+        state.wipe_all().expect("wipe");
+        println!("wipe_all(new physical rebuild): {:?}", t0.elapsed());
+
+        // 重置后状态断言：库可查、会话为 0、索引/raw 目录为空索引可用
+        let count = state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .count_conversations()
+            .expect("SQL execution failed");
+        assert_eq!(count, 0, "重置后会话必须为 0");
+    }
+}

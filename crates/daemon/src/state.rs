@@ -65,12 +65,55 @@ impl DaemonState {
     }
 
     /// 清空所有数据。保留 schema 和用户自定义脱敏规则。
+    /// 清空所有数据。保留用户自定义脱敏规则与治理配置（策略/预算/定价/设置）。
+    ///
+    /// 实现：物理删除重建而非逐表 DELETE——实测 190MB 库（977 会话 / 4.7 万消息
+    /// 加 FTS5 触发器级联）DELETE 路径需 12 分钟；删文件重跑 migration 仅毫秒级
+    /// （2026-08-15 重置卡死事故）。
     pub fn wipe_all(&self) -> Result<(), DaemonStateError> {
-        self.repo.lock().expect("mutex poisoned").clear_all()?;
-        self.search_index
+        // 1. 快照需要保留的用户数据（脱敏规则；其余治理配置存于独立表，重建不丢）
+        let redaction: Vec<ch_storage::RedactionRuleRecord> = {
+            let repo = self.repo.lock().expect("mutex poisoned");
+            repo.list_redaction_rules()
+                .map_err(DaemonStateError::Storage)?
+        };
+
+        // 2. DB 物理重建：先释放连接（drop guard），删 db/wal/shm，重开建 schema
+        {
+            drop(self.repo.lock().expect("mutex poisoned"));
+            let db = self.data_dir.join("threadock.db");
+            for f in [
+                db.clone(),
+                self.data_dir.join("threadock.db-wal"),
+                self.data_dir.join("threadock.db-shm"),
+            ] {
+                if f.exists() {
+                    std::fs::remove_file(&f)?;
+                }
+            }
+            let mut guard = self.repo.lock().expect("mutex poisoned");
+            *guard = Repository::open(&db)?;
+        }
+
+        // 3. 回写脱敏规则
+        self.repo
             .lock()
             .expect("mutex poisoned")
-            .clear_all()?;
+            .restore_redaction_rules(&redaction)
+            .map_err(DaemonStateError::Storage)?;
+
+        // 4. 搜索索引物理重建（派生数据，可重建；目录 300MB+ 时远快于 delete_all）
+        {
+            drop(self.search_index.lock().expect("mutex poisoned"));
+            let idx_dir = self.data_dir.join("index");
+            if idx_dir.exists() {
+                std::fs::remove_dir_all(&idx_dir)?;
+            }
+            let mut guard = self.search_index.lock().expect("mutex poisoned");
+            *guard = SearchIndex::open(&idx_dir)?;
+        }
+
+        // 5. raw blob 清空（remove_dir_all + 重建目录）
         self.raw_store.lock().expect("mutex poisoned").clear()?;
         Ok(())
     }

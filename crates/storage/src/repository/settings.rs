@@ -39,6 +39,24 @@ impl Repository {
         Ok(())
     }
 
+    /// 批量回写脱敏规则（重置后恢复用户自定义规则，保留 enabled 状态）。
+    pub fn restore_redaction_rules(&self, rules: &[RedactionRuleRecord]) -> StorageResult<()> {
+        if rules.is_empty() {
+            return Ok(());
+        }
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        for r in rules {
+            conn.execute(
+                "INSERT INTO redaction_rules (id, name, pattern, enabled, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                 ON CONFLICT(name) DO UPDATE SET pattern = ?3, enabled = ?4, updated_at = ?5",
+                params![r.id, r.name, r.pattern, i64::from(r.enabled), now_ms],
+            )?;
+        }
+        Ok(())
+    }
+
     /// 添加自定义脱敏规则（幂等：按 name upsert）。
     pub fn add_redaction_rule(&self, name: &str, pattern: &str) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");

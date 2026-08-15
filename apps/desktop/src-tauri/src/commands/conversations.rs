@@ -101,7 +101,8 @@ pub(crate) fn cancel_sync() -> Result<(), String> {
 #[tauri::command]
 pub(crate) async fn reset_all_data(state: tauri::State<'_, DaemonState>) -> Result<(), String> {
     let _guard = BusyGuard::acquire()?;
-    let result = state.wipe_all().map_err(|e| storage_err(e));
+    // 物理重建含大量文件删除，移出 runtime worker 线程
+    let result = run_blocking(|| state.wipe_all().map_err(|e| storage_err(e)));
     // 重置后 ops 节流标记必须清零，否则治理页 5 分钟内拿不到新数据
     LAST_OPS_SYNC_MS.store(0, std::sync::atomic::Ordering::SeqCst);
     result
