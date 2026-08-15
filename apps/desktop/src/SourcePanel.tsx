@@ -59,11 +59,12 @@ export default function SourcePanel({
             <div
               key={s.session_id}
               className={`source-item ${s.imported ? "imported" : ""}`}
-              onClick={() => !importing && !s.imported && onImport(s.session_id)}
+              title={s.imported ? "点击重新导入（幂等覆盖，可用于修正历史数据）" : "点击导入"}
+              onClick={() => !importing && onImport(s.session_id)}
             >
               <div className="source-title">
                 {s.title || "(无标题)"}
-                {s.imported && <span className="imported-badge">✓ 已导入</span>}
+                {s.imported && <span className="imported-badge">✓ 已导入 · 点击重导</span>}
               </div>
               <div className="source-meta">
                 {s.message_count != null && `${s.message_count} 消息 · `}

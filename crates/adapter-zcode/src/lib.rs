@@ -205,6 +205,14 @@ pub fn parse_session(
             "tool" => Role::Tool,
             _ => Role::User,
         };
+        // synthetic 消息 = runtime 注入（todo 提醒 / 后台任务 / goal 续跑等），
+        // 源侧 role 存的是 "user" 但并非真人输入——归为 System，
+        // 否则会被「仅用户消息」筛选误当成真人提问（2026-08-15 用户反馈）。
+        let is_synthetic = msg_obj
+            .get("synthetic")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        let role = if is_synthetic { Role::System } else { role };
         let msg_created_at = time::OffsetDateTime::from_unix_timestamp(msg_time / 1000).ok();
 
         // 查这条消息的 parts
@@ -532,5 +540,63 @@ mod tests {
 
         let raw = super::parse_session(&db, "child").expect("parse failed");
         assert_eq!(raw.source_parent_id.as_deref(), Some("parent-session"));
+    }
+
+    #[test]
+    fn synthetic_messages_mapped_to_system() {
+        // runtime 注入（todo 提醒等）源侧 role=user 但 synthetic=true → System；
+        // 真实用户输入（无 synthetic）保持 User
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("z.db");
+        let conn = rusqlite::Connection::open(&db).expect("file I/O failed");
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT, directory TEXT, time_created INTEGER, time_updated INTEGER, parent_id TEXT);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT, time_created INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, data TEXT, sequence INTEGER, time_created INTEGER);",
+        )
+        .expect("SQL execution failed");
+        conn.execute(
+            "INSERT INTO session VALUES ('s1', 't', '/p', 1000, 2000, NULL)",
+            [],
+        )
+        .expect("SQL execution failed");
+        conn.execute(
+            "INSERT INTO message VALUES ('m1', 's1', ?, 1100)",
+            [r#"{"role":"user","synthetic":true,"metadata":{"source":"todo_reminder"}}"#],
+        )
+        .expect("SQL execution failed");
+        conn.execute(
+            "INSERT INTO message VALUES ('m2', 's1', ?, 1200)",
+            [r#"{"role":"user","agent":"zcode-agent"}"#],
+        )
+        .expect("SQL execution failed");
+        conn.execute(
+            "INSERT INTO part VALUES ('p1','m1',?,0,1100)",
+            [r#"{"type":"text","text":"The TodoWrite tool hasn't been used recently"}"#],
+        )
+        .expect("SQL execution failed");
+        conn.execute(
+            "INSERT INTO part VALUES ('p2','m2',?,0,1200)",
+            [r#"{"type":"text","text":"真实用户输入"}"#],
+        )
+        .expect("SQL execution failed");
+
+        let raw = parse_session(&db, "s1").expect("unexpected None");
+        assert_eq!(raw.messages.len(), 2);
+        assert_eq!(
+            raw.messages[0].role,
+            ch_domain::Role::System,
+            "synthetic 注入必须归为 System"
+        );
+        assert_eq!(
+            raw.messages[1].role,
+            ch_domain::Role::User,
+            "真实输入保持 User"
+        );
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .unwrap_or("")
+            .contains("TodoWrite"));
     }
 }

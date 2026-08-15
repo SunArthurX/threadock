@@ -338,8 +338,9 @@ export default function App() {
   };
 
   const importFromSource = async (sessionId: string) => {
+    // 已导入也允许重导：导入幂等（upsert 覆盖），用于修正历史数据
     const target = sourceSessions.find((s) => s.session_id === sessionId);
-    if (target?.imported) return;
+    const wasImported = target?.imported ?? false;
     setImporting(true);
     try {
       const cmd = { "zcode":"import_from_zcode","claude-code":"import_from_claude_code","cursor":"import_from_cursor","minimax":"import_from_minimax","codex":"import_from_codex" }[sourcePanel!]!;
@@ -348,7 +349,7 @@ export default function App() {
       setSyncResult(`✓ 已同步 · ${result.messages} 条消息已导入`);
       refreshNewCount();
       window.setTimeout(() => setSyncResult(null), 15000);
-      alert(`✓ 导入成功\n消息 ${result.messages} 条 · 事件 ${result.events} 个 · 完整度 ${result.completeness}`);
+      alert(`✓ ${wasImported ? "重新导入" : "导入"}成功\n消息 ${result.messages} 条 · 事件 ${result.events} 个 · 完整度 ${result.completeness}`);
       try {
         const prov = sourcePanel === "minimax" ? "minimax-code" : sourcePanel;
         const conv = await invoke<Conversation | null>("get_conversation_by_source", { provider: prov, sourceConversationId: sessionId });
