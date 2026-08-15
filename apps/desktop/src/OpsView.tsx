@@ -35,6 +35,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [automations, setAutomations] = useState<AutomationRow[]>([]);
   const [dirCosts, setDirCosts] = useState<DirCost[]>([]);
+  const [cacheTrend, setCacheTrend] = useState<{ day: string; total_input: number; cache_read: number }[]>([]);
   const [audit, setAudit] = useState<AuditReport | null>(null);
   const [policies, setPolicies] = useState<PolicyRule[]>([]);
   const [budget, setBudget] = useState<BudgetSettings>({ monthly_token_limit: null, monthly_cost_limit: null, notify_on_exceed: true });
@@ -58,6 +59,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       p(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then(setTimeseries), "ts");
       p(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then(setTopTools), "tools");
       p(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then(setCacheStats), "cache");
+      p(invoke<{ day: string; total_input: number; cache_read: number }[]>("ops_cache_trend", { days: range }).then(setCacheTrend), "cacheTrend");
       p(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then(setHealth), "health");
       p(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then(setLatency), "latency");
       p(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then(setWaste), "waste");
@@ -173,7 +175,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
       {recalcMsg && <div className="recalc-msg">{recalcMsg}</div>}
 
       {section === "overview" && (
-        <OverviewSection overview={overview} byProvider={byProvider} byModel={byModel}
+        <OverviewSection cacheTrend={cacheTrend} overview={overview} byProvider={byProvider} byModel={byModel}
           timeseries={timeseries} topTools={topTools} cacheStats={cacheStats}
           health={health} latency={latency} waste={waste} benchmark={benchmark}
           loading={loading} onWeeklyReport={weeklyReport} />
@@ -191,6 +193,14 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
           onScan={runAudit} onExportHtml={exportHtml} onFilter={setAuditKindFilter}
           onAddPolicy={addPolicy} onRemovePolicy={async (n) => { await invoke("policy_delete", { name: n }); loadPolicies(); }}
           onPolicyInput={(f, v) => setNewPolicy((p) => ({ ...p, [f]: v }))}
+          onTogglePolicyEnabled={async (rule) => {
+            await invoke("policy_upsert", { rule: { ...rule, enabled: !rule.enabled } });
+            loadPolicies();
+          }}
+          onDisposeFinding={async (fingerprint, status) => {
+            try { await invoke("audit_finding_set_state", { fingerprint, status }); } catch { /* 失败静默：后台/可选操作 */ }
+          }}
+          onRefreshAfterDispose={runAudit}
           onToggleRisk={(id) => setExpandedRisk((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })}
           onJump={onJumpToConversation ?? (() => {})} />
       )}

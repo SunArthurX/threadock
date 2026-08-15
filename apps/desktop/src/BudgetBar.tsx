@@ -1,0 +1,52 @@
+// 顶栏全局预算条：当月实际 + 日均外推月底（超限变红，外推超限变黄提示）
+import { formatCost, formatTokens } from "./charts";
+
+export interface BudgetBarProps {
+  /** 当月实际成本（USD）。 */
+  costSoFar: number;
+  /** 当月实际 tokens。 */
+  tokensSoFar: number;
+  /** 外推月底成本；null = 无预算限制。 */
+  projectedCost: number | null;
+  projectedTokens: number | null;
+  costLimit: number | null;
+  tokenLimit: number | null;
+}
+
+/** 预算状态：ok / warning（外推超限）/ over（已超限）。 */
+export function budgetState(props: BudgetBarProps): "ok" | "warning" | "over" {
+  const { costSoFar, projectedCost, costLimit, tokensSoFar, projectedTokens, tokenLimit } = props;
+  if (costLimit != null && costLimit > 0) {
+    if (costSoFar >= costLimit) return "over";
+    if (projectedCost != null && projectedCost >= costLimit) return "warning";
+  }
+  if (tokenLimit != null && tokenLimit > 0) {
+    if (tokensSoFar >= tokenLimit) return "over";
+    if (projectedTokens != null && projectedTokens >= tokenLimit) return "warning";
+  }
+  return "ok";
+}
+
+export default function BudgetBar(props: BudgetBarProps) {
+  const { costSoFar, projectedCost, costLimit, tokensSoFar, tokenLimit } = props;
+  if ((costLimit == null || costLimit <= 0) && (tokenLimit == null || tokenLimit <= 0)) {
+    return null; // 未设预算不显示
+  }
+  const state = budgetState(props);
+  const pct = costLimit && costLimit > 0 ? Math.min(100, (costSoFar / costLimit) * 100) : 0;
+  return (
+    <div className={`budget-bar ${state}`} title={
+      projectedCost != null && costLimit
+        ? `当月 ${formatCost(costSoFar)} / 预算 ${formatCost(costLimit)} · 外推月底 ${formatCost(projectedCost)}`
+        : `当月 ${formatTokens(tokensSoFar)} tokens`
+    }>
+      <div className="budget-bar-fill" style={{ width: `${pct}%` }} />
+      <span className="budget-bar-label">
+        {state === "over" ? "⚠ " : state === "warning" ? "◔ " : ""}
+        {costLimit && costLimit > 0
+          ? `${formatCost(costSoFar)} / ${formatCost(costLimit)}`
+          : `${formatTokens(tokensSoFar)}`}
+      </span>
+    </div>
+  );
+}

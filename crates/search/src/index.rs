@@ -7,7 +7,7 @@ use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::query::{BooleanQuery, Occur, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value};
-use tantivy::tokenizer::{LowerCaser, NgramTokenizer, SimpleTokenizer, TextAnalyzer};
+use tantivy::tokenizer::{LowerCaser, NgramTokenizer, RawTokenizer, TextAnalyzer};
 use tantivy::{doc, Index as TantivyIndex, IndexReader, IndexWriter, ReloadPolicy};
 
 /// IndexWriter 默认堆大小（15 MiB）：单 writer 场景的内存/性能平衡点。
@@ -113,11 +113,12 @@ fn register_tokenizers(index: &TantivyIndex) {
     let tokenizers = index.tokenizers();
     tokenizers.register("ngram", ngram);
     // raw 用于精确匹配 ID 类字段
+    // raw 必须是整串精确匹配（RawTokenizer 不分词）：id 字段的 delete_term
+    // 依赖整串 term 命中。此前误用 SimpleTokenizer，含 '_' 的真实 ID
+    //（msg_xxx）被分词 → 删除路径失效（2026-08-15 治理闭环引入时发现）。
     tokenizers.register(
         "raw",
-        TextAnalyzer::builder(SimpleTokenizer::default())
-            .filter(LowerCaser)
-            .build(),
+        TextAnalyzer::builder(RawTokenizer::default()).build(),
     );
 }
 
@@ -550,6 +551,27 @@ mod tests {
             .search(&SearchQuery::new("unique"))
             .expect("SQL execution failed");
         assert_eq!(hits.len(), 1, "reindex should replace not duplicate");
+    }
+
+    #[test]
+    fn delete_removes_from_index_realistic_id() {
+        // 回归：含 '_' 的真实 ID（msg_abc-123）必须能被 delete_term 删除
+        //（旧实现误用 SimpleTokenizer 分词导致删除失效）
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        index_samples(
+            &idx,
+            &[msg("msg_abc-123_def", "c1", "t", "deletable realistic")],
+        );
+
+        let mut writer = idx.writer(DEFAULT_WRITER_HEAP).expect("file I/O failed");
+        idx.delete_message(&mut writer, "msg_abc-123_def")
+            .expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(&SearchQuery::new("realistic"))
+            .expect("SQL execution failed");
+        assert!(hits.is_empty(), "realistic id delete must work");
     }
 
     #[test]

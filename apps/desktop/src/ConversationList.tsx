@@ -1,5 +1,8 @@
-// 会话列表组件（筛选栏 + 列表项 + 子任务展开）
+// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开）
 import { Conversation, sourceLabel, formatTime } from "./types";
+
+/** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
+export type ListScope = "all" | "favorite" | "archived" | "deleted";
 
 interface Props {
   conversations: Conversation[];
@@ -9,15 +12,29 @@ interface Props {
   selectedWs: string | null;
   expandedParents: Set<string>;
   childConvs: Record<string, Conversation[]>;
+  scope: ListScope;
+  onScopeChange: (s: ListScope) => void;
   onFilter: (p: string | null) => void;
   onSelect: (c: Conversation) => void;
   onToggleExpand: (c: Conversation) => void;
   onClearWs: () => void;
+  /** 切换收藏（星标）。 */
+  onToggleFavorite: (c: Conversation) => void;
+  /** 已删除视图：恢复会话。 */
+  onRestore?: (c: Conversation) => void;
 }
+
+const SCOPES: [ListScope, string][] = [
+  ["all", "全部"],
+  ["favorite", "★ 收藏"],
+  ["archived", "已归档"],
+  ["deleted", "已删除"],
+];
 
 export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
-  expandedParents, childConvs, onFilter, onSelect, onToggleExpand, onClearWs,
+  expandedParents, childConvs, scope, onScopeChange, onFilter, onSelect,
+  onToggleExpand, onClearWs, onToggleFavorite, onRestore,
 }: Props) {
   const renderItem = (c: Conversation, isChild = false) => (
     <div key={c.id}>
@@ -35,6 +52,8 @@ export default function ConversationList({
             </span>
           )}
           {isChild && <span className="child-arrow">↳</span>}
+          {c.favorite && <span className="fav-star" title="已收藏">★</span>}
+          {c.archived && <span className="arch-badge" title="已归档">🗄</span>}
           {c.user_title ?? c.title ?? "(无标题)"}
         </div>
         <div className="meta">
@@ -42,6 +61,23 @@ export default function ConversationList({
           <span className="meta-time">{formatTime(c.updated_at_ms)}</span>
           {!isChild && c.child_count > 0 && <span className="meta-child">{c.child_count} 子任务</span>}
           {c.model && <span className="meta-model">{c.model}</span>}
+          {scope !== "deleted" ? (
+            <span
+              className={`fav-toggle ${c.favorite ? "on" : ""}`}
+              title={c.favorite ? "取消收藏" : "收藏"}
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite(c); }}
+            >
+              {c.favorite ? "★" : "☆"}
+            </span>
+          ) : (
+            <span
+              className="restore-btn"
+              title="恢复此会话"
+              onClick={(e) => { e.stopPropagation(); onRestore?.(c); }}
+            >
+              ↩ 恢复
+            </span>
+          )}
         </div>
       </div>
       {!isChild && expandedParents.has(c.id) && childConvs[c.id] && (
@@ -58,6 +94,15 @@ export default function ConversationList({
       <div className="panel-header">
         会话 ({conversations.length})
         {selectedWs && <span className="clear-ws" onClick={onClearWs}>✕</span>}
+      </div>
+      <div className="scope-bar">
+        {SCOPES.map(([s, label]) => (
+          <button
+            key={s}
+            className={`scope-chip ${scope === s ? "active" : ""}`}
+            onClick={() => onScopeChange(s)}
+          >{label}</button>
+        ))}
       </div>
       <div className="filter-bar">
         <button
@@ -77,7 +122,9 @@ export default function ConversationList({
       )}
       {!loading && conversations.map((c) => renderItem(c))}
       {!loading && conversations.length === 0 && (
-        <div className="empty">{selectedWs ? "该项目下暂无会话" : "选择左侧项目"}</div>
+        <div className="empty">
+          {scope === "deleted" ? "回收站为空" : selectedWs ? "该项目下暂无会话" : "选择左侧项目"}
+        </div>
       )}
     </>
   );

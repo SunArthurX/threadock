@@ -112,6 +112,22 @@ pub fn run() {
             list_tags,
             app_setting_get,
             app_setting_set,
+            ops_month_projection,
+            ops_cache_trend,
+            audit_scan_conversation,
+            audit_finding_set_state,
+            audit_finding_restore,
+            audit_finding_states,
+            governance_log_list,
+            storage_stats,
+            gc_raw_store,
+            retention_apply,
+            weekly_report_auto,
+            set_archived,
+            delete_conversation,
+            restore_conversation,
+            hard_delete_conversation,
+            rebuild_search_index,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

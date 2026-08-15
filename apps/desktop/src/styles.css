@@ -2465,3 +2465,61 @@ button {
 }
 .reset-confirm-btn:disabled { opacity: .35; cursor: not-allowed; }
 .reset-confirm-btn:not(:disabled):hover { background: #b91c1c; }
+
+/* ── 治理闭环新增样式 ─────────────────────────────────────── */
+/* 通知堆叠 */
+.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 300; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+.toast { padding: 10px 16px; border-radius: 10px; background: var(--panel-bg, #1e222e); border: 1px solid var(--border, #333); box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 13px; cursor: pointer; animation: toast-in .18s ease-out; }
+.toast-warn { border-color: #d97706; }
+.toast-error { border-color: #dc2626; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+/* 顶栏预算条 */
+.budget-bar { position: relative; min-width: 130px; height: 22px; border-radius: 11px; border: 1px solid var(--border, #444); overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+.budget-bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--accent, #4f8cff); opacity: .35; transition: width .4s; }
+.budget-bar-label { position: relative; z-index: 1; padding: 0 8px; white-space: nowrap; }
+.budget-bar.warning .budget-bar-fill { background: #d97706; }
+.budget-bar.over { border-color: #dc2626; }
+.budget-bar.over .budget-bar-fill { background: #dc2626; opacity: .45; }
+.budget-bar.over .budget-bar-label { color: #f87171; font-weight: 600; }
+
+/* 会话列表 scope 与星标 */
+.scope-bar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border, #2a2e3a); }
+.scope-chip { border: 1px solid transparent; background: none; color: inherit; font-size: 12px; padding: 3px 10px; border-radius: 99px; cursor: pointer; opacity: .75; }
+.scope-chip.active { border-color: var(--accent, #4f8cff); color: var(--accent, #4f8cff); opacity: 1; }
+.fav-star { color: #f59e0b; margin-right: 4px; }
+.arch-badge { opacity: .6; margin-right: 4px; font-size: 11px; }
+.fav-toggle { cursor: pointer; font-size: 14px; opacity: .55; margin-left: auto; }
+.fav-toggle:hover { opacity: 1; }
+.fav-toggle.on { color: #f59e0b; opacity: 1; }
+.restore-btn { cursor: pointer; font-size: 11px; color: var(--accent, #4f8cff); margin-left: auto; }
+
+/* 详情治理操作与标签 */
+.gov-actions { border-top: 1px dashed var(--border, #2a2e3a); padding-top: 6px; margin-top: 2px; }
+.action-btn.danger { border-color: #dc2626; color: #f87171; }
+.action-btn.danger:hover:not(:disabled) { background: rgba(220,38,38,.15); }
+.hard-delete-confirm { display: inline-flex; gap: 6px; align-items: center; }
+.hard-delete-confirm input { padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border, #444); background: var(--input-bg, rgba(0,0,0,.25)); color: inherit; font-size: 12px; width: 130px; }
+.tag-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0; }
+.tag-chip { font-size: 11.5px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--border, #444); cursor: pointer; }
+.tag-chip:hover { border-color: #dc2626; }
+.tag-x { opacity: .5; font-size: 10px; }
+.tag-input { width: 90px; padding: 2px 8px; border-radius: 99px; border: 1px dashed var(--border, #444); background: none; color: inherit; font-size: 11.5px; }
+
+/* 审计处置与策略开关 */
+.finding-actions { margin-left: auto; display: inline-flex; gap: 4px; }
+.finding-btn { font-size: 11px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border, #444); background: none; color: inherit; cursor: pointer; }
+.finding-btn:hover { border-color: var(--accent, #4f8cff); }
+.policy-row.disabled { opacity: .45; }
+.policy-toggle { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; cursor: pointer; }
+
+/* 概览卡片显隐 */
+.card-visibility { float: right; cursor: pointer; opacity: .4; font-size: 12px; padding: 0 4px; }
+.card-visibility:hover { opacity: 1; }
+.card-hidden { display: none !important; }
+.ops-card-subtitle { font-size: 11.5px; opacity: .6; margin: 8px 0 4px; }
+
+/* 自动化关注 */
+.watch-toggle { cursor: pointer; opacity: .5; }
+.watch-toggle.on { color: #f59e0b; opacity: 1; }
+.ops-risky-row.watched { background: rgba(245,158,11,.06); }

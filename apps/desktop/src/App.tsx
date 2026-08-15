@@ -9,6 +9,10 @@ import ConversationDetail from "./ConversationDetail";
 import SearchPanel from "./SearchPanel";
 import ImportMenu from "./ImportMenu";
 import SettingsView from "./SettingsView";
+import BudgetBar from "./BudgetBar";
+import { Toasts } from "./Toasts";
+import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
+import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
 
@@ -34,6 +38,7 @@ export default function App() {
   const [messages, setMessages] = useState<import("./types").Message[]>([]);
   const [events, setEvents] = useState<import("./types").EventDto[]>([]);
   const [completenessLabel, setCompletenessLabel] = useState("");
+  const [detailTags, setDetailTags] = useState<string[]>([]);
   const [knowledge, setKnowledge] = useState<ExtractionResult | null>(null);
   const [childConvs, setChildConvs] = useState<Record<string, Conversation[]>>({});
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
@@ -42,6 +47,12 @@ export default function App() {
   const [convsLoading, setConvsLoading] = useState(false);
   const [msgsLoading, setMsgsLoading] = useState(false);
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
+  const [scope, setScope] = useState<ListScope>("all");
+  const [budgetInfo, setBudgetInfo] = useState<{
+    costSoFar: number; tokensSoFar: number;
+    projectedCost: number | null; projectedTokens: number | null;
+    costLimit: number | null; tokenLimit: number | null; notify: boolean;
+  } | null>(null);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
@@ -60,6 +71,9 @@ export default function App() {
     const v = Number(localStorage.getItem("ch-sync-interval"));
     return [0, 5, 10, 30].includes(v) ? v : 10;
   });
+  // 保留策略（天，0 = 关闭）与预算通知：localStorage 即时生效
+  const [retentionDays, setRetentionDays] = useState(() => Number(localStorage.getItem("ch-retention-days") ?? "0") || 0);
+  const [notifyOnExceed, setNotifyOnExceed] = useState(() => localStorage.getItem("ch-budget-notify") === "1");
 
   // source panel
   const [sourcePanel, setSourcePanel] = useState<SourceKey | null>(null);
@@ -68,6 +82,8 @@ export default function App() {
   const [batchProgress, setBatchProgress] = useState<{done:number;total:number}|null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [toastList, setToastList] = useState(toastSnapshot());
+  useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   const showError = (e: unknown) => setError(typeof e === "string" ? e : (e as {message?:string}).message ?? String(e));
 
   // ── effects ──
@@ -75,15 +91,58 @@ export default function App() {
   useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
   useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
 
+  // 预算看门狗：预算/月用量/预测 → 全局预算条；超限且开启通知时弹一次（按月去重）
+  const refreshBudget = async () => {
+    try {
+      const [budget, proj] = await Promise.all([
+        invoke<{ monthly_token_limit: number | null; monthly_cost_limit: number | null; notify_on_exceed: boolean }>("budget_get"),
+        invoke<{ tokens_so_far: number; cost_so_far: number; projected_tokens: number; projected_cost: number }>("ops_month_projection"),
+      ]);
+      const info = {
+        costSoFar: proj.cost_so_far, tokensSoFar: proj.tokens_so_far,
+        projectedCost: proj.projected_cost, projectedTokens: proj.projected_tokens,
+        costLimit: budget.monthly_cost_limit ?? null, tokenLimit: budget.monthly_token_limit ?? null,
+        notify: budget.notify_on_exceed,
+      };
+      setBudgetInfo(info);
+      const over = (info.costLimit && info.costSoFar >= info.costLimit) || (info.tokenLimit && info.tokensSoFar >= info.tokenLimit);
+      if (over && info.notify) {
+        const key = `ch-budget-warned-${new Date().getFullYear()}-${new Date().getMonth()}`;
+        if (!localStorage.getItem(key)) {
+          localStorage.setItem(key, "1");
+          showToast(`⚠ 预算已超限：当月 $${info.costSoFar.toFixed(2)} / 预算 $${info.costLimit}`, "error", 10000);
+        }
+      }
+    } catch { /* 预算看门狗失败静默（空库等） */ }
+  };
+
   useEffect(() => {
     loadConversations();
     const t = setTimeout(() => autoSync(), 600);
-    return () => clearTimeout(t);
+    // 周报自动生成（>7 天落盘一份）+ 保留策略自动执行 + 预算刷新
+    const t2 = setTimeout(async () => {
+      refreshBudget();
+      try {
+        const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
+        if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
+      } catch { /* 失败静默：后台/可选操作 */ }
+      try {
+        const days = Number(localStorage.getItem("ch-retention-days") ?? "0");
+        if (days > 0) {
+          const r = await invoke<{ archived: number }>("retention_apply", { days });
+          if (r.archived > 0) showToast(`🗄 保留策略：自动归档 ${r.archived} 条 ${days} 天前的会话`, "info");
+        }
+      } catch { /* 失败静默：后台/可选操作 */ }
+    }, 3000);
+    return () => { clearTimeout(t); clearTimeout(t2); };
   }, []);
 
   useEffect(() => {
     if (syncIntervalMin === 0) return; // 设置为关闭
-    const interval = setInterval(() => { autoSync(true); invoke("ops_sync", {force:false}).catch(() => { /* 后台任务失败不打断 UI */ }); }, syncIntervalMin * 60 * 1000);
+    const interval = setInterval(() => {
+      autoSync(true);
+      invoke("ops_sync", {force:false}).then(() => refreshBudget()).catch(() => { /* 后台任务失败不打断 UI */ });
+    }, syncIntervalMin * 60 * 1000);
     return () => clearInterval(interval);
   }, [syncIntervalMin]);
 
@@ -96,13 +155,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", handler);
   }, [sourcePanel, searchResults]);
 
-  useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter]);
+  useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
 
   // ── data loading ──
   const loadConversations = async () => {
     setConvsLoading(true);
     try {
-      const convs = await invoke<Conversation[]>("list_conversations", { workspaceId: null, provider: providerFilter });
+      const convs = await invoke<Conversation[]>("list_conversations", {
+        workspaceId: null,
+        provider: providerFilter,
+        favorite: scope === "favorite" ? true : null,
+        archived: scope === "archived" ? true : null,
+        includeDeleted: scope === "deleted",
+      });
       setConversations([...convs].sort((a, b) => (b.updated_at_ms ?? 0) - (a.updated_at_ms ?? 0)));
     } catch (e) { showError(e); }
     setConvsLoading(false);
@@ -140,6 +205,22 @@ export default function App() {
     invoke("app_setting_set", { key: "sync_interval_min", value: String(min) }).catch(() => { /* 持久化失败不影响本地生效 */ });
   };
 
+  const changeRetentionDays = (days: number) => {
+    setRetentionDays(days);
+    localStorage.setItem("ch-retention-days", String(days));
+    invoke("app_setting_set", { key: "retention_days", value: String(days) }).catch(() => { /* 持久化失败不影响本地生效 */ });
+  };
+
+  const changeNotifyOnExceed = async (v: boolean) => {
+    setNotifyOnExceed(v);
+    localStorage.setItem("ch-budget-notify", v ? "1" : "0");
+    setBudgetInfo((p) => (p ? { ...p, notify: v } : p));
+    try {
+      const budget = await invoke<{ monthly_token_limit: number | null; monthly_cost_limit: number | null; notify_on_exceed: boolean }>("budget_get");
+      await invoke("budget_set", { settings: { ...budget, notify_on_exceed: v } });
+    } catch { /* 后端失败保留本地开关状态 */ }
+  };
+
   const selectConversation = async (c: Conversation, highlightId?: string) => {
     setSelectedConv(c);
     setHighlightMsgId(highlightId ?? null);
@@ -149,6 +230,7 @@ export default function App() {
       const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: c.id });
       setMessages(detail.messages); setEvents(detail.events);
       setCompletenessLabel(detail.completeness_label); setKnowledge(null);
+      setDetailTags(detail.tags ?? []);
       if (highlightId) setTimeout(() => document.getElementById(`msg-${highlightId}`)?.scrollIntoView({behavior:"smooth",block:"center"}), 100);
     } catch (e) { showError(e); }
     setMsgsLoading(false);
@@ -177,6 +259,8 @@ export default function App() {
       const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: r.conversation_id });
       setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
       setCompletenessLabel(detail.completeness_label); setKnowledge(null);
+      setDetailTags(detail.tags ?? []);
+      setDetailTags(detail.tags ?? []);
       setHighlightMsgId(r.message_id); setCollapsedMsgs(new Set()); setSearchResults(null);
       setTimeout(() => document.getElementById(`msg-${r.message_id}`)?.scrollIntoView({behavior:"smooth",block:"center"}), 120);
     } catch (e) { showError(e); }
@@ -255,12 +339,93 @@ export default function App() {
     try {
       await invoke("reset_all_data");
       setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
-      setKnowledge(null); setSelectedWs(null); setProviderFilter(null);
+      setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
       setChildConvs({}); setExpandedParents(new Set());
       setSyncResult("已重置，后台重新加载中…");
     } catch (e) { showError(e); }
     setResetting(false);
     autoSync();
+  };
+
+  // ── 会话级治理动作 ──
+  const toggleFavorite = async (c: Conversation) => {
+    try {
+      await invoke("set_favorite", { id: c.id, favorite: !c.favorite });
+      setConversations((p) => p.map((x) => x.id === c.id ? { ...x, favorite: !x.favorite } : x));
+      if (selectedConv?.id === c.id) setSelectedConv({ ...selectedConv, favorite: !c.favorite });
+      loadDetail(c.id);
+    } catch (e) { showError(e); }
+  };
+
+  const toggleArchive = async () => {
+    if (!selectedConv) return;
+    try {
+      await invoke("set_archived", { id: selectedConv.id, archived: !selectedConv.archived });
+      const next = { ...selectedConv, archived: !selectedConv.archived };
+      setSelectedConv(next);
+      await loadConversations();
+      showToast(next.archived ? "🗄 已归档" : "📤 已取消归档");
+    } catch (e) { showError(e); }
+  };
+
+  const softDeleteConv = async () => {
+    if (!selectedConv) return;
+    try {
+      await invoke("delete_conversation", { id: selectedConv.id });
+      showToast("🗑 已移入回收站（会话列表切到「已删除」可恢复）");
+      setSelectedConv(null); setMessages([]); setEvents([]);
+      await loadConversations();
+    } catch (e) { showError(e); }
+  };
+
+  const hardDeleteConv = async () => {
+    if (!selectedConv) return;
+    try {
+      await invoke("hard_delete_conversation", { id: selectedConv.id });
+      showToast("⚡ 已彻底删除（含原始归档与索引文档）");
+      setSelectedConv(null); setMessages([]); setEvents([]);
+      await loadConversations();
+    } catch (e) { showError(e); }
+  };
+
+  const restoreConv = async (c: Conversation) => {
+    try {
+      await invoke("restore_conversation", { id: c.id });
+      await loadConversations();
+      showToast("↩ 已恢复会话");
+    } catch (e) { showError(e); }
+  };
+
+  const rescanAudit = async () => {
+    if (!selectedConv) return;
+    try {
+      const findings = await invoke<unknown[]>("audit_scan_conversation", { conversationId: selectedConv.id });
+      showToast(findings.length > 0
+        ? `🔍 重扫完成：${findings.length} 条发现（详见安全页）`
+        : "🔍 重扫完成：本会话无发现", findings.length > 0 ? "warn" : "info");
+    } catch (e) { showError(e); }
+  };
+
+  const addTag = async (tag: string) => {
+    if (!selectedConv) return;
+    try { await invoke("add_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); }
+    catch (e) { showError(e); }
+  };
+
+  const removeTag = async (tag: string) => {
+    if (!selectedConv) return;
+    try { await invoke("remove_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); }
+    catch (e) { showError(e); }
+  };
+
+  /** 重拉详情（收藏/标签等局部状态同步）。 */
+  const loadDetail = async (id: string) => {
+    try {
+      const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: id });
+      setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+      setCompletenessLabel(detail.completeness_label);
+      setDetailTags(detail.tags ?? []);
+    } catch { /* 静默刷新失败保持现状 */ }
   };
 
   const jumpFromAudit = async (provider: string, sourceConvId: string, messageId: string | null) => {
@@ -306,15 +471,26 @@ export default function App() {
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing}
               onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
           </>)}
+          {budgetInfo && (
+            <BudgetBar
+              costSoFar={budgetInfo.costSoFar} tokensSoFar={budgetInfo.tokensSoFar}
+              projectedCost={budgetInfo.projectedCost} projectedTokens={budgetInfo.projectedTokens}
+              costLimit={budgetInfo.costLimit} tokenLimit={budgetInfo.tokenLimit}
+            />
+          )}
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
           <button className="settings-toggle" title="设置" onClick={() => setSettingsOpen(true)}>⚙</button>
         </div>
 
+        <Toasts toasts={toastList} onDismiss={dismissToast} />
+
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={setTheme}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
+            retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
+            notifyOnExceed={notifyOnExceed} onNotifyOnExceedChange={changeNotifyOnExceed}
             onNavigate={(v) => setView(v)}
             onReset={resetData} resetting={resetting}
             onClose={() => setSettingsOpen(false)} />
@@ -337,8 +513,9 @@ export default function App() {
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
                     loading={convsLoading} providerFilter={providerFilter} selectedWs={selectedWs}
                     expandedParents={expandedParents} childConvs={childConvs}
+                    scope={scope} onScopeChange={setScope}
                     onFilter={setProviderFilter} onSelect={selectConversation}
-                    onToggleExpand={toggleExpand}
+                    onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite} onRestore={restoreConv}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </div>
             <div className="panel">
@@ -347,6 +524,11 @@ export default function App() {
                     completenessLabel={completenessLabel} knowledge={knowledge}
                     loading={msgsLoading} exporting={exporting} timelineMode={timelineMode}
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
+                    tags={detailTags}
+                    onToggleFavorite={() => selectedConv && toggleFavorite(selectedConv)}
+                    onToggleArchive={toggleArchive}
+                    onSoftDelete={softDeleteConv} onHardDelete={hardDeleteConv}
+                    onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={extractKnowledge}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />

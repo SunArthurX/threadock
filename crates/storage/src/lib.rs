@@ -14,9 +14,9 @@ pub mod timestamp;
 pub use error::{StorageError, StorageResult};
 pub use filter::ConversationFilter;
 pub use repository::{
-    AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AuditMessageRow, AutomationRow,
-    BudgetSettings, CacheStat, DailyUsage, DirCost, KnowledgeRecord, LatencyStat, ModelUsage,
-    OpsOverview, PolicyRuleRecord, ProviderUsage, RedactionRuleRecord, Repository, TokenWaste,
-    ToolUsageRow, WeeklySummary,
+    AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AuditFindingState, AuditMessageRow,
+    AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyUsage, DirCost, GovernanceLogRow,
+    KnowledgeRecord, LatencyStat, ModelUsage, MonthProjection, OpsOverview, PolicyRuleRecord,
+    ProviderUsage, RedactionRuleRecord, Repository, TokenWaste, ToolUsageRow, WeeklySummary,
 };
 pub use search::{build_match_expr, SearchQuery, SearchResult};

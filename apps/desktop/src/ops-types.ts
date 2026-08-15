@@ -37,6 +37,7 @@ export interface AgentBenchmark {
   cost_per_session: number; tokens_per_session: number;
 }
 export interface AuditFinding {
+  fingerprint: string;
   kind: string; severity: "low" | "medium" | "high"; rule: string; provider: string;
   source_conversation_id: string; conversation_title: string | null;
   message_id: string | null; tool_call_id: string | null; snippet: string;

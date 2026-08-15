@@ -33,12 +33,14 @@ mod knowledge_repo;
 mod ops_queries;
 mod settings;
 
-pub use audit_repo::{AuditMessageRow, BudgetSettings, PolicyRuleRecord};
+pub use audit_repo::{
+    AuditFindingState, AuditMessageRow, BudgetSettings, GovernanceLogRow, PolicyRuleRecord,
+};
 pub use knowledge_repo::KnowledgeRecord;
 pub use ops_queries::{
-    AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat, DailyUsage,
-    DirCost, LatencyStat, ModelUsage, OpsOverview, ProviderUsage, TokenWaste, ToolUsageRow,
-    WeeklySummary,
+    AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat, CacheTrendRow,
+    DailyUsage, DirCost, LatencyStat, ModelUsage, MonthProjection, OpsOverview, ProviderUsage,
+    TokenWaste, ToolUsageRow, WeeklySummary,
 };
 pub use settings::RedactionRuleRecord;
 
@@ -409,6 +411,14 @@ impl Repository {
                 &mut next_idx,
             );
         }
+        if let Some(del) = filter.deleted {
+            // 无参数子句：直接拼接（不能走 push，否则占位索引错位）
+            where_clauses.push(if del {
+                "c.source_status = 'deleted'".to_string()
+            } else {
+                "COALESCE(c.source_status, '') != 'deleted'".to_string()
+            });
+        }
 
         let mut sql = String::from(
             "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
@@ -495,6 +505,36 @@ impl Repository {
         let mut map = std::collections::HashMap::new();
         for row in rows {
             let (k, v) = row?;
+            map.insert(k, v);
+        }
+        Ok(map)
+    }
+
+    /// 单会话 UI 标志位（favorite/is_archived，DB-only 字段）。
+    pub fn get_conversation_flags(&self, id: &str) -> StorageResult<(bool, bool)> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        Ok(conn.query_row(
+            "SELECT favorite, is_archived FROM conversations WHERE id = ?1",
+            params![id],
+            |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, i64>(1)? != 0)),
+        )?)
+    }
+
+    /// 全部会话标志位（id → (favorite, is_archived)），列表页一次取齐。
+    pub fn conversation_flags_bulk(
+        &self,
+    ) -> StorageResult<std::collections::HashMap<String, (bool, bool)>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare("SELECT id, favorite, is_archived FROM conversations")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                (r.get::<_, i64>(1)? != 0, r.get::<_, i64>(2)? != 0),
+            ))
+        })?;
+        let mut map = std::collections::HashMap::new();
+        for r in rows {
+            let (k, v) = r?;
             map.insert(k, v);
         }
         Ok(map)
@@ -2077,5 +2117,171 @@ mod tests {
         assert!(rec_b.result_json.contains("\"b\""));
         assert_eq!(rec_a.version, 1);
         assert_eq!(rec_b.version, 1);
+    }
+
+    // ── V11 治理闭环新增能力 ─────────────────────────────────────────
+
+    fn seeded_usage(r: &Repository) {
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
+        let u = ch_domain::UsageRecord {
+            id: "u1".into(),
+            provider: Provider::Codex,
+            source_session_id: "s1".into(),
+            turn_id: Some("t1".into()),
+            model: Some("gpt-test".into()),
+            ts: ch_domain::now_utc(),
+            input_tokens: 1000,
+            output_tokens: 500,
+            reasoning_tokens: 0,
+            cache_read_tokens: 800,
+            cache_write_tokens: 0,
+            cost_usd: Some(1.5),
+            status: ch_domain::UsageStatus::Completed,
+            duration_ms: Some(100),
+            retry_count: None,
+            source_dir: None,
+            context_exceeded: 0,
+        };
+        r.upsert_usage_batch(&[u]).expect("upsert failed");
+    }
+
+    #[test]
+    fn audit_finding_states_roundtrip() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.set_audit_finding_state("abc123", "ignored", Some("测试"))
+            .expect("SQL execution failed");
+        r.set_audit_finding_state("def456", "false_positive", None)
+            .expect("SQL execution failed");
+        let states = r.list_audit_finding_states().expect("SQL execution failed");
+        assert_eq!(states.len(), 2);
+        // upsert 覆盖
+        r.set_audit_finding_state("abc123", "false_positive", None)
+            .expect("SQL execution failed");
+        let s = &r.list_audit_finding_states().expect("SQL execution failed")[0];
+        assert_eq!(s.status, "false_positive");
+        // 清除
+        r.clear_audit_finding_state("def456")
+            .expect("SQL execution failed");
+        assert_eq!(
+            r.list_audit_finding_states()
+                .expect("SQL execution failed")
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn governance_log_roundtrip() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.log_governance_action("reset_all_data", None, None, "ok", None)
+            .expect("SQL execution failed");
+        r.log_governance_action(
+            "hard_delete_conversation",
+            Some("conversation"),
+            Some("c1"),
+            "ok",
+            None,
+        )
+        .expect("SQL execution failed");
+        let log = r.list_governance_log(10).expect("SQL execution failed");
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].action, "hard_delete_conversation"); // 倒序
+        assert_eq!(log[1].action, "reset_all_data");
+    }
+
+    #[test]
+    fn month_projection_extrapolates() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        seeded_usage(&r);
+        let p = r.ops_month_projection().expect("SQL execution failed");
+        assert_eq!(p.tokens_so_far, 1500);
+        assert!((p.cost_so_far - 1.5).abs() < 1e-9);
+        // 日均外推：days_elapsed >= 1 → 预测 >= 已用
+        assert!(p.projected_tokens >= p.tokens_so_far);
+        assert!(p.projected_cost >= p.cost_so_far - 1e-9);
+        assert!(p.days_in_month >= 28);
+    }
+
+    #[test]
+    fn cache_trend_rows() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        seeded_usage(&r);
+        let rows = r.ops_cache_trend(Some(30)).expect("SQL execution failed");
+        assert_eq!(rows.len(), 1);
+        // total 口径含 cache_read：1000+500+0+800 = 2300
+        assert_eq!(rows[0].total_input, 2300);
+        assert_eq!(rows[0].cache_read, 800);
+    }
+
+    #[test]
+    fn archive_older_than_targets_stale() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let mut old = Conversation::new(Provider::Generic, "src-old");
+        old.updated_at = Some(ch_domain::now_utc() - time::Duration::days(400));
+        let mut fresh = Conversation::new(Provider::Generic, "src-fresh");
+        fresh.updated_at = Some(ch_domain::now_utc());
+        r.upsert_conversation(&old).expect("upsert failed");
+        r.upsert_conversation(&fresh).expect("upsert failed");
+        let n = r
+            .archive_conversations_older_than(90)
+            .expect("SQL execution failed");
+        assert_eq!(n, 1, "只归档 400 天前的");
+        let (fav_old, arch_old) = r
+            .get_conversation_flags(&old.id)
+            .expect("SQL execution failed");
+        assert!(arch_old);
+        assert!(!fav_old);
+        let (_, arch_fresh) = r
+            .get_conversation_flags(&fresh.id)
+            .expect("SQL execution failed");
+        assert!(!arch_fresh);
+    }
+
+    #[test]
+    fn filter_deleted_dimension() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let c1 = Conversation::new(Provider::Generic, "src-d1");
+        let c2 = Conversation::new(Provider::Generic, "src-d2");
+        r.upsert_conversation(&c1).expect("upsert failed");
+        r.upsert_conversation(&c2).expect("upsert failed");
+        r.soft_delete_conversation(&c1.id)
+            .expect("SQL execution failed");
+
+        let visible = r
+            .list_conversations_filtered(&ConversationFilter::default().exclude_deleted())
+            .expect("SQL execution failed");
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].source_conversation_id, "src-d2");
+
+        let deleted = r
+            .list_conversations_filtered(&ConversationFilter::default().deleted_only())
+            .expect("SQL execution failed");
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].source_conversation_id, "src-d1");
+
+        // 恢复
+        r.restore_conversation(&c1.id)
+            .expect("SQL execution failed");
+        assert_eq!(
+            r.list_conversations_filtered(&ConversationFilter::default().deleted_only())
+                .expect("SQL execution failed")
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn raw_payload_refs_and_flags_bulk() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let mut c = Conversation::new(Provider::Generic, "src-refs");
+        c.raw_payload_id = Some("a".repeat(64));
+        r.upsert_conversation(&c).expect("upsert failed");
+        let refs = r.list_raw_payload_refs().expect("SQL execution failed");
+        assert!(refs.contains(&"a".repeat(64)));
+        let flags = r.conversation_flags_bulk().expect("SQL execution failed");
+        assert!(flags.contains_key(&c.id));
     }
 }

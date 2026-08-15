@@ -29,31 +29,76 @@ interface Props {
   onThemeChange: (t: "dark" | "light") => void;
   syncIntervalMin: number;
   onSyncIntervalChange: (min: number) => void;
+  retentionDays: number;
+  onRetentionDaysChange: (days: number) => void;
+  notifyOnExceed: boolean;
+  onNotifyOnExceedChange: (v: boolean) => void;
   onNavigate: (view: GovernanceView) => void;
   onReset: () => Promise<void>;
   resetting: boolean;
   onClose: () => void;
 }
 
+const RETENTION_OPTIONS: [number, string][] = [
+  [0, "关闭"],
+  [30, "30 天"],
+  [90, "90 天"],
+  [180, "180 天"],
+];
+
+/** 字节数人性化。 */
+export function formatBytes(n: number): string {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + " MB";
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + " KB";
+  return `${n} B`;
+}
+
+/** 治理动作名 → 中文。 */
+export const GOVERNANCE_LABELS: Record<string, string> = {
+  reset_all_data: "重置全部数据",
+  gc_raw_store: "清理孤儿数据",
+  rebuild_search_index: "重建搜索索引",
+  retention_archive: "保留策略归档",
+  hard_delete_conversation: "彻底删除会话",
+  soft_delete_conversation: "删除会话（回收站）",
+  archive_conversation: "归档会话",
+  unarchive_conversation: "取消归档",
+  audit_finding_disposition: "审计发现处置",
+};
+
 export default function SettingsView({
   theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
+  retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   onNavigate, onReset, resetting, onClose,
 }: Props) {
+  const [storage, setStorage] = useState<{ db_bytes: number; raw_count: number; raw_bytes: number; index_bytes: number } | null>(null);
+  const [gcResult, setGcResult] = useState<string | null>(null);
+  const [gcRunning, setGcRunning] = useState(false);
+  const [rebuildMsg, setRebuildMsg] = useState<string | null>(null);
+  const [govLog, setGovLog] = useState<{ id: string; action: string; created_at: number }[]>([]);
+  const [lastWeekly, setLastWeekly] = useState<number | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [lastConvSync, setLastConvSync] = useState<number | null>(null);
   const [lastOpsSync, setLastOpsSync] = useState<number | null>(null);
   const [opsSyncing, setOpsSyncing] = useState(false);
   const [opsMsg, setOpsMsg] = useState<string | null>(null);
 
-  // 打开时读取只读的同步时间戳
+  // 打开时读取只读的同步时间戳 + 存储看板 + 治理流水 + 周报时间
   useEffect(() => {
     (async () => {
       try {
         const conv = await invoke<string | null>("app_setting_get", { key: "last_conv_sync_ms" });
         const ops = await invoke<string | null>("app_setting_get", { key: "last_ops_sync_ms" });
+        const weekly = await invoke<string | null>("app_setting_get", { key: "last_weekly_ms" });
         setLastConvSync(conv ? Number(conv) : null);
         setLastOpsSync(ops ? Number(ops) : null);
+        setLastWeekly(weekly ? Number(weekly) : null);
       } catch { /* 只读展示，失败忽略 */ }
+      try { setStorage(await invoke("storage_stats", {})); } catch { /* 空库忽略 */ }
+      try {
+        setGovLog(await invoke<{ id: string; action: string; created_at: number }[]>("governance_log_list", { limit: 8 }));
+      } catch { /* 空表忽略 */ }
     })();
   }, []);
 
@@ -129,6 +174,13 @@ export default function SettingsView({
 
           <section className="settings-section">
             <h3>治理</h3>
+            <div className="settings-row">
+              <span>预算超限通知</span>
+              <label className="settings-segment">
+                <input type="checkbox" checked={notifyOnExceed} onChange={(e) => onNotifyOnExceedChange(e.target.checked)} />
+                超预算时弹窗提醒（顶部预算条常驻显示）
+              </label>
+            </div>
             <div className="settings-hint">预算、定价与安全策略在对应治理页管理：</div>
             <div className="settings-row">
               <span>预算 / 定价</span>
@@ -138,6 +190,84 @@ export default function SettingsView({
               <span>脱敏规则 / 命令黑名单</span>
               <button className="action-btn" onClick={() => { onClose(); onNavigate("security"); }}>前往 安全 页 →</button>
             </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>存储与维护</h3>
+            {storage && (
+              <div className="storage-rows">
+                <div className="settings-row">
+                  <span>数据库</span>
+                  <span className="settings-value">{formatBytes(storage.db_bytes)}</span>
+                </div>
+                <div className="settings-row">
+                  <span>原始归档（{storage.raw_count} 个）</span>
+                  <span className="settings-value">{formatBytes(storage.raw_bytes)}</span>
+                </div>
+                <div className="settings-row">
+                  <span>搜索索引</span>
+                  <span className="settings-value">{formatBytes(storage.index_bytes)}</span>
+                </div>
+              </div>
+            )}
+            <div className="settings-row">
+              <span>孤儿数据清理</span>
+              <button className="action-btn" disabled={gcRunning} onClick={async () => {
+                setGcRunning(true); setGcResult(null);
+                try {
+                  const r = await invoke<{ scanned: number; deleted: number; freed_bytes: number }>("gc_raw_store", {});
+                  setGcResult(`扫描 ${r.scanned} · 删除 ${r.deleted} · 释放 ${formatBytes(r.freed_bytes)}`);
+                  setStorage(await invoke("storage_stats", {}));
+                } catch (e) { setGcResult(String(e)); }
+                setGcRunning(false);
+              }}>{gcRunning ? "⟳ 清理中…" : "🧹 清理未引用归档"}</button>
+              {gcResult && <span className="settings-value">{gcResult}</span>}
+            </div>
+            <div className="settings-row">
+              <span>重建搜索索引</span>
+              <button className="action-btn" onClick={async () => {
+                setRebuildMsg("重建中…");
+                try {
+                  const r = await invoke<{ messages: number }>("rebuild_search_index", {});
+                  setRebuildMsg(`已重建 ${r.messages} 条消息的索引`);
+                } catch (e) { setRebuildMsg(String(e)); }
+              }}>♻ 重建</button>
+              {rebuildMsg && <span className="settings-value">{rebuildMsg}</span>}
+            </div>
+            <div className="settings-row">
+              <span>保留策略（自动归档）</span>
+              <select value={retentionDays} onChange={(e) => onRetentionDaysChange(Number(e.target.value))}>
+                {RETENTION_OPTIONS.map(([v, label]) => (
+                  <option key={v} value={v}>{label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="settings-hint">
+              开启后每次启动自动归档超过 N 天未更新的会话（可在会话列表「已归档」视图查看）。
+            </div>
+            <div className="settings-row">
+              <span>周报</span>
+              <span className="settings-value">{formatTime(lastWeekly) || "从未生成"}</span>
+              <button className="action-btn" onClick={async () => {
+                try {
+                  const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
+                  setLastWeekly(Date.now());
+                  setRebuildMsg(r.generated && r.path ? `已生成：${r.path}` : "未到 7 天间隔，未生成");
+                } catch (e) { setRebuildMsg(String(e)); }
+              }}>立即生成</button>
+            </div>
+          </section>
+
+          <section className="settings-section">
+            <h3>治理操作流水（最近 8 条）</h3>
+            {govLog.length === 0
+              ? <div className="settings-hint">暂无记录</div>
+              : govLog.map((l) => (
+                <div key={l.id} className="settings-row">
+                  <span>{GOVERNANCE_LABELS[l.action] ?? l.action}</span>
+                  <span className="settings-value">{formatTime(l.created_at)}</span>
+                </div>
+              ))}
           </section>
 
           <section className="settings-section danger">

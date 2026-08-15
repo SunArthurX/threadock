@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 ch-domain = { path = "../domain" }
 ch-storage = { path = "../storage" }
+blake3.workspace = true
 ch-export = { path = "../export" }
 thiserror.workspace = true
 serde.workspace = true

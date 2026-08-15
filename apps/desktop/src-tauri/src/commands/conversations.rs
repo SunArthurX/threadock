@@ -20,13 +20,28 @@ pub(crate) async fn list_conversations(
     state: tauri::State<'_, DaemonState>,
     workspace_id: Option<String>,
     provider: Option<String>,
+    favorite: Option<bool>,
+    archived: Option<bool>,
+    include_deleted: Option<bool>,
 ) -> Result<Vec<ConversationDto>, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    // 过滤维度走 ConversationFilter（收藏/归档/删除）；provider 仍按内存过滤（标签栏）
+    let filter = ch_storage::ConversationFilter {
+        workspace_id: workspace_id.clone(),
+        favorite,
+        archived,
+        deleted: match include_deleted {
+            Some(true) => None,                // 含已删除
+            Some(false) | None => Some(false), // 默认排除已删除
+        },
+        provider: None,
+    };
     let convs = repo
-        .list_conversations(workspace_id.as_deref())
+        .list_conversations_filtered(&filter)
         .map_err(|e| storage_err(e))?;
     // 子任务数一次 GROUP BY 全取（旧实现每会话一次 count_children = 1+N 查询）
     let child_counts = repo.child_counts_bulk().map_err(|e| storage_err(e))?;
+    let flags = repo.conversation_flags_bulk().map_err(|e| storage_err(e))?;
     // 只返回顶层主任务（source_parent_id 为空），并统计各自子任务数
     let dtos = convs
         .into_iter()
@@ -44,7 +59,8 @@ pub(crate) async fn list_conversations(
                 .get(&(c.source_conversation_id.clone(), provider_id))
                 .copied()
                 .unwrap_or(0);
-            conversation_dto(c, child_count)
+            let f = flags.get(&c.id).copied().unwrap_or((false, false));
+            conversation_dto(c, child_count, f)
         })
         .collect();
     Ok(dtos)
@@ -62,7 +78,14 @@ pub(crate) async fn list_child_conversations(
     let convs = repo
         .list_child_conversations(&parent_source_id, &provider_id)
         .map_err(|e| storage_err(e))?;
-    Ok(convs.into_iter().map(|c| conversation_dto(c, 0)).collect())
+    let flags = repo.conversation_flags_bulk().map_err(|e| storage_err(e))?;
+    Ok(convs
+        .into_iter()
+        .map(|c| {
+            let f = flags.get(&c.id).copied().unwrap_or((false, false));
+            conversation_dto(c, 0, f)
+        })
+        .collect())
 }
 
 /// 请求取消当前正在进行的同步（对话/指标），无进行中的同步也无副作用。
@@ -138,11 +161,127 @@ pub(crate) async fn get_conversation_detail(
     let child_count = repo
         .count_children(&conv.source_conversation_id, &provider_id)
         .unwrap_or(0);
+    let tags = repo.list_tags(&conversation_id).unwrap_or_default();
+    let flags = repo
+        .get_conversation_flags(&conversation_id)
+        .unwrap_or((false, false));
     Ok(ConversationDetailDto {
-        conversation: conversation_dto(conv, child_count),
+        tags,
+        conversation: conversation_dto(conv, child_count, flags),
         messages: messages.into_iter().map(message_dto).collect(),
         events: events.into_iter().map(event_dto).collect(),
         completeness_label: label.to_string(),
+    })
+}
+
+/// 归档/取消归档。
+#[tauri::command]
+pub(crate) async fn set_archived(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+    archived: bool,
+) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    repo.set_archived(&id, archived)
+        .map_err(|e| storage_err(e))?;
+    let _ = repo.log_governance_action(
+        if archived {
+            "archive_conversation"
+        } else {
+            "unarchive_conversation"
+        },
+        Some("conversation"),
+        Some(&id),
+        "ok",
+        None,
+    );
+    Ok(())
+}
+
+/// 软删除（可恢复）。
+#[tauri::command]
+pub(crate) async fn delete_conversation(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    repo.soft_delete_conversation(&id)
+        .map_err(|e| storage_err(e))?;
+    let _ = repo.log_governance_action(
+        "soft_delete_conversation",
+        Some("conversation"),
+        Some(&id),
+        "ok",
+        None,
+    );
+    Ok(())
+}
+
+/// 恢复软删除。
+#[tauri::command]
+pub(crate) async fn restore_conversation(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+) -> Result<(), String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    repo.restore_conversation(&id).map_err(|e| storage_err(e))?;
+    Ok(())
+}
+
+/// 彻底删除（不可恢复）：级联清理 DB + raw blob + 搜索索引，并记治理流水。
+#[tauri::command]
+pub(crate) async fn hard_delete_conversation(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+) -> Result<(), String> {
+    // 硬删是重活（索引提交），移出 runtime 线程
+    run_blocking(move || {
+        let (raw_hash, message_ids) = {
+            let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+            let conv = repo
+                .get_conversation(&id)
+                .map_err(|e| storage_err(e))?
+                .ok_or_else(|| format!("conversation not found: {id}"))?;
+            let ids: Vec<String> = repo
+                .list_messages(&id)
+                .map_err(|e| storage_err(e))?
+                .into_iter()
+                .map(|m| m.id)
+                .collect();
+            (conv.raw_payload_id, ids)
+        };
+        // 1) DB 级联（messages/events/tags/knowledge 随 FK CASCADE）
+        {
+            let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+            repo.hard_delete_conversation(&id)
+                .map_err(|e| storage_err(e))?;
+            let _ = repo.log_governance_action(
+                "hard_delete_conversation",
+                Some("conversation"),
+                Some(&id),
+                "ok",
+                Some(&format!(r#"{{"messages": {}}}"#, message_ids.len())),
+            );
+        }
+        // 2) 搜索索引：删该会话全部消息文档后提交
+        {
+            let idx = state.search_index.lock().map_err(|e| storage_err(e))?;
+            let mut writer = idx
+                .writer(ch_search::index::DEFAULT_WRITER_HEAP)
+                .map_err(|e| search_err(e))?;
+            for mid in &message_ids {
+                let _ = idx.delete_message(&mut writer, mid);
+            }
+            idx.commit(writer).map_err(|e| search_err(e))?;
+        }
+        // 3) raw blob
+        if let Some(hash) = raw_hash {
+            let raw_store = state.raw_store.lock().map_err(|e| storage_err(e))?;
+            if let Err(e) = raw_store.delete(&hash) {
+                tracing::warn!(hash = %hash, error = %e, "raw blob delete failed");
+            }
+        }
+        Ok(())
     })
 }
 
@@ -215,7 +354,10 @@ pub(crate) async fn get_conversation_by_source(
     let conn_row = repo
         .find_conversation_by_source(&provider_id, &source_conversation_id)
         .map_err(|e| storage_err(e))?;
-    Ok(conn_row.map(|c| conversation_dto(c, 0)))
+    Ok(conn_row.map(|c| {
+        let f = repo.get_conversation_flags(&c.id).unwrap_or((false, false));
+        conversation_dto(c, 0, f)
+    }))
 }
 
 #[tauri::command]

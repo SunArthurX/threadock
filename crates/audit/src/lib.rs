@@ -24,6 +24,9 @@ pub enum AuditError {
 
     #[error("invalid regex {name}: {err}")]
     InvalidRegex { name: String, err: String },
+
+    #[error("conversation not found: {0}")]
+    NotFound(String),
 }
 
 /// 严重级别。
@@ -64,6 +67,32 @@ pub struct AuditFinding {
     pub tool_call_id: Option<String>,
     /// 命中上下文片段（敏感信息已脱敏展示）。
     pub snippet: String,
+    /// 处置指纹：稳定标识一次命中（忽略/误报白名单的 key）。
+    pub fingerprint: String,
+}
+
+/// 计算发现的处置指纹（BLAKE3 前 16 位 hex；同一位置同一规则恒定）。
+fn fingerprint_of(
+    kind: &str,
+    rule: &str,
+    provider: &str,
+    source_conversation_id: &str,
+    message_id: Option<&str>,
+    tool_call_id: Option<&str>,
+) -> String {
+    let mut input = String::with_capacity(96);
+    input.push_str(kind);
+    input.push('|');
+    input.push_str(rule);
+    input.push('|');
+    input.push_str(provider);
+    input.push('|');
+    input.push_str(source_conversation_id);
+    input.push('|');
+    input.push_str(message_id.unwrap_or(""));
+    input.push('|');
+    input.push_str(tool_call_id.unwrap_or(""));
+    blake3::hash(input.as_bytes()).to_hex().to_string()[..16].to_string()
 }
 
 /// 审计报告。
@@ -181,6 +210,14 @@ impl AuditScanner {
                     &text[m.end()..end]
                 );
                 out.push(AuditFinding {
+                    fingerprint: fingerprint_of(
+                        "sensitive",
+                        name,
+                        &row.provider,
+                        &row.source_conversation_id,
+                        Some(&row.message_id),
+                        None,
+                    ),
                     kind: "sensitive".into(),
                     severity: *sev,
                     rule: name.clone(),
@@ -206,6 +243,14 @@ impl AuditScanner {
         for (name, re, sev) in &self.dangerous_rules {
             if re.is_match(cmd) {
                 out.push(AuditFinding {
+                    fingerprint: fingerprint_of(
+                        "dangerous_command",
+                        name,
+                        &tc.provider.to_string(),
+                        &tc.source_session_id,
+                        None,
+                        Some(&tc.id),
+                    ),
                     kind: "dangerous_command".into(),
                     severity: *sev,
                     rule: name.clone(),
@@ -223,9 +268,18 @@ impl AuditScanner {
     }
 }
 
-/// 全库审计扫描入口。
-/// 消息分批扫描（每批 500），工具调用一次性读取。
+/// 全库审计扫描入口（不过滤处置状态）。
 pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
+    run_audit_with(repo, &std::collections::HashSet::new())
+}
+
+/// 全库审计扫描（忽略集合内的 fingerprint 跳过，不计入 findings）。
+/// 消息分批扫描（每批 500），工具调用一次性读取。
+#[allow(clippy::implicit_hasher)] // 本地工具固定默认 hasher，不泛化
+pub fn run_audit_with(
+    repo: &Repository,
+    ignored: &std::collections::HashSet<String>,
+) -> AuditResult<AuditReport> {
     let custom = repo.list_policy_rules()?;
     let scanner = AuditScanner::build(&custom)?;
     let mut findings = Vec::new();
@@ -241,7 +295,11 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
             break;
         }
         for row in &rows {
-            findings.extend(scanner.scan_message(row));
+            for f in scanner.scan_message(row) {
+                if !ignored.contains(&f.fingerprint) {
+                    findings.push(f);
+                }
+            }
         }
         scanned_messages += n;
         last_id = rows
@@ -256,7 +314,11 @@ pub fn run_audit(repo: &Repository) -> AuditResult<AuditReport> {
     // 工具调用
     let tool_calls = repo.list_tool_calls_for_audit()?;
     for tc in &tool_calls {
-        findings.extend(scanner.scan_tool_call(tc));
+        for f in scanner.scan_tool_call(tc) {
+            if !ignored.contains(&f.fingerprint) {
+                findings.push(f);
+            }
+        }
     }
 
     // 严重度统计
@@ -313,6 +375,48 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// 单会话重扫（审计处置闭环：详情页「重扫此会话」）。
+///
+/// 扫描该会话全部消息 + 该会话来源的 tool calls；同样应用忽略集合。
+#[allow(clippy::implicit_hasher)] // 本地工具固定默认 hasher，不泛化
+pub fn run_audit_for_conversation(
+    repo: &Repository,
+    conversation_id: &str,
+    ignored: &std::collections::HashSet<String>,
+) -> AuditResult<Vec<AuditFinding>> {
+    let conv = repo
+        .get_conversation(conversation_id)?
+        .ok_or_else(|| AuditError::NotFound(conversation_id.to_string()))?;
+    let custom = repo.list_policy_rules()?;
+    let scanner = AuditScanner::build(&custom)?;
+    let mut findings = Vec::new();
+
+    for m in repo.list_messages(conversation_id)? {
+        let row = AuditMessageRow {
+            message_id: m.id.clone(),
+            provider: conv.provider.as_str().to_string(),
+            source_conversation_id: conv.source_conversation_id.clone(),
+            conversation_title: conv.title.clone(),
+            content_text: m.content_text.clone().unwrap_or_default(),
+        };
+        for f in scanner.scan_message(&row) {
+            if !ignored.contains(&f.fingerprint) {
+                findings.push(f);
+            }
+        }
+    }
+    for tc in repo.list_tool_calls_for_audit()? {
+        if tc.source_session_id == conv.source_conversation_id {
+            for f in scanner.scan_tool_call(&tc) {
+                if !ignored.contains(&f.fingerprint) {
+                    findings.push(f);
+                }
+            }
+        }
+    }
+    Ok(findings)
 }
 
 /// 渲染 HTML 报告（自包含、可直接打开）。
@@ -512,6 +616,7 @@ mod tests {
             scanned_messages: 10,
             scanned_tool_calls: 5,
             findings: vec![AuditFinding {
+                fingerprint: "fp_test".into(),
                 kind: "dangerous_command".into(),
                 severity: Severity::High,
                 rule: "rm_recursive".into(),
@@ -531,5 +636,44 @@ mod tests {
         assert!(html.contains("rm_recursive"));
         assert!(html.contains("&lt;script&gt;"), "HTML 必须转义");
         assert!(html.contains("&amp;"), "& 必须转义");
+    }
+
+    #[test]
+    fn fingerprint_stable_and_scoped() {
+        let a = fingerprint_of("sensitive", "aws_key", "zcode", "s1", Some("m1"), None);
+        let b = fingerprint_of("sensitive", "aws_key", "zcode", "s1", Some("m1"), None);
+        let c = fingerprint_of("sensitive", "aws_key", "zcode", "s1", Some("m2"), None);
+        assert_eq!(a, b, "同一位置同一规则必须稳定");
+        assert_ne!(a, c, "不同消息不同指纹");
+        assert_eq!(a.len(), 16);
+    }
+
+    #[test]
+    fn run_audit_with_ignores_findings() {
+        // 白名单命中后不再出现在报告里
+        let r = ch_storage::Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let conv = ch_domain::Conversation::new(Provider::Generic, "src-ign");
+        let cid = r.upsert_conversation(&conv).expect("upsert failed");
+        let mut m = ch_domain::Message::new(&cid, ch_domain::Role::User, 1);
+        m.content_text = Some("key AKIAIOSFODNN7EXAMPLE here".into());
+        r.upsert_message(&m).expect("upsert failed");
+
+        let report = run_audit(&r).expect("unexpected None");
+        assert_eq!(report.findings.len(), 1);
+        let fp = report.findings[0].fingerprint.clone();
+        assert!(!fp.is_empty());
+
+        let mut ignored = std::collections::HashSet::new();
+        ignored.insert(fp);
+        let filtered = run_audit_with(&r, &ignored).expect("unexpected None");
+        assert_eq!(filtered.findings.len(), 0, "已处置的应被跳过");
+
+        // 单会话扫描同样应用忽略集合
+        let one = run_audit_for_conversation(&r, &cid, &ignored).expect("unexpected None");
+        assert_eq!(one.len(), 0);
+        let one_open = run_audit_for_conversation(&r, &cid, &std::collections::HashSet::new())
+            .expect("unexpected None");
+        assert_eq!(one_open.len(), 1);
     }
 }

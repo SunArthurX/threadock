@@ -1,0 +1,410 @@
+//! 数据维护域：存储看板、孤儿 GC、保留策略、周报自动生成。
+//!
+//! 全部为本地维护动作，敏感操作（GC/保留归档）写入治理操作流水。
+
+use super::*;
+use ch_daemon::DaemonState;
+
+/// 存储占用统计。
+#[derive(serde::Serialize)]
+pub(crate) struct StorageStats {
+    pub db_bytes: u64,
+    pub raw_count: u64,
+    pub raw_bytes: u64,
+    pub index_bytes: u64,
+}
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = std::fs::read_dir(path) {
+        for e in entries.flatten() {
+            match e.file_type() {
+                Ok(t) if t.is_dir() => {
+                    total += dir_size(&e.path());
+                }
+                Ok(_) => {
+                    total += std::fs::metadata(e.path()).map(|m| m.len()).unwrap_or(0);
+                }
+                Err(_) => {}
+            }
+        }
+    }
+    total
+}
+
+/// 三块存储（DB / raw blob / 搜索索引）的占用看板。
+#[tauri::command]
+pub(crate) async fn storage_stats(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<StorageStats, String> {
+    let data_dir = &state.data_dir;
+    let raw = state
+        .raw_store
+        .lock()
+        .map_err(|e| storage_err(e))?
+        .stats()
+        .map_err(|e| io_err(e))?;
+    Ok(StorageStats {
+        db_bytes: std::fs::metadata(data_dir.join("threadock.db"))
+            .map(|m| m.len())
+            .unwrap_or(0),
+        raw_count: raw.count,
+        raw_bytes: raw.bytes,
+        index_bytes: dir_size(&data_dir.join("index")),
+    })
+}
+
+/// GC 核心：删除不被任何会话引用、且落盘超过 1 小时（防与导入竞态）的 blob。
+/// 返回 (扫描数, 删除数, 释放字节)。
+fn gc_raw_inner(state: &DaemonState) -> Result<(usize, usize, u64), String> {
+    let refs = {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.list_raw_payload_refs().map_err(|e| storage_err(e))?
+    };
+    let raw_store = state.raw_store.lock().map_err(|e| storage_err(e))?;
+    let blobs = raw_store.list_blobs().map_err(|e| io_err(e))?;
+    let mut deleted = 0usize;
+    let mut freed = 0u64;
+    for (hash, size) in &blobs {
+        if refs.contains(hash) {
+            continue;
+        }
+        if let Ok(p) = raw_store.path_of(hash) {
+            if let Ok(meta) = std::fs::metadata(&p) {
+                if let Ok(mtime) = meta.modified() {
+                    if mtime.elapsed().map(|d| d.as_secs() < 3600).unwrap_or(true) {
+                        continue;
+                    }
+                }
+            }
+        }
+        if raw_store.delete(hash).is_ok() {
+            deleted += 1;
+            freed += size;
+        }
+    }
+    drop(raw_store);
+    if deleted > 0 {
+        if let Ok(repo) = state.repo.lock() {
+            let _ = repo.log_governance_action(
+                "gc_raw_store",
+                None,
+                None,
+                "ok",
+                Some(&format!(r#"{{"deleted": {deleted}, "freed": {freed}}}"#)),
+            );
+        }
+    }
+    Ok((blobs.len(), deleted, freed))
+}
+
+/// 孤儿 blob GC（设置-数据分区触发）。
+#[tauri::command]
+pub(crate) async fn gc_raw_store(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let (scanned, deleted, freed) = run_blocking(|| gc_raw_inner(&state))?;
+    Ok(serde_json::json!({ "scanned": scanned, "deleted": deleted, "freed_bytes": freed }))
+}
+
+/// 立即执行保留策略：归档 N 天前未归档会话，返回归档数量。
+#[tauri::command]
+pub(crate) async fn retention_apply(
+    state: tauri::State<'_, DaemonState>,
+    days: i64,
+) -> Result<serde_json::Value, String> {
+    if days <= 0 {
+        return Err("保留天数必须为正（0 = 关闭策略，不需要执行）".into());
+    }
+    let archived = {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        let n = repo
+            .archive_conversations_older_than(days)
+            .map_err(|e| storage_err(e))?;
+        let _ = repo.log_governance_action(
+            "retention_archive",
+            None,
+            None,
+            "ok",
+            Some(&format!(r#"{{"days": {days}, "archived": {n}}}"#)),
+        );
+        n
+    };
+    Ok(serde_json::json!({ "archived": archived }))
+}
+
+/// 周报自动生成：距上次生成超过 7 天则落盘一份到 app_data/reports/。
+///
+/// 返回 {generated, path}；未到期时 generated=false。
+#[tauri::command]
+pub(crate) async fn weekly_report_auto(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let last_ms: i64 = {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        repo.get_setting("last_weekly_ms")
+            .map_err(|e| storage_err(e))?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    };
+    let now_ms =
+        (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    let week_ms: i64 = 7 * 24 * 3600 * 1000;
+    if last_ms > 0 && now_ms - last_ms < week_ms {
+        return Ok(serde_json::json!({ "generated": false, "path": null }));
+    }
+
+    let html = {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        super::ops::weekly_report_html(&repo)?
+    };
+    let dir = state.data_dir.join("reports");
+    std::fs::create_dir_all(&dir).map_err(|e| io_err(e))?;
+    let date = ch_domain::now_utc().date();
+    let path = dir.join(format!("weekly-{}.html", date));
+    std::fs::write(&path, html.as_bytes()).map_err(|e| io_err(e))?;
+
+    {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.set_setting("last_weekly_ms", &now_ms.to_string())
+            .map_err(|e| storage_err(e))?;
+    }
+    Ok(serde_json::json!({
+        "generated": true,
+        "path": path.to_string_lossy(),
+    }))
+}
+
+/// 全量重建搜索索引（tokenizer 修复后的存量迁移 + 索引孤儿清理）。
+#[tauri::command]
+pub(crate) async fn rebuild_search_index(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let count = run_blocking(|| rebuild_index_inner(&state))?;
+    let _ = {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.log_governance_action(
+            "rebuild_search_index",
+            None,
+            None,
+            "ok",
+            Some(&format!(r#"{{"messages": {count}}}"#)),
+        )
+    };
+    Ok(serde_json::json!({ "messages": count }))
+}
+
+/// 重建核心：清空索引 → 全量重灌所有会话消息。
+fn rebuild_index_inner(state: &DaemonState) -> Result<usize, String> {
+    let convs: Vec<ch_domain::Conversation> = {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.list_conversations(None).map_err(|e| storage_err(e))?
+    };
+    let mut docs: Vec<ch_search::index::IndexableMessage> = Vec::new();
+    {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        for c in &convs {
+            let msgs = repo.list_messages(&c.id).map_err(|e| storage_err(e))?;
+            let title = c.effective_title().to_string();
+            for m in &msgs {
+                docs.push(ch_search::index::IndexableMessage {
+                    message_id: m.id.clone(),
+                    conversation_id: c.id.clone(),
+                    provider: c.provider,
+                    workspace_id: c.workspace_id.clone(),
+                    role: m.role,
+                    title: Some(title.clone()),
+                    body: m.content_text.clone(),
+                });
+            }
+        }
+    }
+    let n = docs.len();
+    {
+        let idx = state.search_index.lock().map_err(|e| storage_err(e))?;
+        let mut writer = idx
+            .writer(ch_search::index::DEFAULT_WRITER_HEAP)
+            .map_err(|e| search_err(e))?;
+        idx.rebuild(&mut writer, |w| -> Result<usize, ch_search::SearchError> {
+            for d in &docs {
+                idx.index_message(w, d)?;
+            }
+            Ok(n)
+        })
+        .map_err(|e| search_err(e))?;
+        idx.commit(writer).map_err(|e| search_err(e))?;
+    }
+    Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    #[test]
+    fn gc_deletes_only_orphans() {
+        // 一个被引用 + 一个孤儿 blob：GC 只删孤儿
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+        let raw_store = state.raw_store.lock().expect("mutex poisoned");
+        let referenced = raw_store
+            .put_json(&serde_json::json!({"a": 1}))
+            .expect("file I/O failed");
+        let orphan = raw_store
+            .put_json(&serde_json::json!({"orphan": true}))
+            .expect("file I/O failed");
+        assert!(raw_store.exists(&referenced.hash).expect("file I/O failed"));
+        drop(raw_store);
+
+        // 会话引用 referenced
+        {
+            let repo = state.repo.lock().expect("mutex poisoned");
+            let conv = ch_domain::Conversation::new(ch_domain::Provider::Generic, "src-gc");
+            let mut c = conv;
+            c.raw_payload_id = Some(referenced.hash.clone());
+            repo.import_conversation_batch(&c, &[], &[], None, None)
+                .expect("SQL execution failed");
+        }
+
+        // 孤儿文件 mtime 是刚刚 → 1 小时保护期内，先验证保护期跳过
+        let (_, deleted, _) = gc(&state);
+        assert_eq!(deleted, 0, "新写入孤儿在保护期内不删");
+        // 把孤儿 mtime 拨回 2 小时前
+        {
+            let raw_store = state.raw_store.lock().expect("mutex poisoned");
+            let p = raw_store.path_of(&orphan.hash).expect("file I/O failed");
+            let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+            // 拨回 mtime：用 utime 语义（截断重开 + set_modified）
+            let f = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&p)
+                .expect("file I/O failed");
+            f.set_modified(old).expect("file I/O failed");
+        }
+        let (_, deleted, freed) = gc(&state);
+        assert_eq!(deleted, 1, "过期孤儿应被删除");
+        assert_eq!(freed, orphan.stored_size);
+        let raw_store = state.raw_store.lock().expect("mutex poisoned");
+        assert!(
+            raw_store.exists(&referenced.hash).expect("file I/O failed"),
+            "被引用的必须保留"
+        );
+        assert!(
+            !raw_store.exists(&orphan.hash).expect("file I/O failed"),
+            "孤儿必须已删"
+        );
+    }
+
+    fn gc(state: &DaemonState) -> (usize, usize, u64) {
+        super::gc_raw_inner(state).expect("gc inner")
+    }
+
+    #[test]
+    fn hard_delete_cascades_index_and_raw() {
+        use ch_normalization::RawConversation;
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+        // 导入一条会话（走完整流水线：raw + DB + 索引）
+        let raw = RawConversation {
+            provider: ch_domain::Provider::Generic,
+            source_conversation_id: "src-hd".into(),
+            title: Some("级联删除测试".into()),
+            model: None,
+            started_at: None,
+            messages: vec![ch_normalization::RawMessage {
+                role: ch_domain::Role::User,
+                text: Some("cascade unique keyword".into()),
+                content_json: None,
+                source_message_id: None,
+                created_at: None,
+            }],
+            events: vec![],
+            source_parent_id: None,
+        };
+        let dto = super::super::import::import_raw_to_state(&state, raw, None, None)
+            .expect("import failed");
+        let cid = dto.conversation_id;
+        let raw_hash = {
+            let repo = state.repo.lock().expect("mutex poisoned");
+            repo.get_conversation(&cid)
+                .expect("SQL execution failed")
+                .expect("unexpected None")
+                .raw_payload_id
+        }
+        .expect("raw hash");
+
+        // 索引能搜到
+        {
+            let idx = state.search_index.lock().expect("mutex poisoned");
+            let hits = idx
+                .search(&ch_search::SearchQuery::new("cascade"))
+                .expect("unexpected None");
+            assert!(!hits.is_empty());
+        }
+        // raw 存在
+        {
+            let rs = state.raw_store.lock().expect("mutex poisoned");
+            assert!(rs.exists(&raw_hash).expect("file I/O failed"));
+        }
+
+        // 硬删（与 hard_delete_conversation 命令同一套级联逻辑）
+        let (hash_opt, msg_ids): (Option<String>, Vec<String>) = {
+            let repo = state.repo.lock().expect("mutex poisoned");
+            let ids = repo
+                .list_messages(&cid)
+                .expect("SQL execution failed")
+                .into_iter()
+                .map(|m| m.id)
+                .collect();
+            (Some(raw_hash.clone()), ids)
+        };
+        {
+            let repo = state.repo.lock().expect("mutex poisoned");
+            repo.hard_delete_conversation(&cid)
+                .expect("SQL execution failed");
+        }
+        {
+            let idx = state.search_index.lock().expect("mutex poisoned");
+            let mut writer = idx
+                .writer(ch_search::index::DEFAULT_WRITER_HEAP)
+                .expect("file I/O failed");
+            for mid in &msg_ids {
+                let _ = idx.delete_message(&mut writer, mid);
+            }
+            idx.commit(writer).expect("file I/O failed");
+        }
+        if let Some(h) = hash_opt {
+            let rs = state.raw_store.lock().expect("mutex poisoned");
+            rs.delete(&h).expect("file I/O failed");
+        }
+
+        // 三处全清
+        {
+            let repo = state.repo.lock().expect("mutex poisoned");
+            assert!(repo
+                .get_conversation(&cid)
+                .expect("SQL execution failed")
+                .is_none());
+        }
+        {
+            let idx = state.search_index.lock().expect("mutex poisoned");
+            let hits = idx
+                .search(&ch_search::SearchQuery::new("cascade"))
+                .expect("unexpected None");
+            assert!(hits.is_empty(), "索引文档必须删除");
+        }
+        {
+            let rs = state.raw_store.lock().expect("mutex poisoned");
+            assert!(
+                !rs.exists(&raw_hash).expect("file I/O failed"),
+                "raw blob 必须删除"
+            );
+        }
+    }
+}

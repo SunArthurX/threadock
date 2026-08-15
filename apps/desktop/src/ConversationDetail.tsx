@@ -12,17 +12,35 @@ interface Props {
   timelineMode: boolean;
   highlightMsgId: string | null;
   collapsedMsgs: Set<string>;
+  tags: string[];
   onToggleTimeline: () => void;
   onExport: (format: "markdown" | "json") => void;
   onExtractKnowledge: () => void;
   onToggleCollapse: (id: string) => void;
+  onToggleFavorite: () => void;
+  onToggleArchive: () => void;
+  onSoftDelete: () => void;
+  onHardDelete: () => void;
+  onAddTag: (tag: string) => void;
+  onRemoveTag: (tag: string) => void;
+  onRescanAudit: () => void;
 }
+
+/** 彻底删除确认词。 */
+export const HARD_DELETE_CONFIRM = "删除";
+
+import { useState } from "react";
 
 export default function ConversationDetail({
   conv, messages, events, completenessLabel, knowledge, loading, exporting,
-  timelineMode, highlightMsgId, collapsedMsgs,
+  timelineMode, highlightMsgId, collapsedMsgs, tags,
   onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
+  onToggleFavorite, onToggleArchive, onSoftDelete, onHardDelete,
+  onAddTag, onRemoveTag, onRescanAudit,
 }: Props) {
+  const [tagInput, setTagInput] = useState("");
+  const [hardArmed, setHardArmed] = useState(false);
+  const [hardText, setHardText] = useState("");
   const renderContent = (m: Message) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
@@ -44,12 +62,13 @@ export default function ConversationDetail({
   const renderTimeline = () => (
     <div className="conversation-timeline">
       {(() => {
-        interface TI { kind: "msg" | "event"; data: unknown }
+        interface TI { kind: "msg" | "event"; ts: number; data: unknown }
+        // 按时间归并排序（旧实现直接拼接不排序、事件无时间、截断 100）
         const items: TI[] = [
-          ...messages.map((m) => ({ kind: "msg" as const, data: m })),
-          ...events.map((e) => ({ kind: "event" as const, data: e })),
-        ];
-        return items.slice(0, 100).map((item, i) => {
+          ...messages.map((m) => ({ kind: "msg" as const, ts: m.created_at_ms ?? 0, data: m })),
+          ...events.map((e) => ({ kind: "event" as const, ts: e.created_at_ms ?? 0, data: e })),
+        ].sort((a, b) => a.ts - b.ts);
+        return items.slice(0, 2000).map((item, i) => {
           if (item.kind === "msg") {
             const m = item.data as Message;
             return (
@@ -67,7 +86,7 @@ export default function ConversationDetail({
           return (
             <div key={i} className="tl-item tl-event">
               <div className="tl-dot tl-dot-event" />
-              <div className="tl-time" />
+              <div className="tl-time">{e.created_at_ms ? new Date(e.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
               <div className="tl-content">
                 <div className="tl-role tl-role-event">⚡ {eventTypeLabel(e.event_type)}</div>
                 {e.summary && <div className="tl-text mono" style={{ fontSize: 10 }}>{e.summary.slice(0, 80)}</div>}
@@ -99,7 +118,51 @@ export default function ConversationDetail({
           {exporting ? "导出中…" : "⤓ Markdown"}
         </button>
         <button className="action-btn" disabled={exporting} onClick={() => onExport("json")}>⤓ JSON</button>
+        <button className="action-btn" onClick={onExtractKnowledge}>✨ 知识</button>
+        <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
       </div>
+      <div className="detail-actions gov-actions">
+        <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
+        <button className="action-btn" onClick={onToggleArchive}>{conv.archived ? "📤 取消归档" : "🗄 归档"}</button>
+        <button className="action-btn" onClick={onSoftDelete} title="移入回收站（可恢复）">🗑 删除</button>
+        {!hardArmed ? (
+          <button className="action-btn danger" onClick={() => { setHardArmed(true); setHardText(""); }}>⚡ 彻底删除…</button>
+        ) : (
+          <span className="hard-delete-confirm">
+            <input
+              value={hardText}
+              placeholder={`输入「${HARD_DELETE_CONFIRM}」确认`}
+              onChange={(e) => setHardText(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && hardText === HARD_DELETE_CONFIRM) { onHardDelete(); setHardArmed(false); } }}
+            />
+            <button
+              className="action-btn danger"
+              disabled={hardText !== HARD_DELETE_CONFIRM}
+              onClick={() => { onHardDelete(); setHardArmed(false); }}
+            >确认彻底删除</button>
+            <button className="action-btn" onClick={() => setHardArmed(false)}>取消</button>
+          </span>
+        )}
+      </div>
+      {/* 标签行始终显示（含输入框） */}
+      {(
+        <div className="tag-row">
+          {tags.map((t) => (
+            <span key={t} className="tag-chip" title="点击移除标签" onClick={() => onRemoveTag(t)}>
+              #{t} <span className="tag-x">✕</span>
+            </span>
+          ))}
+          <input
+            className="tag-input"
+            value={tagInput}
+            placeholder="+ 标签"
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); }
+            }}
+          />
+        </div>
+      )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
       {timelineMode && !loading && renderTimeline()}
       {!timelineMode && messages.map((m) => (

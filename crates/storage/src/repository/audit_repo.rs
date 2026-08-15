@@ -36,6 +36,28 @@ pub struct AuditMessageRow {
     pub content_text: String,
 }
 
+/// 审计发现处置状态（fingerprint → 忽略/误报白名单）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct AuditFindingState {
+    pub fingerprint: String,
+    /// `ignored`（不再提示）或 `false_positive`（误报，规则命中但非敏感）。
+    pub status: String,
+    pub note: Option<String>,
+    pub created_at: i64,
+}
+
+/// 治理操作流水行（audit_logs 表启用后的读取形态）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct GovernanceLogRow {
+    pub id: String,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<String>,
+    pub result: String,
+    pub metadata_json: Option<String>,
+    pub created_at: i64,
+}
+
 impl Repository {
     /// 列出策略规则。
     pub fn list_policy_rules(&self) -> StorageResult<Vec<PolicyRuleRecord>> {
@@ -181,6 +203,104 @@ impl Repository {
                 duration_ms: r.get(9)?,
                 status: ch_domain::UsageStatus::parse(&r.get::<_, String>(10)?),
                 command_text: r.get(11)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    // ── 审计发现处置（M4 闭环：忽略/误报白名单）──────────────────────
+
+    /// 列出全部处置状态（key = fingerprint）。
+    pub fn list_audit_finding_states(&self) -> StorageResult<Vec<AuditFindingState>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT fingerprint, status, note, created_at FROM audit_finding_states ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(AuditFindingState {
+                fingerprint: r.get(0)?,
+                status: r.get(1)?,
+                note: r.get(2)?,
+                created_at: r.get(3)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 设置/更新处置状态（upsert）。
+    pub fn set_audit_finding_state(
+        &self,
+        fingerprint: &str,
+        status: &str,
+        note: Option<&str>,
+    ) -> StorageResult<()> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now = crate::timestamp::to_millis(Some(ch_domain::now_utc())).unwrap_or(0);
+        conn.execute(
+            "INSERT INTO audit_finding_states (fingerprint, status, note, created_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(fingerprint) DO UPDATE SET status = ?2, note = ?3",
+            params![fingerprint, status, note, now],
+        )?;
+        Ok(())
+    }
+
+    /// 清除处置状态（恢复提示）。
+    pub fn clear_audit_finding_state(&self, fingerprint: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        conn.execute(
+            "DELETE FROM audit_finding_states WHERE fingerprint = ?1",
+            params![fingerprint],
+        )?;
+        Ok(())
+    }
+
+    // ── 治理操作流水（audit_logs 表启用）─────────────────────────────
+
+    /// 记录一条治理操作（重置/删除/GC/策略变更等敏感动作）。
+    pub fn log_governance_action(
+        &self,
+        action: &str,
+        target_type: Option<&str>,
+        target_id: Option<&str>,
+        result: &str,
+        metadata_json: Option<&str>,
+    ) -> StorageResult<String> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let id = format!("gl_{}", ch_domain::now_utc().unix_timestamp_nanos());
+        let now = crate::timestamp::to_millis(Some(ch_domain::now_utc())).unwrap_or(0);
+        conn.execute(
+            "INSERT INTO audit_logs (id, actor_type, actor_id, action, target_type, target_id, result, metadata_json, created_at)
+             VALUES (?1, 'local-user', NULL, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, action, target_type, target_id, result, metadata_json, now],
+        )?;
+        Ok(id)
+    }
+
+    /// 最近 N 条治理操作（倒序）。
+    pub fn list_governance_log(&self, limit: i64) -> StorageResult<Vec<GovernanceLogRow>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id, action, target_type, target_id, result, metadata_json, created_at
+             FROM audit_logs ORDER BY created_at DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |r| {
+            Ok(GovernanceLogRow {
+                id: r.get(0)?,
+                action: r.get(1)?,
+                target_type: r.get(2)?,
+                target_id: r.get(3)?,
+                result: r.get(4)?,
+                metadata_json: r.get(5)?,
+                created_at: r.get(6)?,
             })
         })?;
         let mut v = Vec::new();

@@ -388,3 +388,13 @@ CREATE TABLE IF NOT EXISTS import_state (
 );
 CREATE INDEX IF NOT EXISTS idx_import_state_provider ON import_state(provider_id);
 ";
+
+/// V11：审计发现处置状态（忽略/误报白名单，M4 处置闭环）。
+pub const SCHEMA_V11: &str = r"
+CREATE TABLE IF NOT EXISTS audit_finding_states (
+    fingerprint TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    note        TEXT,
+    created_at  INTEGER NOT NULL
+);
+";

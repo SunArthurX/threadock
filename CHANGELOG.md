@@ -1,5 +1,27 @@
 # Changelog
 
+
+## [0.3.0] - 2026-08-15
+
+### Governance Closed-Loop (治理闭环，三批次)
+- **Budget alerting**: notify_on_exceed now enforced (settings toggle + topbar global budget bar + over-limit toast with per-month dedup); month-end cost/token projection (daily-run-rate extrapolation)
+- **Audit disposition**: findings persisted fingerprints (V11 audit_finding_states), ignore / false-positive whitelist, per-conversation rescan, policy rule enable/disable switches (was delete-only)
+- **Notification system**: in-app toasts (budget/audit/weekly/retention) — none existed before
+- **Conversation governance**: favorite star + tag editing (backend APIs existed, UI was zero), archive, soft-delete + recycle-bin view with restore, hard delete with typed「删除」confirmation
+- **Hard delete now cascades**: raw blob + tantivy documents + governance log (previously leaked both)
+- **Timeline fixed (M15)**: messages+events merged by timestamp (was unsorted concat), event timestamps shown (EventDto.created_at_ms added), cap 100 → 2000
+- **Data lifecycle**: storage dashboard (db/raw/index), orphan-blob GC with 1h race protection, retention policy (auto-archive >N days at startup), search-index rebuild
+- **Weekly report automation**: auto-generated when >7 days stale into app_data/reports/ + manual button
+- **Governance audit trail**: audit_logs table enabled — every sensitive action (reset/GC/delete/policy/disposition) recorded and shown in Settings
+- **Dashboard**: per-card visibility toggles (persisted), daily cache-hit trend chart, automation watch-list (read-only principle preserved)
+
+### Fixed
+- **Search delete was silently broken**: "raw" tokenizer was actually SimpleTokenizer — underscore IDs were tokenized so delete_term never matched; switched to RawTokenizer + realistic-ID regression test + rebuild-index migration command for existing indexes
+- MSRV job/toolchain: lockfile requires 1.88 (declared 1.75 was fictional)
+
+### Tests
+- 371 workspace (was 361) + 7 tauri (was 4... now 7) + 34 frontend (was 24)
+
 ## [0.2.1] - 2026-08-15
 
 ### Security

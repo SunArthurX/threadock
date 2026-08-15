@@ -17,6 +17,8 @@ pub struct WorkspaceDto {
 
 #[derive(serde::Serialize)]
 pub struct ConversationDto {
+    pub favorite: bool,
+    pub archived: bool,
     pub id: String,
     pub provider: String,
     pub source_conversation_id: String,
@@ -48,6 +50,7 @@ pub struct MessageDto {
 
 #[derive(serde::Serialize)]
 pub struct EventDto {
+    pub created_at_ms: Option<i64>,
     pub id: String,
     pub event_type: String,
     pub summary: Option<String>,
@@ -57,6 +60,7 @@ pub struct EventDto {
 /// 会话完整详情：消息 + 事件（plan §6.4 回溯修改过程）。
 #[derive(serde::Serialize)]
 pub struct ConversationDetailDto {
+    pub tags: Vec<String>,
     pub conversation: ConversationDto,
     pub messages: Vec<MessageDto>,
     pub events: Vec<EventDto>,
@@ -135,8 +139,14 @@ pub(crate) fn ts_to_ms(ts: Option<ch_domain::Timestamp>) -> Option<i64> {
     ts.map(|t| (t - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64)
 }
 
-pub(crate) fn conversation_dto(c: ch_domain::Conversation, child_count: i64) -> ConversationDto {
+pub(crate) fn conversation_dto(
+    c: ch_domain::Conversation,
+    child_count: i64,
+    flags: (bool, bool),
+) -> ConversationDto {
     ConversationDto {
+        favorite: flags.0,
+        archived: flags.1,
         id: c.id,
         provider: c.provider.to_string(),
         source_conversation_id: c.source_conversation_id,
@@ -165,6 +175,7 @@ pub(crate) fn message_dto(m: ch_domain::Message) -> MessageDto {
 
 pub(crate) fn event_dto(e: ch_domain::Event) -> EventDto {
     EventDto {
+        created_at_ms: ts_to_ms(e.created_at),
         id: e.id,
         event_type: e.event_type.to_string(),
         summary: e.summary,

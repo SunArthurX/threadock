@@ -1,4 +1,5 @@
 // 资产 Section：资产清单（按 agent 分组+类型颜色）+ 自动化任务（完成折叠）
+import { useState } from "react";
 import type { AssetRow, AutomationRow } from "./ops-types";
 import { meta } from "./ops-types";
 
@@ -8,21 +9,55 @@ interface Props {
   loading: boolean;
 }
 
+
+/** 自动化关注列表（localStorage；受只读原则限制不做禁用，仅本地标记）。 */
+export function loadAutomationWatch(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("ch-automation-watch") ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+export function toggleAutomationWatch(key: string): Set<string> {
+  const cur = loadAutomationWatch();
+  if (cur.has(key)) {
+    cur.delete(key);
+  } else {
+    cur.add(key);
+  }
+  localStorage.setItem("ch-automation-watch", JSON.stringify([...cur]));
+  return cur;
+}
 export default function AssetsSection({ assets, automations, loading }: Props) {
+  const [watch, setWatch] = useState<Set<string>>(loadAutomationWatch);
   const isDone = (s: string | null) => s?.includes("completed") || s?.includes("finished") || s?.includes("idle");
-  const active = automations.filter((a) => !isDone(a.status));
+  const activeSorted = [...automations.filter((a) => !isDone(a.status))].sort(
+    (a, b) => Number(watch.has(`${b.provider}:${b.name}`)) - Number(watch.has(`${a.provider}:${a.name}`)),
+  );
   const done = automations.filter((a) => isDone(a.status));
 
-  const autoRow = (a: AutomationRow, i: number) => (
-    <div key={i} className="ops-risky-row">
-      <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
-      <span className="asset-name mono">{a.name}</span>
-      <span className="policy-kind">{a.kind}</span>
-      {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
-      {a.status && <span className={`risk-flag ${isDone(a.status) ? "low" : "medium"}`}>{a.status}</span>}
-      <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
-    </div>
-  );
+  const autoRow = (a: AutomationRow, i: number) => {
+    const wk = `${a.provider}:${a.name}`;
+    const watched = watch.has(wk);
+    return (
+      <div key={i} className={`ops-risky-row ${watched ? "watched" : ""}`}>
+        <span
+          className={`watch-toggle ${watched ? "on" : ""}`}
+          title={watched ? "取消关注" : "关注此任务（置顶标记；受只读原则限制不修改来源配置）"}
+          onClick={() => setWatch(toggleAutomationWatch(wk))}
+        >
+          {watched ? "★" : "☆"}
+        </span>
+        <span className={`badge source ${a.provider}`}>{meta(a.provider).label}</span>
+        <span className="asset-name mono">{a.name}</span>
+        <span className="policy-kind">{a.kind}</span>
+        {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
+        {a.status && <span className={`risk-flag ${isDone(a.status) ? "low" : "medium"}`}>{a.status}</span>}
+        <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -71,9 +106,9 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
           loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
         ) : (<>
           <div className="ops-risky">
-            {active.length > 0 && <div className="automation-sub">进行中（{active.length}）</div>}
-            {active.map(autoRow)}
-            {active.length === 0 && done.length === 0 && <div className="ops-table-empty">无任务</div>}
+            {activeSorted.length > 0 && <div className="automation-sub">进行中（{activeSorted.length}）</div>}
+            {activeSorted.map(autoRow)}
+            {activeSorted.length === 0 && done.length === 0 && <div className="ops-table-empty">无任务</div>}
           </div>
           {done.length > 0 && (
             <details className="automation-done">

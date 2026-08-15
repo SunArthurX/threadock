@@ -190,6 +190,36 @@ impl RawStore {
         Ok(RawStats { count, bytes })
     }
 
+    /// 删除单个 blob（硬删除会话时级联清理；不存在视为成功）。
+    pub fn delete(&self, hash: &str) -> RawResult<()> {
+        validate_hash(hash)?;
+        let path = self.root.join(hash_to_rel_path(hash));
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    /// 列出全部 blob（hash, 压缩字节数）。GC 孤儿判定用。
+    pub fn list_blobs(&self) -> RawResult<Vec<(String, u64)>> {
+        let mut out = Vec::new();
+        if !self.root.exists() {
+            return Ok(out);
+        }
+        for entry in walk_files(&self.root)? {
+            let meta = std::fs::metadata(&entry)?;
+            // 文件名形如 <hash>.json.zst
+            if let Some(name) = entry.file_name().and_then(|n| n.to_str()) {
+                if let Some(hash) = name.strip_suffix(".json.zst") {
+                    if hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()) {
+                        out.push((hash.to_string(), meta.len()));
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// 清空所有原始 blob（用于「重置数据」）。
     pub fn clear(&self) -> RawResult<()> {
         if self.root.exists() {

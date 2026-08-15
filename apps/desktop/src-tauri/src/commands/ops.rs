@@ -405,6 +405,11 @@ pub(crate) async fn ops_weekly_report(
     state: tauri::State<'_, DaemonState>,
 ) -> Result<String, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    weekly_report_html(&repo)
+}
+
+/// 周报 HTML 生成（command 与自动生成都走这里）。
+pub(crate) fn weekly_report_html(repo: &ch_storage::Repository) -> Result<String, String> {
     let s = repo.ops_weekly_summary().map_err(|e| storage_err(e))?;
     let mut html = String::new();
     use std::fmt::Write;
@@ -662,4 +667,23 @@ pub(crate) async fn ops_cost_recalc(
         "models_updated": updated,
         "total_cost_usd": total_cost,
     }))
+}
+
+/// 当月用量 + 日均外推月底预测（预算告警/预算条）。
+#[tauri::command]
+pub(crate) async fn ops_month_projection(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<ch_storage::MonthProjection, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.ops_month_projection().map_err(|e| storage_err(e))
+}
+
+/// 每日缓存命中趋势（概览缓存卡片的趋势图）。
+#[tauri::command]
+pub(crate) async fn ops_cache_trend(
+    state: tauri::State<'_, DaemonState>,
+    days: Option<i64>,
+) -> Result<Vec<ch_storage::CacheTrendRow>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.ops_cache_trend(days).map_err(|e| storage_err(e))
 }

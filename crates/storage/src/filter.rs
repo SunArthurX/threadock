@@ -13,6 +13,8 @@ pub struct ConversationFilter {
     pub favorite: Option<bool>,
     /// Some(true) 只看已归档；Some(false) 只看未归档；None 不限。
     pub archived: Option<bool>,
+    /// Some(true) 只看已软删除；Some(false) 排除已软删除；None 不限。
+    pub deleted: Option<bool>,
 }
 
 impl ConversationFilter {
@@ -43,6 +45,16 @@ impl ConversationFilter {
     #[must_use]
     pub fn archived_only(mut self) -> Self {
         self.archived = Some(true);
+        self
+    }
+    #[must_use]
+    pub fn deleted_only(mut self) -> Self {
+        self.deleted = Some(true);
+        self
+    }
+    #[must_use]
+    pub fn exclude_deleted(mut self) -> Self {
+        self.deleted = Some(false);
         self
     }
 }

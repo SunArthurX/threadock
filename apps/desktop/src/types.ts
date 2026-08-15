@@ -1,6 +1,8 @@
 // 共享类型定义（与 Rust serde 对应）
 
 export interface Conversation {
+  favorite?: boolean;
+  archived?: boolean;
   id: string; provider: string; source_conversation_id: string;
   title: string | null; user_title: string | null; status: string | null;
   model: string | null; completeness_score: number | null;
@@ -24,9 +26,11 @@ export interface SourceSession {
   message_count: number | null; imported: boolean;
 }
 export interface EventDto {
+  created_at_ms?: number | null;
   id: string; event_type: string; summary: string | null; sequence_number: number;
 }
 export interface ConversationDetailDto {
+  tags?: string[];
   conversation: Conversation; messages: Message[]; events: EventDto[]; completeness_label: string;
 }
 export interface ExtractionResult {

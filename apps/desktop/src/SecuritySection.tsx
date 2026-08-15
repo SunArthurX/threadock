@@ -19,6 +19,9 @@ interface Props {
   onAddPolicy: () => void;
   onRemovePolicy: (name: string) => void;
   onPolicyInput: (field: string, value: string) => void;
+  onTogglePolicyEnabled: (rule: PolicyRule) => void;
+  onDisposeFinding: (fingerprint: string, status: "ignored" | "false_positive") => void;
+  onRefreshAfterDispose: () => void;
   onToggleRisk: (id: string) => void;
   onJump: (provider: string, sessionId: string, messageId: string | null) => void;
 }
@@ -78,11 +81,19 @@ export default function SecuritySection(p: Props) {
                 <span className={`badge source ${f.provider}`}>{meta(f.provider).label}</span>
                 <span className="audit-finding-rule mono">{f.rule}</span>
                 <span className="audit-finding-snippet mono">{f.snippet}</span>
+                <span className="finding-actions" onClick={(e) => e.stopPropagation()}>
+                  <button className="finding-btn" title="不再提示此发现" onClick={() => { p.onDisposeFinding(f.fingerprint, "ignored"); p.onRefreshAfterDispose(); }}>忽略</button>
+                  <button className="finding-btn" title="标记为误报（同类不再报）" onClick={() => { p.onDisposeFinding(f.fingerprint, "false_positive"); p.onRefreshAfterDispose(); }}>误报</button>
+                </span>
               </div>
             ))}
           </div>
         )}
-        {p.audit && p.audit.findings.length === 0 && <div className="ops-table-empty">扫描完成，未发现风险 🎉</div>}
+        {p.audit && p.audit.findings.length === 0 && (
+          <div className="ops-table-empty">
+            扫描完成，未发现未处置风险 🎉（已忽略/误报的不再显示，可在下方处置列表管理）
+          </div>
+        )}
 
         <div className="policy-section">
           <div className="budget-label">自定义策略规则（正则）</div>
@@ -101,11 +112,15 @@ export default function SecuritySection(p: Props) {
           {p.policies.length > 0 && (
             <div className="policy-list">
               {p.policies.map((rule) => (
-                <div key={rule.id} className="policy-row">
+                <div key={rule.id} className={`policy-row ${rule.enabled ? "" : "disabled"}`}>
                   <span className={`risk-flag ${rule.severity}`}>{SEV_LABEL[rule.severity]}</span>
                   <span className="mono">{rule.name}</span>
                   <span className="policy-kind">{rule.kind === "sensitive" ? "敏感" : "命令"}</span>
                   <span className="mono policy-pattern">{rule.pattern}</span>
+                  <label className="policy-toggle" title={rule.enabled ? "点击停用（保留规则不扫描）" : "点击启用"}>
+                    <input type="checkbox" checked={rule.enabled} onChange={() => p.onTogglePolicyEnabled(rule)} />
+                    {rule.enabled ? "启用" : "停用"}
+                  </label>
                   <button className="policy-del" onClick={() => p.onRemovePolicy(rule.name)}>✕</button>
                 </div>
               ))}

@@ -174,6 +174,26 @@ pub struct WeeklySummary {
     pub waste_sessions: i64,
 }
 
+/// 月度用量 + 按日均外推的月底预测（预算告警用）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MonthProjection {
+    pub tokens_so_far: i64,
+    pub cost_so_far: f64,
+    pub days_elapsed: u32,
+    pub days_in_month: u32,
+    /// 按日均线性外推的月底预测。
+    pub projected_tokens: i64,
+    pub projected_cost: f64,
+}
+
+/// 每日缓存命中趋势行（cache_read / 总输入口径）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CacheTrendRow {
+    pub day: String,
+    pub total_input: i64,
+    pub cache_read: i64,
+}
+
 impl Repository {
     /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
     pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
@@ -1110,5 +1130,99 @@ impl Repository {
             benchmark,
             waste_sessions: waste_count,
         })
+    }
+
+    /// 当月用量 + 按日均外推月底（第一天返回 so_far 原值）。
+    pub fn ops_month_projection(&self) -> StorageResult<MonthProjection> {
+        let now = now_utc();
+        let (y, m) = (now.year(), now.month() as u32);
+        let days_in_month = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][(m as usize) - 1]
+            + u32::from(m == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)));
+        let day = u32::from(now.day());
+        let days_elapsed = day.max(1);
+
+        let month_start = time::Date::from_calendar_date(now.year(), now.month(), 1)
+            .expect("月初日期构造仅在当时钟异常时失败")
+            .midnight()
+            .assume_utc();
+        let cutoff = timestamp::to_millis(Some(month_start)).unwrap_or(0);
+
+        let (tokens, cost): (i64, f64) = {
+            let conn = self.conn.lock().expect("mutex poisoned");
+            conn.query_row(
+                "SELECT
+                    COALESCE(SUM(input_tokens + output_tokens + reasoning_tokens), 0),
+                    COALESCE(SUM(cost_usd), 0.0)
+                 FROM usage_records WHERE ts >= ?1",
+                params![cutoff],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?
+        };
+
+        let per_day_t = tokens as f64 / f64::from(days_elapsed);
+        let per_day_c = cost / f64::from(days_elapsed);
+        Ok(MonthProjection {
+            tokens_so_far: tokens,
+            cost_so_far: cost,
+            days_elapsed,
+            days_in_month,
+            projected_tokens: (per_day_t * f64::from(days_in_month)) as i64,
+            projected_cost: per_day_c * f64::from(days_in_month),
+        })
+    }
+
+    /// 每日缓存命中趋势（总输入口径含 cache_read；空日由前端补零）。
+    pub fn ops_cache_trend(&self, days: Option<i64>) -> StorageResult<Vec<CacheTrendRow>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let (clause, cutoff) = Self::range_clause(days);
+        let sql = format!(
+            "SELECT date(ts/1000, 'unixepoch', 'localtime') AS day,
+                    SUM(input_tokens + output_tokens + reasoning_tokens + cache_read_tokens),
+                    SUM(cache_read_tokens)
+             FROM usage_records WHERE {clause}
+             GROUP BY day ORDER BY day",
+        );
+        let args: Vec<SqlValue> = cutoff.map(std::convert::Into::into).into_iter().collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args.iter()), |r| {
+            Ok(CacheTrendRow {
+                day: r.get(0)?,
+                total_input: r.get::<_, Option<i64>>(1)?.unwrap_or(0),
+                cache_read: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 保留策略：把 N 天前未归档的会话批量归档，返回归档数量。
+    pub fn archive_conversations_older_than(&self, days: i64) -> StorageResult<usize> {
+        let cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days * 86_400_000;
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE conversations SET is_archived = 1
+             WHERE is_archived = 0
+               AND COALESCE(source_status, '') != 'deleted'
+               AND updated_at IS NOT NULL AND updated_at < ?1",
+            params![cutoff],
+        )?;
+        Ok(changed)
+    }
+
+    /// GC 引用集合：所有会话挂的 raw blob hash（孤儿判定用）。
+    pub fn list_raw_payload_refs(&self) -> StorageResult<std::collections::HashSet<String>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT raw_payload_id FROM conversations WHERE raw_payload_id IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut set = std::collections::HashSet::new();
+        for r in rows {
+            set.insert(r?);
+        }
+        Ok(set)
     }
 }
