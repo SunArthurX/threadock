@@ -16,6 +16,7 @@ import KnowledgeView from "./KnowledgeView";
 import ActivityView from "./ActivityView";
 import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
+import HelpShortcuts from "./HelpShortcuts";
 import { Toasts } from "./Toasts";
 import ErrorBoundary from "./ErrorBoundary";
 import { CommandPalette, type Page } from "./CommandPalette";
@@ -32,6 +33,12 @@ const NAV_ITEMS = [
   ["security", "🛡", "安全"], ["assets", "🧩", "资产"],
   ["knowledge", "📚", "知识库"], ["activity", "📆", "活动"], ["projects", "📁", "项目"],
 ] as const;
+
+/** 视图标签（用于 window.title 反映当前页）。 */
+const VIEW_LABEL: Record<View, string> = {
+  chat: "对话", overview: "概览", cost: "成本", security: "安全", assets: "资产",
+  knowledge: "知识库", activity: "活动", projects: "项目",
+};
 
 /** 数据新鲜度徽标：拉 last_ops_sync_ms / last_conv_sync_ms，按时间窗口分绿/黄/橙。 */
 function FreshnessBadge() {
@@ -71,6 +78,8 @@ export default function App() {
   });
   // Command Palette（⌘K 全局搜索 + 跳转）
   const [cmdOpen, setCmdOpen] = useState(false);
+  // 快捷键速查（⌘? 唤起）
+  const [helpOpen, setHelpOpen] = useState(false);
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
 
@@ -159,6 +168,11 @@ export default function App() {
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("ch-theme", theme); }, [theme]);
   useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
   useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
+  // Window title 反映当前页（OS 任务栏/活动指示友好）
+  useEffect(() => {
+    const sub = selectedConv ? ` · ${selectedConv.user_title ?? selectedConv.title ?? "未命名"}` : "";
+    document.title = `Threadock · ${VIEW_LABEL[view]}${sub}`;
+  }, [view, selectedConv]);
 
   // 预算看门狗：预算/月用量/预测 → 全局预算条；超限且开启通知时弹一次（按月去重）
   const refreshBudget = async () => {
@@ -225,6 +239,12 @@ export default function App() {
         setCmdOpen((v) => !v);
         return;
       }
+      // ⌘? / Ctrl+? 唤起快捷键速查
+      if ((e.metaKey || e.ctrlKey) && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
       // ⌘1..8 直接跳页
       if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
         e.preventDefault();
@@ -237,14 +257,15 @@ export default function App() {
         return;
       }
       if (e.key === "Escape") {
-        if (cmdOpen) setCmdOpen(false);
+        if (helpOpen) setHelpOpen(false);
+        else if (cmdOpen) setCmdOpen(false);
         else if (sourcePanel) setSourcePanel(null);
         else if (searchResults) { setSearchResults(null); setSearchQuery(""); }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [sourcePanel, searchResults]);
+  }, [sourcePanel, searchResults, helpOpen, cmdOpen]);
 
   useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
 
@@ -350,10 +371,34 @@ export default function App() {
   };
 
   // ── actions ──
-  const doSearch = async () => {
+  const doSearch = async (overrideQuery?: string) => {
     // 空关键词 + 勾选「仅我的提问」= 全量我的提问；两者皆空则清空结果
-    if (!searchQuery.trim()) { setSearchResults(null); return; }
-    try { setSearchResults(await invoke<SearchResult[]>("search", { query: searchQuery })); } catch (e) { showError(e); }
+    const q = (overrideQuery ?? searchQuery).trim();
+    if (!q) { setSearchResults(null); return; }
+    try {
+      setSearchResults(await invoke<SearchResult[]>("search", { query: q }));
+      addSearchHistory(q);
+    } catch (e) { showError(e); }
+  };
+
+  // 搜索历史：localStorage 持久化最近 10 条；按使用时间倒序
+  const SEARCH_HISTORY_KEY = "ch-search-history";
+  const [searchHistory, setSearchHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]") as string[]; } catch { return []; }
+  });
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const addSearchHistory = (q: string) => {
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    setSearchHistory((prev) => {
+      const next = [trimmed, ...prev.filter((x) => x !== trimmed)].slice(0, 10);
+      try { localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next)); } catch { /* 静默 */ }
+      return next;
+    });
+  };
+  const clearSearchHistory = () => {
+    setSearchHistory([]);
+    try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* 静默 */ }
   };
 
   const jumpToSearchResult = async (r: SearchResult) => {
@@ -567,9 +612,25 @@ export default function App() {
             <div className="search-box">
               <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K 唤起命令面板)"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && doSearch()} />
-              <button onClick={doSearch}>搜索</button>
+                onKeyDown={(e) => e.key === "Enter" && doSearch()}
+                onFocus={() => setHistoryOpen(true)}
+                onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
+              <button onClick={() => doSearch()}>搜索</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
+              {historyOpen && searchHistory.length > 0 && !searchResults && (
+                <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
+                  <div className="search-history-head">
+                    <span>最近搜索</span>
+                    <button className="kb-copy" onClick={clearSearchHistory} title="清空历史">清空</button>
+                  </div>
+                  {searchHistory.map((q, i) => (
+                    <button key={i} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
+                      <span className="search-history-q">{q}</span>
+                      <span className="search-history-hint">↵</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
               onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
@@ -594,6 +655,18 @@ export default function App() {
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
+          <button
+            className="settings-toggle"
+            title="备份 (加密导出全部数据到 .chbak 文件)"
+            onClick={() => setSettingsOpen(true)}
+            style={{ fontSize: 13 }}
+          >💾</button>
+          <button
+            className="settings-toggle"
+            title="快捷键速查 (⌘?)"
+            onClick={() => setHelpOpen(true)}
+            style={{ fontSize: 13 }}
+          >?</button>
           <button
             className="settings-toggle"
             title="命令面板 (⌘K)"
@@ -629,6 +702,8 @@ export default function App() {
         )}
 
         {reportsOpen && <ReportModal onClose={() => setReportsOpen(false)} />}
+
+        {helpOpen && <HelpShortcuts onClose={() => setHelpOpen(false)} />}
 
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={setTheme}

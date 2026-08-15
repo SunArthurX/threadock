@@ -17,6 +17,11 @@ import { formatTime } from "./types";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
 
+/** 桌面端版本（与 package.json 对齐）。 */
+export const APP_VERSION = "0.1.0";
+/** 核心库版本（与 Cargo.toml workspace.package.version 对齐）。 */
+export const CORE_VERSION = "0.2.0";
+
 /** 可重置的最早日期（今天 - 31 天，一个月以上数据长存）。 */
 export function resetDateBounds(): { earliest: string; today: string } {
   const today = new Date().toISOString().slice(0, 10);
@@ -325,6 +330,8 @@ export default function SettingsView({
             <BackupSection />
           </section>
 
+          <AboutSection />
+
           <section className="settings-section danger">
             <h3>按时间重置</h3>
             <div className="settings-hint">
@@ -372,6 +379,60 @@ export default function SettingsView({
         </div>
       </div>
     </div>
+  );
+}
+
+/** 关于：版本号 + 关键依赖 + 文档链接。 */
+function AboutSection() {
+  // 依赖版本（与 package.json / Cargo.toml 对齐；本面板帮助用户/客服快速核对环境）
+  const deps: { name: string; version: string; role: string }[] = [
+    { name: "Tauri", version: "2.x", role: "桌面壳（Rust + WebView）" },
+    { name: "React", version: "18.3.x", role: "UI 框架" },
+    { name: "Vite", version: "5.4.x", role: "前端构建" },
+    { name: "TypeScript", version: "5.5.x", role: "类型系统" },
+    { name: "vitest", version: "3.2.7", role: "前端测试" },
+    { name: "Rust 工具链", version: "stable", role: "后端运行时" },
+  ];
+  const links: { label: string; url: string; hint: string }[] = [
+    { label: "📖 项目主页", url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图" },
+    { label: "🐛 报告问题", url: "https://github.com/sunqingguang/threadock/issues", hint: "Bug 反馈与功能建议" },
+    { label: "📝 更新日志", url: "https://github.com/sunqingguang/threadock/releases", hint: "各版本变更说明" },
+    { label: "💬 讨论", url: "https://github.com/sunqingguang/threadock/discussions", hint: "使用交流与最佳实践" },
+  ];
+  return (
+    <section className="settings-section">
+      <h3>关于</h3>
+      <div className="settings-row">
+        <span>应用名</span>
+        <span className="settings-value">Threadock Desktop</span>
+      </div>
+      <div className="settings-row">
+        <span>桌面版版本</span>
+        <span className="settings-value">v{APP_VERSION}</span>
+      </div>
+      <div className="settings-row">
+        <span>核心库版本</span>
+        <span className="settings-value">v{CORE_VERSION}</span>
+      </div>
+      <div className="settings-hint">关键依赖：</div>
+      <div className="about-deps">
+        {deps.map((d) => (
+          <div key={d.name} className="about-dep-row">
+            <span className="about-dep-name">{d.name}</span>
+            <span className="about-dep-ver mono">{d.version}</span>
+            <span className="about-dep-role">{d.role}</span>
+          </div>
+        ))}
+      </div>
+      <div className="settings-hint">相关链接：</div>
+      <div className="about-links">
+        {links.map((l) => (
+          <a key={l.url} className="about-link" href={l.url} target="_blank" rel="noreferrer" title={l.hint}>
+            {l.label}
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 

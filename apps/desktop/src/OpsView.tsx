@@ -7,6 +7,7 @@ import CostSection from "./CostSection";
 import SecuritySection from "./SecuritySection";
 import AssetsSection from "./AssetsSection";
 import type { Section, OpsOverview, ProviderUsage, ModelUsage, DailyUsage, ToolUsageRow, RiskyCall, AssetRow, AutomationRow, DirCost, CacheStat, AnomalyRow, AgentHealth, LatencyStat, TokenWaste, AgentBenchmark, AuditReport, PolicyRule, BudgetSettings } from "./ops-types";
+import { showToast } from "./toast";
 
 type Props = {
   section: Section;
@@ -185,7 +186,8 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
           loading={loading} onWeeklyReport={weeklyReport} onOpenReports={onOpenReports} />
       )}
       {section === "cost" && (
-        <CostSection summary={usageSummary} dirCosts={dirCosts} budget={budget} monthUsage={monthUsage}
+        <CostSection summary={usageSummary} dirCosts={dirCosts} byProvider={byProvider}
+          budget={budget} monthUsage={monthUsage}
           budgetInput={budgetInput} loading={loading}
           onBudgetInput={(f, v) => setBudgetInput((p) => ({ ...p, [f]: v }))}
           onSaveBudget={saveBudget} onRecalc={recalcCost} />
@@ -204,7 +206,24 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
           onDisposeFinding={async (fingerprint, status) => {
             try { await invoke("audit_finding_set_state", { fingerprint, status }); } catch { /* 失败静默：后台/可选操作 */ }
           }}
+          onBulkDisposeFindings={async (fingerprints, status) => {
+            for (const fp of fingerprints) {
+              try { await invoke("audit_finding_set_state", { fingerprint: fp, status }); } catch { /* 单条失败不影响整体 */ }
+            }
+          }}
           onRefreshAfterDispose={runAudit}
+          onImportPolicies={async (json) => {
+            try {
+              const arr = JSON.parse(json);
+              if (!Array.isArray(arr)) throw new Error("JSON 不是数组");
+              let n = 0;
+              for (const r of arr) {
+                try { await invoke("policy_upsert", { rule: r }); n++; } catch { /* 单条失败 */ }
+              }
+              await loadPolicies();
+              showToast(`✓ 已导入 ${n} 条策略规则`, "info");
+            } catch (e) { showToast(`导入失败：${String(e)}`, "error"); }
+          }}
           onToggleRisk={(id) => setExpandedRisk((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })}
           onJump={onJumpToConversation ?? (() => {})} />
       )}

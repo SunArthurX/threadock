@@ -1,8 +1,10 @@
 // 资产 Section：资产清单（按 agent 分组+类型颜色）+ 自动化任务（完成折叠）
+// 增强：点击资产弹详情（路径/版本/说明）+ 风险资产标红 + 复制资产 ID
 import { useState } from "react";
 import type { AssetRow, AutomationRow } from "./ops-types";
 import { usePager } from "./usePager";
 import { meta } from "./ops-types";
+import { showToast } from "./toast";
 
 interface Props {
   assets: AssetRow[];
@@ -32,6 +34,7 @@ export function toggleAutomationWatch(key: string): Set<string> {
 }
 export default function AssetsSection({ assets, automations, loading }: Props) {
   const [watch, setWatch] = useState<Set<string>>(loadAutomationWatch);
+  const [detail, setDetail] = useState<AssetRow | null>(null);
   const isDone = (s: string | null) => s?.includes("completed") || s?.includes("finished") || s?.includes("idle");
   const activeAll = [...automations.filter((a) => !isDone(a.status))].sort(
     (a, b) => Number(watch.has(`${b.provider}:${b.name}`)) - Number(watch.has(`${a.provider}:${a.name}`)),
@@ -39,6 +42,11 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
   const activePager = usePager(activeAll, 20);
   const activeSorted = activePager.slice;
   const done = automations.filter((a) => isDone(a.status));
+
+  const copyAssetField = async (label: string, text: string) => {
+    try { await navigator.clipboard.writeText(text); showToast(`✓ 已复制 ${label}`, "info"); }
+    catch { showToast("剪贴板不可用", "error"); }
+  };
 
   const autoRow = (a: AutomationRow, i: number) => {
     const wk = `${a.provider}:${a.name}`;
@@ -85,7 +93,12 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
               </div>
               <div className="assets-grid">
                 {items.map((a, i) => (
-                  <div key={i} className={`asset-item kind-${a.kind} ${a.risky_hits > 0 ? "risky" : ""}`}>
+                  <div
+                    key={i}
+                    className={`asset-item kind-${a.kind} ${a.risky_hits > 0 ? "risky" : ""}`}
+                    onClick={() => setDetail(a)}
+                    title="点击查看详情"
+                  >
                     <span className={`asset-kind-chip kind-${a.kind}`}>
                       {a.kind === "builtin_skill" ? "内置" : a.kind === "plugin" ? "插件" : a.kind === "mcp" ? "MCP" : "技能"}
                     </span>
@@ -128,6 +141,56 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
           )}
         </>)}
       </div>
+
+      {detail && (
+        <div className="settings-backdrop" onClick={() => setDetail(null)}>
+          <div className="settings-modal asset-detail-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-header">
+              <h2>
+                🧩 资产详情
+                <span className={`asset-kind-chip kind-${detail.kind}`} style={{ marginLeft: 8 }}>
+                  {detail.kind === "builtin_skill" ? "内置" : detail.kind === "plugin" ? "插件" : detail.kind === "mcp" ? "MCP" : "技能"}
+                </span>
+              </h2>
+              <button className="settings-close" onClick={() => setDetail(null)}>✕</button>
+            </div>
+            <div className="settings-body">
+              <div className="asset-detail-row">
+                <span className="asset-detail-label">名称</span>
+                <span className="mono">{detail.name}</span>
+                <button className="kb-copy" onClick={() => copyAssetField("资产名", detail.name)}>📋</button>
+              </div>
+              {detail.version && (
+                <div className="asset-detail-row">
+                  <span className="asset-detail-label">版本</span>
+                  <span className="mono">v{detail.version}</span>
+                </div>
+              )}
+              {detail.path && (
+                <div className="asset-detail-row">
+                  <span className="asset-detail-label">路径</span>
+                  <span className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>{detail.path}</span>
+                  <button className="kb-copy" onClick={() => copyAssetField("路径", detail.path ?? "")}>📋</button>
+                </div>
+              )}
+              <div className="asset-detail-row">
+                <span className="asset-detail-label">Provider</span>
+                <span className={`badge source ${detail.provider}`}>{meta(detail.provider).label}</span>
+              </div>
+              {detail.risky_hits != null && detail.risky_hits > 0 && (
+                <div className="asset-detail-row">
+                  <span className="asset-detail-label">风险点</span>
+                  <span className="risk-flag high">⚠ {detail.risky_hits} 处风险（按审计规则扫描）</span>
+                </div>
+              )}
+              <div className="asset-detail-row">
+                <span className="asset-detail-label">详情 JSON</span>
+                <button className="kb-copy" onClick={() => copyAssetField("完整 JSON", JSON.stringify(detail, null, 2))}>📋 复制</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

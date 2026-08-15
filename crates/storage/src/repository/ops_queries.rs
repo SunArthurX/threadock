@@ -30,6 +30,7 @@ pub struct ProviderUsage {
     pub total_tokens: i64,
     pub output_tokens: i64,
     pub errors: i64,
+    pub cost_usd: f64,
 }
 
 /// 按模型聚合。
@@ -388,7 +389,8 @@ impl Repository {
             "SELECT p.name, COUNT(*),
                     SUM(input_tokens + output_tokens + reasoning_tokens),
                     SUM(output_tokens),
-                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END)
+                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
+                    COALESCE(SUM(cost_usd), 0.0)
              FROM usage_records u JOIN providers p ON p.id = u.provider_id
              WHERE {clause}
              GROUP BY u.provider_id ORDER BY 3 DESC",
@@ -402,6 +404,7 @@ impl Repository {
                 total_tokens: r.get::<_, Option<i64>>(2)?.unwrap_or(0),
                 output_tokens: r.get::<_, Option<i64>>(3)?.unwrap_or(0),
                 errors: r.get::<_, Option<i64>>(4)?.unwrap_or(0),
+                cost_usd: r.get::<_, Option<f64>>(5)?.unwrap_or(0.0),
             })
         })?;
         let mut v = Vec::new();

@@ -1,8 +1,10 @@
 // 安全 Section：异常检测 + 安全审计 + 策略规则 + 风险调用
+// 增强：bulk 处置（全部忽略/全部误报）+ 策略规则 export/import JSON
 import { formatDuration } from "./charts";
 import { usePager } from "./usePager";
 import type { AnomalyRow, AuditReport, AuditFinding, PolicyRule, RiskyCall } from "./ops-types";
 import { meta, SEV_LABEL } from "./ops-types";
+import { showToast } from "./toast";
 
 interface Props {
   anomalies: AnomalyRow[];
@@ -22,8 +24,10 @@ interface Props {
   onPolicyInput: (field: string, value: string) => void;
   onTogglePolicyEnabled: (rule: PolicyRule) => void;
   onDisposeFinding: (fingerprint: string, status: "ignored" | "false_positive") => void;
+  onBulkDisposeFindings: (fingerprints: string[], status: "ignored" | "false_positive") => void;
   onRefreshAfterDispose: () => void;
   onToggleRisk: (id: string) => void;
+  onImportPolicies: (json: string) => void;
   onJump: (provider: string, sessionId: string, messageId: string | null) => void;
 }
 
@@ -39,6 +43,33 @@ export default function SecuritySection(p: Props) {
         <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>下一页 ›</button>
       </div>
     ) : null;
+
+  const visibleFindings = findings.slice(0, 50);
+  const handleBulk = async (status: "ignored" | "false_positive") => {
+    if (visibleFindings.length === 0) return;
+    const fps = visibleFindings.map((f) => f.fingerprint);
+    try {
+      await p.onBulkDisposeFindings(fps, status);
+      const label = status === "ignored" ? "忽略" : "标记为误报";
+      showToast(`✓ 已${label} ${fps.length} 条发现`, "info");
+      p.onRefreshAfterDispose();
+    } catch (e) { showToast(`失败：${String(e)}`, "error"); }
+  };
+
+  /** 策略规则 export 为 JSON 复制到剪贴板（用户可贴到 issue / 备份）。 */
+  const exportPolicies = async () => {
+    if (p.policies.length === 0) { showToast("无策略规则可导出", "warn"); return; }
+    const json = JSON.stringify(p.policies, null, 2);
+    try {
+      await navigator.clipboard.writeText(json);
+      showToast(`✓ 已复制 ${p.policies.length} 条策略规则（JSON）到剪贴板`, "info");
+    } catch { showToast("剪贴板不可用", "error"); }
+  };
+  const importPolicies = async () => {
+    const text = window.prompt("粘贴策略规则 JSON（覆盖现有同名规则）：");
+    if (!text) return;
+    p.onImportPolicies(text);
+  };
 
   return (
     <>
@@ -83,6 +114,8 @@ export default function SecuritySection(p: Props) {
           </button>
           {p.audit && p.audit.findings.length > 0 && (<>
             <button className="action-btn" onClick={p.onExportHtml}>⤓ 导出报告</button>
+            <button className="action-btn" onClick={() => handleBulk("ignored")} title="全部标记为「忽略」（本会话不再报）">⊘ 全部忽略</button>
+            <button className="action-btn" onClick={() => handleBulk("false_positive")} title="全部标记为「误报」（同类规则不再报）">⊗ 全部误报</button>
             <div className="ops-range">
               {([["all","全部"],["sensitive","敏感信息"],["dangerous_command","危险命令"]] as const).map(([v,l]) => (
                 <button key={v} className={`filter-chip ${p.auditKindFilter === v ? "active" : ""}`} onClick={() => p.onFilter(v)}>{l}</button>
@@ -114,7 +147,11 @@ export default function SecuritySection(p: Props) {
         )}
 
         <div className="policy-section">
-          <div className="budget-label">自定义策略规则（正则）</div>
+          <div className="budget-label">
+            自定义策略规则（正则）
+            <button className="kb-copy" style={{ marginLeft: "auto" }} onClick={exportPolicies} title="把当前规则复制为 JSON 粘贴到剪贴板">⤓ 导出</button>
+            <button className="kb-copy" onClick={importPolicies} title="粘贴 JSON 批量导入（同名规则覆盖）">⤒ 导入</button>
+          </div>
           <div className="policy-add">
             <input placeholder="规则名" value={p.newPolicy.name} onChange={(e) => p.onPolicyInput("name", e.target.value)} />
             <input placeholder="正则" value={p.newPolicy.pattern} onChange={(e) => p.onPolicyInput("pattern", e.target.value)} />
