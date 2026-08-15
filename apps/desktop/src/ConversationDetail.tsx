@@ -1,5 +1,7 @@
-// 会话详情组件（消息/时间线/事件/知识提取/导出）
+// 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制）
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
+import { showToast } from "./toast";
 
 interface Props {
   conv: Conversation;
@@ -23,8 +25,6 @@ interface Props {
   onRescanAudit: () => void;
 }
 
-import { useState } from "react";
-
 export default function ConversationDetail({
   conv, messages, events, completenessLabel, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
@@ -36,22 +36,123 @@ export default function ConversationDetail({
   const [downloadOpen, setDownloadOpen] = useState(false);
   /** 只看用户消息（我的提问）：消息视图与时间线同时生效。 */
   const [onlyUser, setOnlyUser] = useState(false);
-  const renderContent = (m: Message) => {
+  /** 消息内搜索（⌘F 唤起）：实时高亮 + 跳到第 N 个匹配。 */
+  const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchIdx, setSearchIdx] = useState(0);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ⌘F / Ctrl+F 唤起消息内搜索
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        // 顶层 ⌘K 面板是跳转 / 搜索会话；详情页的 ⌘F 是消息内搜索
+        e.preventDefault();
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus(), 30);
+        setTimeout(() => searchInputRef.current?.select(), 30);
+      } else if (e.key === "Escape" && searchOpen) {
+        setSearchOpen(false);
+        setSearch("");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchOpen]);
+
+  // 计算匹配：返回在 messages 中（按 onlyUser 过滤后）的索引列表
+  const visibleMsgs = onlyUser ? messages.filter((m) => m.role === "user") : messages;
+  const matches = useMemo(() => {
+    if (!search.trim()) return [] as number[];
+    const lower = search.toLowerCase();
+    return visibleMsgs
+      .map((m, i) => (m.content_text ?? "").toLowerCase().includes(lower) ? i : -1)
+      .filter((i) => i >= 0);
+  }, [visibleMsgs, search]);
+  // 切换 search / matches 时回正 idx
+  useEffect(() => { setSearchIdx(0); }, [search, matches.length]);
+  const currentMatch = matches[searchIdx] ?? -1;
+
+  const scrollToMessage = (idx: number) => {
+    const el = document.getElementById(`msg-${visibleMsgs[idx]?.id}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const nextMatch = () => {
+    if (matches.length === 0) return;
+    const next = (searchIdx + 1) % matches.length;
+    setSearchIdx(next);
+    scrollToMessage(matches[next]);
+  };
+  const prevMatch = () => {
+    if (matches.length === 0) return;
+    const prev = (searchIdx - 1 + matches.length) % matches.length;
+    setSearchIdx(prev);
+    scrollToMessage(matches[prev]);
+  };
+
+  /** 复制消息文本。 */
+  const copyMessage = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("✓ 消息已复制", "info");
+    } catch { showToast("剪贴板不可用", "error"); }
+  };
+  /** 复制 message_id（排错用：粘到 issue 里能直接定位 DB 行）。 */
+  const copyMsgId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      showToast(`✓ message_id 已复制 (${id.slice(0, 12)}…)`, "info");
+    } catch { showToast("剪贴板不可用", "error"); }
+  };
+  /** 复制整条会话的纯文本（user + assistant 顺序拼接，无 metadata）。 */
+  const copyAllMessages = async () => {
+    const lines = visibleMsgs.map((m) => {
+      const role = m.role === "user" ? "我" : m.role === "assistant" ? "AI" : m.role;
+      const ts = m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN") : "";
+      return `[${ts}] ${role}:\n${m.content_text ?? ""}`;
+    });
+    try {
+      await navigator.clipboard.writeText(lines.join("\n\n"));
+      showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
+    } catch { showToast("剪贴板不可用", "error"); }
+  };
+  /** 渲染消息内容：高亮搜索关键词 + 复制按钮 + 长消息折叠。 */
+  const renderContent = (m: Message, idx: number) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
     const isLong = text.length > COLLAPSE_THRESHOLD;
-    if (isLong && isCollapsed) {
-      return (<>
-        <div className="content">{text.slice(0, COLLAPSE_THRESHOLD)}…</div>
-        <button className="collapse-btn" onClick={() => onToggleCollapse(m.id)}>
-          展开剩余 {text.length - COLLAPSE_THRESHOLD} 字 ▾
-        </button>
-      </>);
+    const isCurrentMatch = currentMatch === idx && search.trim();
+    // 高亮匹配片段（不区分大小写，保留原大小写）
+    const lower = search.trim().toLowerCase();
+    const nodes: ReactNode[] = [];
+    if (lower) {
+      let i = 0;
+      const lowerText = text.toLowerCase();
+      while (i < text.length) {
+        const hit = lowerText.indexOf(lower, i);
+        if (hit < 0) { nodes.push(text.slice(i)); break; }
+        if (hit > i) nodes.push(text.slice(i, hit));
+        nodes.push(<mark key={`hl-${hit}`} className="msg-search-hit">{text.slice(hit, hit + lower.length)}</mark>);
+        i = hit + lower.length;
+      }
+    } else {
+      nodes.push(text);
     }
-    return (<>
-      <div className="content">{text}</div>
-      {isLong && <button className="collapse-btn" onClick={() => onToggleCollapse(m.id)}>收起 ▴</button>}
-    </>);
+    return (
+      <>
+        <div className="content">{nodes}</div>
+        <div className="msg-actions">
+          {isLong && (
+            <button className="msg-action-btn" onClick={() => onToggleCollapse(m.id)}>
+              {isCollapsed ? `展开剩余 ${text.length - COLLAPSE_THRESHOLD} 字 ▾` : "收起 ▴"}
+            </button>
+          )}
+          <button className="msg-action-btn" onClick={() => copyMessage(text)} title="复制本条消息">📋</button>
+          <button className="msg-action-btn" onClick={() => copyMsgId(m.id)} title="复制 message_id（排错）">🆔</button>
+        </div>
+        {isCurrentMatch && <div className="msg-match-marker" aria-hidden>🎯</div>}
+      </>
+    );
   };
 
   const renderTimeline = () => (
@@ -123,6 +224,14 @@ export default function ConversationDetail({
           👤 仅用户消息
         </button>
         <button className="action-btn" onClick={onToggleArchive}>{conv.archived ? "📤 取消归档" : "🗄 归档"}</button>
+        <button
+          className="action-btn"
+          onClick={() => setSearchOpen((v) => !v)}
+          title="在此会话内搜索消息（⌘F）"
+        >🔍 搜索消息</button>
+        <button className="action-btn" onClick={copyAllMessages} title={`复制 ${visibleMsgs.length} 条消息为纯文本`}>
+          📋 复制全部
+        </button>
         <div className="download-dropdown">
           <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
             {exporting ? "导出中…" : "⤓ 下载 ▾"}
@@ -138,6 +247,27 @@ export default function ConversationDetail({
           )}
         </div>
       </div>
+
+      {searchOpen && (
+        <div className="msg-search-bar">
+          <input
+            ref={searchInputRef}
+            className="msg-search-input"
+            value={search}
+            placeholder="在消息中搜索关键词…"
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? prevMatch() : nextMatch(); }
+            }}
+          />
+          <span className="msg-search-count">
+            {search.trim() ? (matches.length === 0 ? "无匹配" : `${searchIdx + 1} / ${matches.length}`) : ""}
+          </span>
+          <button className="msg-search-btn" onClick={prevMatch} disabled={matches.length === 0}>↑</button>
+          <button className="msg-search-btn" onClick={nextMatch} disabled={matches.length === 0}>↓</button>
+          <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); }} title="关闭（Esc）">✕</button>
+        </div>
+      )}
       {/* 标签行始终显示（含输入框） */}
       {(
         <div className="tag-row">
@@ -159,14 +289,14 @@ export default function ConversationDetail({
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
       {timelineMode && !loading && renderTimeline()}
-      {!timelineMode && (onlyUser ? messages.filter((m) => m.role === "user") : messages).map((m) => (
-        <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""}`}>
+      {!timelineMode && visibleMsgs.map((m, idx) => (
+        <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${currentMatch === idx ? "current-match" : ""}`}>
           <div className="role">
             <span className={`avatar ${m.role}`}>{m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}</span>
             <span className="role-label">{m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : m.role}</span>
             {m.created_at_ms && <span className="msg-time">{formatTime(m.created_at_ms)}</span>}
           </div>
-          {renderContent(m)}
+          {renderContent(m, idx)}
         </div>
       ))}
       {events.length > 0 && (<>

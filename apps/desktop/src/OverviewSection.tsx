@@ -49,6 +49,13 @@ export function toggleHiddenCard(key: CardKey): Set<string> {
   return cur;
 }
 
+/** 一键全部展开/收起。返回操作后的 Set。 */
+export function setAllHidden(show: boolean): Set<string> {
+  const next = show ? new Set<string>() : new Set(CARD_KEYS as readonly string[]);
+  localStorage.setItem("ch-cards-hidden", JSON.stringify([...next]));
+  return next;
+}
+
 export default function OverviewSection({
   overview, byProvider, byModel, timeseries, topTools, cacheStats,
   health, latency, waste, benchmark, cacheTrend, loading, onWeeklyReport, onOpenReports,
@@ -77,6 +84,22 @@ export default function OverviewSection({
 
   return (
     <>
+      <div className="card-toolbar">
+        <span style={{ fontSize: 11, opacity: 0.55 }}>卡片显隐</span>
+        <button
+          className="action-btn"
+          style={{ fontSize: 11 }}
+          onClick={() => setHidden(setAllHidden(false))}
+        >▣ 全部展开</button>
+        <button
+          className="action-btn"
+          style={{ fontSize: 11 }}
+          onClick={() => setHidden(setAllHidden(true))}
+        >▢ 全部收起</button>
+        <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.55 }}>
+          已隐藏 {hidden.size} / {CARD_KEYS.length}
+        </span>
+      </div>
       {overview ? <div className="ops-kpis">{kpis.map((k, i) => <AnimatedKpi key={i} {...k} />)}</div>
       : <div className="ops-kpis">{[0,1,2,3].map((i) => (
           <div key={i} className="ops-kpi skeleton"><div className="sk-line sk-lg" /><div className="sk-line" /><div className="sk-line sk-sm" /></div>

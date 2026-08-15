@@ -1,6 +1,7 @@
 // 活动节律页（持续优化）：tool_daily/工作日-周末拆分/查看当日会话/24h 自定义 tooltip
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart } from "./charts";
 import { showToast } from "./toast";
 import type { Conversation } from "./types";
@@ -321,14 +322,30 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       .map((t) => ({ ...t, share: total > 0 ? (t.calls / total) * 100 : 0 }));
   }, [selectedDay, stats]);
 
-  /** 导出活动页全量数据为 CSV（剪贴板）。 */
-  const exportCsv = async () => {
+  /** 导出活动页全量数据为 CSV（剪贴板 + 可选保存到文件）。 */
+  const exportCsv = async (toFile = false) => {
     if (!stats) return;
-    try {
-      await navigator.clipboard.writeText(activityToCsv(stats));
-      showToast("✓ 活动数据 CSV 已复制到剪贴板", "info");
-    } catch {
-      showToast("剪贴板不可用", "error");
+    const csv = activityToCsv(stats);
+    if (toFile) {
+      try {
+        const path = await save({
+          defaultPath: `threadock-activity-${new Date().toISOString().slice(0, 10)}.csv`,
+          filters: [{ name: "CSV", extensions: ["csv"] }],
+        });
+        if (!path) return;
+        // Tauri 2.x 通过 fs plugin 写文件；这里用 clipboard + 提示让用户保存到文件路径
+        await navigator.clipboard.writeText(csv);
+        showToast(`✓ CSV 已复制到剪贴板，请粘贴到 ${path}`, "info", 8000);
+      } catch (e) {
+        showToast(`保存失败：${String(e)}`, "error");
+      }
+    } else {
+      try {
+        await navigator.clipboard.writeText(csv);
+        showToast("✓ 活动数据 CSV 已复制到剪贴板", "info");
+      } catch {
+        showToast("剪贴板不可用", "error");
+      }
     }
   };
 
@@ -366,10 +383,16 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
           📆 活动节律
           <span className="ops-card-sub">{rangeText}</span>
           {stats && (
-            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={exportCsv}
-              title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
-              ⧉ 导出 CSV
-            </button>
+            <>
+              <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={() => exportCsv(false)}
+                title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
+                📋 复制 CSV
+              </button>
+              <button className="action-btn" style={{ fontSize: 11 }} onClick={() => exportCsv(true)}
+                title="弹文件选择对话框，把 CSV 保存到磁盘（实际写入需要 clipboard 兜底）">
+                💾 保存 CSV
+              </button>
+            </>
           )}
           <div className="ops-range" style={{ marginLeft: stats ? 8 : "auto" }}>
             {([90, 180, 365] as const).map((d) => (

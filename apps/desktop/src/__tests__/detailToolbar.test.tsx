@@ -20,11 +20,11 @@ const baseDetail = {
 };
 
 describe("详情页按钮清单", () => {
-  it("工具栏为：收藏/时间线/知识/重扫/仅用户消息/归档/下载（顺序一致）", () => {
+  it("工具栏为：收藏/时间线/知识/重扫/仅用户消息/归档/搜索消息/复制全部/下载（顺序一致）", () => {
     render(<ConversationDetail {...baseDetail} />);
     const bar = screen.getByText(/时间线/).closest("div.detail-actions")!;
     expect(bar).toBeTruthy();
-    const labels = ["收藏", "时间线", "知识", "重扫", "仅用户消息", "归档", "下载"];
+    const labels = ["收藏", "时间线", "知识", "重扫", "仅用户消息", "归档", "搜索消息", "复制全部", "下载"];
     let last = -1;
     for (const label of labels) {
       const idx = (bar.textContent ?? "").indexOf(label);
@@ -70,6 +70,27 @@ describe("详情页按钮清单", () => {
     render(<ConversationDetail {...baseDetail} />);
     const btn = screen.getByText("✨ 知识") as HTMLButtonElement;
     expect(btn).toBeDisabled();
+  });
+
+  it("消息内搜索：⌘F 唤起，输入关键词高亮并显示 N/M 计数", () => {
+    const messages = [
+      { id: "m1", role: "user", content_text: "数据库连接失败", sequence_number: 1, created_at_ms: 1000 },
+      { id: "m2", role: "assistant", content_text: "数据库超时，建议重试", sequence_number: 2, created_at_ms: 2000 },
+      { id: "m3", role: "user", content_text: "另一段对话", sequence_number: 3, created_at_ms: 3000 },
+    ];
+    const { container } = render(<ConversationDetail {...baseDetail} messages={messages} />);
+    // 唤起搜索
+    fireEvent.keyDown(window, { key: "f", metaKey: true } as KeyboardEvent);
+    const input = container.querySelector(".msg-search-input") as HTMLInputElement;
+    expect(input).toBeTruthy();
+    // 输入关键词
+    fireEvent.change(input, { target: { value: "数据库" } });
+    // 应该有 2 个匹配 + 高亮
+    expect(container.querySelectorAll(".msg-search-hit").length).toBe(2);
+    expect(container.querySelector(".msg-search-count")?.textContent).toContain("1 / 2");
+    // 没有匹配的消息不应有 hit
+    const lastMsg = container.querySelectorAll(".message")[2];
+    expect(lastMsg.querySelector(".msg-search-hit")).toBeNull();
   });
 });
 

@@ -33,6 +33,37 @@ const NAV_ITEMS = [
   ["knowledge", "📚", "知识库"], ["activity", "📆", "活动"], ["projects", "📁", "项目"],
 ] as const;
 
+/** 数据新鲜度徽标：拉 last_ops_sync_ms / last_conv_sync_ms，按时间窗口分绿/黄/橙。 */
+function FreshnessBadge() {
+  const [ms, setMs] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetch_ = async () => {
+      try {
+        const v = await invoke<string | null>("app_setting_get", { key: "last_conv_sync_ms" });
+        if (cancelled) return;
+        setMs(v ? Number(v) : null);
+      } catch { /* 静默 */ }
+    };
+    fetch_();
+    const id = window.setInterval(fetch_, 30_000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+  if (ms == null || ms === 0) {
+    return <span className="freshness-badge freshness-missing" title="尚无同步记录（点击导入会话）">⚪ 未同步</span>;
+  }
+  const ageMs = Date.now() - ms;
+  const min = Math.floor(ageMs / 60_000);
+  const fmt = (n: number) => n < 60 ? `${n} 分钟前` : n < 1440 ? `${Math.floor(n / 60)} 小时前` : `${Math.floor(n / 1440)} 天前`;
+  if (ageMs < 5 * 60_000) {
+    return <span className="freshness-badge freshness-fresh" title={`上次同步：${fmt(min)}`}>🟢 {fmt(min)}</span>;
+  }
+  if (ageMs < 30 * 60_000) {
+    return <span className="freshness-badge freshness-warn" title={`上次同步：${fmt(min)} — 建议点导入重新同步`}>🟡 {fmt(min)}</span>;
+  }
+  return <span className="freshness-badge freshness-stale" title={`上次同步：${fmt(min)} — 数据可能过期，点导入刷新`}>🟠 {fmt(min)}</span>;
+}
+
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const v = localStorage.getItem("ch-view");
@@ -558,6 +589,8 @@ export default function App() {
               costLimit={budgetInfo.costLimit} tokenLimit={budgetInfo.tokenLimit}
             />
           )}
+          {/* 数据新鲜度：5 分内绿 / 30 分内黄 / 超期橙（悬停看精确时间） */}
+          <FreshnessBadge />
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
@@ -658,6 +691,47 @@ export default function App() {
                     scope={scope} onScopeChange={setScope} availableProviders={availableProviders}
                     onFilter={setProviderFilter} onSelect={selectConversation}
                     onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite} onRestore={restoreConv}
+                    onBulkFavorite={async (ids, favorite) => {
+                      // 单次逐条 set_favorite：未来如需可换 batch 接口
+                      for (const id of ids) {
+                        try { await invoke("set_favorite", { id, favorite }); } catch {}
+                      }
+                      await loadConversations();
+                    }}
+                    onBulkArchive={async (ids, archived) => {
+                      for (const id of ids) {
+                        try { await invoke("set_archived", { id, archived }); } catch {}
+                      }
+                      await loadConversations();
+                    }}
+                    onBulkDelete={async (ids) => {
+                      // 软删前先记录原状态，撤销时能恢复
+                      const snapshot = conversations.filter((c) => ids.includes(c.id));
+                      for (const id of ids) {
+                        try { await invoke("delete_conversation", { id }); } catch {}
+                      }
+                      await loadConversations();
+                      if (snapshot.length > 0) {
+                        showToast(
+                          `🗑 已删除 ${snapshot.length} 条会话`,
+                          "info",
+                          6000,
+                          async () => {
+                            // 撤销：用 restore_conversation 命令（按 source_conversation_id）
+                            for (const c of snapshot) {
+                              try {
+                                await invoke("restore_conversation", {
+                                  id: c.source_conversation_id,
+                                });
+                              } catch { /* 单条失败不影响整体 */ }
+                            }
+                            await loadConversations();
+                            showToast(`↩ 已恢复 ${snapshot.length} 条会话`, "info");
+                          },
+                          "撤销删除",
+                        );
+                      }
+                    }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </div>
             <div className="panel">

@@ -1,6 +1,7 @@
-// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开 + 日期范围筛选）
+// 会话列表组件（筛选栏 + 收藏星标 + 归档/删除视图 + 子任务展开 + 日期范围筛选 + 批量操作）
 import { useMemo, useState } from "react";
 import { Conversation, sourceLabel, formatTime } from "./types";
+import { showToast } from "./toast";
 
 /** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
 export type ListScope = "all" | "favorite" | "archived" | "deleted";
@@ -35,6 +36,12 @@ interface Props {
   onToggleFavorite: (c: Conversation) => void;
   /** 已删除视图：恢复会话。 */
   onRestore?: (c: Conversation) => void;
+  /** 批量收藏（mode=true 收藏 / false 取消收藏） */
+  onBulkFavorite?: (ids: string[], favorite: boolean) => Promise<void> | void;
+  /** 批量归档 / 取消归档 */
+  onBulkArchive?: (ids: string[], archived: boolean) => Promise<void> | void;
+  /** 批量删除（软删 / 回收站） */
+  onBulkDelete?: (ids: string[]) => Promise<void> | void;
 }
 
 const SCOPES: [ListScope, string][] = [
@@ -47,8 +54,10 @@ export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
   expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onRestore,
+  onBulkFavorite, onBulkArchive, onBulkDelete,
 }: Props) {
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // 日期过滤：基于 started_at_ms（前端内存过滤，不增加后端请求）
   const dateFiltered = useMemo(() => {
     const cfg = DATE_FILTERS.find((d) => d.key === dateFilter);
@@ -56,12 +65,42 @@ export default function ConversationList({
     const cutoff = Date.now() - cfg.days * 86_400_000;
     return conversations.filter((c) => (c.started_at_ms ?? 0) >= cutoff);
   }, [conversations, dateFilter]);
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
+  const clearSelection = () => setSelectedIds(new Set());
+  const selectAllVisible = () => setSelectedIds(new Set(dateFiltered.map((c) => c.id)));
+
+  const runBulk = async (label: string, ids: string[], fn: ((ids: string[]) => Promise<void> | void) | undefined) => {
+    if (!fn) { showToast("批量操作不可用", "warn"); return; }
+    if (ids.length === 0) return;
+    try {
+      await fn(ids);
+      showToast(`✓ 已${label} ${ids.length} 条会话`, "info");
+      clearSelection();
+    } catch (e) { showToast(`失败：${String(e)}`, "error"); }
+  };
   const renderItem = (c: Conversation, isChild = false) => (
     <div key={c.id}>
       <div
-        className={`list-item ${isChild ? "child-item" : ""} ${selectedConv?.id === c.id ? "active" : ""}`}
+        className={`list-item ${isChild ? "child-item" : ""} ${selectedConv?.id === c.id ? "active" : ""} ${selectedIds.has(c.id) ? "selected-multi" : ""}`}
         onClick={() => onSelect(c)}
       >
+        {!isChild && (
+          <input
+            type="checkbox"
+            className="list-item-check"
+            checked={selectedIds.has(c.id)}
+            onClick={(e) => e.stopPropagation()}
+            onChange={() => toggleSelected(c.id)}
+            title="多选（可批量操作）"
+          />
+        )}
         <div className="title">
           {!isChild && c.child_count > 0 && (
             <span
@@ -115,6 +154,24 @@ export default function ConversationList({
         会话 ({dateFilter === "all" ? conversations.length : `${dateFiltered.length}/${conversations.length}`})
         {selectedWs && <span className="clear-ws" onClick={onClearWs}>✕</span>}
       </div>
+      {selectedIds.size > 0 && (
+        <div className="bulk-bar">
+          <span>已选 <b>{selectedIds.size}</b> 条</span>
+          <button className="bulk-btn" onClick={selectAllVisible} title="全选当前可见">全选</button>
+          <button className="bulk-btn" onClick={clearSelection} title="清空选择">清空</button>
+          {scope === "favorite" ? (
+            <button className="bulk-btn" onClick={() => runBulk("取消收藏", [...selectedIds], onBulkFavorite ? (ids) => onBulkFavorite(ids, false) : undefined)}>☆ 取消收藏</button>
+          ) : (
+            <button className="bulk-btn" onClick={() => runBulk("收藏", [...selectedIds], onBulkFavorite ? (ids) => onBulkFavorite(ids, true) : undefined)}>★ 收藏</button>
+          )}
+          {scope === "archived" ? (
+            <button className="bulk-btn" onClick={() => runBulk("取消归档", [...selectedIds], onBulkArchive ? (ids) => onBulkArchive(ids, false) : undefined)}>📤 取消归档</button>
+          ) : (
+            <button className="bulk-btn" onClick={() => runBulk("归档", [...selectedIds], onBulkArchive ? (ids) => onBulkArchive(ids, true) : undefined)}>🗄 归档</button>
+          )}
+          <button className="bulk-btn danger" onClick={() => runBulk("删除（入回收站）", [...selectedIds], onBulkDelete)}>🗑 删除</button>
+        </div>
+      )}
       <div className="scope-bar">
         {SCOPES.map(([s, label]) => (
           <button

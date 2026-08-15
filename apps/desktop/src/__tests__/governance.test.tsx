@@ -31,7 +31,7 @@ describe("toast store", () => {
   beforeEach(() => _resetToasts());
   it("弹出与自动消失（fake timers）", async () => {
     vi.useFakeTimers();
-    showToast("预算超限", "error");
+    showToast("预算超限", "error", 5000);
     expect(getToasts().length).toBe(1);
     expect(getToasts()[0].text).toBe("预算超限");
     vi.advanceTimersByTime(5100);
@@ -46,6 +46,19 @@ describe("toast store", () => {
     dismissToast(id);
     expect(getToasts().length).toBe(0);
     unsub();
+  });
+  it("带 undo 回调：toast 携带 undo 函数 + 默认文本「撤销」", () => {
+    const undo = vi.fn();
+    showToast("已删除 3 条", "info", 6000, undo);
+    const t = getToasts()[0];
+    expect(t.undo).toBe(undo);
+    expect(t.undoLabel).toBe("撤销");
+  });
+  it("带 undo + 自定义文本", () => {
+    const undo = vi.fn();
+    showToast("已重置", "warn", 6000, undo, "撤销重置");
+    const t = getToasts()[0];
+    expect(t.undoLabel).toBe("撤销重置");
   });
 });
 
