@@ -2616,3 +2616,6 @@ button {
 /* 项目优化 */
 .cost-ratio { height: 4px; border-radius: 2px; background: var(--border, #2a2e3a); margin-bottom: 8px; overflow: hidden; }
 .cost-ratio-fill { height: 100%; background: var(--accent, #4f8cff); opacity: .75; }
+
+/* 热力图空白/无数据格：极淡底色保持图轮廓可见（稀疏月份不像空白） */
+.heat-cell.empty { background: var(--border, #2a2e3a) !important; opacity: .35; border-radius: 2.5px; }

@@ -155,9 +155,9 @@ export default function ActivityView() {
                     {col.map((cell, ri) => (
                       <div
                         key={ri}
-                        className="heat-cell"
+                        className={`heat-cell ${!cell || cell.calls === 0 ? "empty" : ""}`}
                         style={{ background: cell ? heatColor(cell.calls, grid.max) : "transparent" }}
-                        title={cell ? `${cell.day} · ${cell.calls} 次调用` : ""}
+                        title={cell ? `${cell.day} · ${cell.calls} 次调用` : "无数据"}
                       />
                     ))}
                   </div>
