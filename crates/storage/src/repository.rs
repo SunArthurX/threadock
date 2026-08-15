@@ -510,6 +510,114 @@ impl Repository {
         Ok(map)
     }
 
+    /// 时间范围重置预览：统计 [start_ms, now] 内将被删除的数据量。
+    pub fn reset_range_stats(&self, start_ms: i64) -> StorageResult<(i64, i64, i64)> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let convs: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM conversations WHERE updated_at >= ?1",
+            params![start_ms],
+            |r| r.get(0),
+        )?;
+        let msgs: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM messages m JOIN conversations c ON c.id = m.conversation_id
+             WHERE c.updated_at >= ?1",
+            params![start_ms],
+            |r| r.get(0),
+        )?;
+        let usage: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM usage_records WHERE ts >= ?1",
+            params![start_ms],
+            |r| r.get(0),
+        )?;
+        Ok((convs, msgs, usage))
+    }
+
+    /// 时间范围重置下限：一个月（更早的数据不可重置，长存库中）。
+    pub const RESET_MIN_SPAN_MS: i64 = 31 * 24 * 3600 * 1000;
+
+    /// 时间范围重置：删除 [start_ms, now] 内的会话及其级联数据 + 指标记录。
+    /// 返回删除的会话数与消息 id 列表（供调用方同步删搜索索引）。
+    ///
+    /// 硬性约束：开始时间不得早于 31 天前（一个月以上数据长存）。
+    /// 性能（真实库实测迭代）：FK CASCADE + FTS5 触发器单事务 686s →
+    /// 分批 228s → 禁触发器删除 + FTS 一次性 rebuild 秒级。
+    pub fn reset_range(&self, start_ms: i64) -> StorageResult<(i64, Vec<String>)> {
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        if now_ms - start_ms > Self::RESET_MIN_SPAN_MS {
+            return Err(StorageError::NotFound {
+                entity: "reset_range",
+                id: "开始时间过早：一个月以上的数据不能重置".into(),
+            });
+        }
+        let mut conn = self.conn.lock().expect("mutex poisoned");
+        let conv_ids: Vec<String> = {
+            let mut stmt = conn.prepare("SELECT id FROM conversations WHERE updated_at >= ?1")?;
+            let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let n = conv_ids.len() as i64;
+        if conv_ids.is_empty() {
+            return Ok((0, Vec::new()));
+        }
+        // ① 删除前收集消息 id（只读，供索引级联删除）
+        let msg_ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM messages WHERE conversation_id IN (
+                     SELECT id FROM conversations WHERE updated_at >= ?1)",
+            )?;
+            let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        // ② 禁用 FTS 行触发器（删除走批量，索引删除改由 rebuild 承担）
+        for trig in ["messages_ai_fts", "messages_ad_fts", "messages_au_fts"] {
+            let _ = conn.execute(&format!("DROP TRIGGER IF EXISTS {trig}"), []);
+        }
+        let del_result: StorageResult<()> = (|| {
+            // ③ 分批删子表 + 主表（每批独立短事务）
+            for chunk in conv_ids.chunks(200) {
+                let tx = conn.transaction()?;
+                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                for table in [
+                    "messages",
+                    "events",
+                    "conversation_tags",
+                    "knowledge_extractions",
+                ] {
+                    let sql =
+                        format!("DELETE FROM {table} WHERE conversation_id IN ({placeholders})");
+                    tx.execute(&sql, rusqlite::params_from_iter(chunk.iter()))?;
+                }
+                let sql_del = format!("DELETE FROM conversations WHERE id IN ({placeholders})");
+                tx.execute(&sql_del, rusqlite::params_from_iter(chunk.iter()))?;
+                drop(tx.commit());
+            }
+            // 指标按时间分批
+            for table in ["usage_records", "tool_call_records"] {
+                loop {
+                    let deleted = conn.execute(
+                        &format!(
+                            "DELETE FROM {table} WHERE rowid IN (
+                                 SELECT rowid FROM {table} WHERE ts >= ?1 LIMIT 2000)"
+                        ),
+                        params![start_ms],
+                    )?;
+                    if deleted == 0 {
+                        break;
+                    }
+                }
+            }
+            Ok(())
+        })();
+        // ④ 无论成败：恢复触发器 + 全文索引一次性重建（保持结构一致）
+        conn.execute_batch(crate::schema::SCHEMA_FTS_TRIGGERS)?;
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+            [],
+        )?;
+        del_result?;
+        Ok((n, msg_ids))
+    }
+
     /// 单会话 UI 标志位（favorite/is_archived，DB-only 字段）。
     pub fn get_conversation_flags(&self, id: &str) -> StorageResult<(bool, bool)> {
         let conn = self.conn.lock().expect("mutex poisoned");

@@ -178,6 +178,18 @@
 |------|------|
 | path, password, targetDir | `{db_size, raw_count}` |
 
+### `reset_range`
+
+| 参数 | 返回 |
+|------|------|
+| startMs | `{conversations, messages}` |
+
+### `reset_range_preview`
+
+| 参数 | 返回 |
+|------|------|
+| startMs | `{conversations, messages, usage_records}` |
+
 ### `list_conversations`
 
 | 参数 | 返回 |

@@ -139,6 +139,8 @@ pub fn run() {
             knowledge_base_list,
             backup_create,
             backup_restore,
+            reset_range,
+            reset_range_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

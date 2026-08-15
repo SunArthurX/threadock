@@ -44,10 +44,32 @@ fn main() {
         ("recent_user_prompts", "limit?", "PromptRow[]"),
         ("list_reports", "-", "ReportFile[]"),
         ("read_report", "name", "string"),
-        ("knowledge_extract_all", "force?", "{conversations, extracted, skipped}"),
-        ("knowledge_base_list", "-", "{todos, decisions, top_commands, top_files, ...}"),
-        ("backup_create", "path, password", "{db_size, raw_count, raw_bytes}"),
-        ("backup_restore", "path, password, targetDir", "{db_size, raw_count}"),
+        (
+            "knowledge_extract_all",
+            "force?",
+            "{conversations, extracted, skipped}",
+        ),
+        (
+            "knowledge_base_list",
+            "-",
+            "{todos, decisions, top_commands, top_files, ...}",
+        ),
+        (
+            "backup_create",
+            "path, password",
+            "{db_size, raw_count, raw_bytes}",
+        ),
+        (
+            "backup_restore",
+            "path, password, targetDir",
+            "{db_size, raw_count}",
+        ),
+        ("reset_range", "startMs", "{conversations, messages}"),
+        (
+            "reset_range_preview",
+            "startMs",
+            "{conversations, messages, usage_records}",
+        ),
         (
             "list_conversations",
             "workspaceId?, provider?",

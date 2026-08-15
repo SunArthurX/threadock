@@ -68,7 +68,6 @@ export default function App() {
   const [timelineMode, setTimelineMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [resetting, setResetting] = useState(false);
   const [importMenu, setImportMenu] = useState(false);
   // 未导入新内容计数（导入按钮红点）：同步/导入完成后重算
   const [newCount, setNewCount] = useState<import("./ImportMenu").NewCount | null>(null);
@@ -398,22 +397,14 @@ export default function App() {
     alert(`批量增量导入\n新增 ${ok} 条${fail > 0 ? ` · 失败 ${fail} 条` : ""}${skipped > 0 ? ` · 已最新 ${skipped} 条` : ""}`);
   };
 
+  /** 重置后的统一刷新（实际删除由设置弹窗的 reset_range 命令完成）。 */
   const resetData = async () => {
-    if (resetting) { setError("正在重置中，请稍候…"); return; }
-    setResetting(true); setError(null);
-    try {
-      await invoke("reset_all_data");
-      setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
-      setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
-      setChildConvs({}); setExpandedParents(new Set());
-      showToast("✓ 已重置（保留了脱敏规则与治理配置），正在后台重新导入（顶部有进度条）…", "info", 8000);
-    } catch (e) { showError(e); }
-    setResetting(false);
-    // 重置后红点/来源显隐立即归零（清旧值防误导；精确计数由后台重算/同步返回值带回）
+    setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
+    setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
+    setChildConvs({}); setExpandedParents(new Set());
     setNewCount(null);
     refreshNewCount();
     refreshProviders();
-    // 重新导入放后台静默执行（进度条仍可见；全量重导分钟级）
     window.setTimeout(() => autoSync(true), 1500);
   };
 
@@ -567,7 +558,7 @@ export default function App() {
             retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
             notifyOnExceed={notifyOnExceed} onNotifyOnExceedChange={changeNotifyOnExceed}
             onNavigate={(v) => setView(v)}
-            onReset={resetData} resetting={resetting}
+            onReset={resetData} resetting={false}
             onClose={() => setSettingsOpen(false)} />
         )}
 

@@ -264,6 +264,91 @@ fn rebuild_index_inner(
     Ok(n)
 }
 
+/// 时间范围重置下限：一个月（更早的数据不可重置，长存库中）。
+pub(crate) const RESET_MIN_START_MS: i64 = 31 * 24 * 3600 * 1000;
+
+/// 范围重置预览：[start, now] 内将删除的会话/消息/指标条数。
+#[tauri::command]
+pub(crate) async fn reset_range_preview(
+    state: tauri::State<'_, DaemonState>,
+    start_ms: i64,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let (convs, msgs, usage) = repo
+        .reset_range_stats(start_ms)
+        .map_err(|e| storage_err(e))?;
+    Ok(serde_json::json!({
+        "conversations": convs,
+        "messages": msgs,
+        "usage_records": usage,
+    }))
+}
+
+/// 按时间范围重置：删除开始时间之后的数据；一个月以上数据不可重置（长存）。
+/// 会话删除同步清理搜索索引文档；全部动作记入治理流水。
+#[tauri::command]
+pub(crate) async fn reset_range(
+    state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
+    start_ms: i64,
+) -> Result<serde_json::Value, String> {
+    let now_ms =
+        (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    if now_ms - start_ms > RESET_MIN_START_MS {
+        return Err(format!(
+            "开始时间过早：一个月以上的数据不能重置（最早 {}）",
+            crate::commands::maintenance::earliest_reset_date_label(now_ms)
+        ));
+    }
+    let app2 = app.clone();
+    let r = run_blocking(move || {
+        let (convs, msg_ids) = {
+            let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+            repo.reset_range(start_ms).map_err(|e| storage_err(e))?
+        };
+        // 搜索索引：删除范围内消息文档
+        if !msg_ids.is_empty() {
+            let idx = state.search_index.lock().map_err(|e| storage_err(e))?;
+            let mut writer = idx
+                .writer(ch_search::index::DEFAULT_WRITER_HEAP)
+                .map_err(|e| search_err(e))?;
+            for mid in &msg_ids {
+                let _ = idx.delete_message(&mut writer, mid);
+            }
+            idx.commit(writer).map_err(|e| search_err(e))?;
+        }
+        {
+            let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+            let _ = repo.log_governance_action(
+                "reset_range",
+                None,
+                None,
+                "ok",
+                Some(&format!(
+                    r#"{{"start_ms": {start_ms}, "conversations": {convs}, "messages": {}}}"#,
+                    msg_ids.len()
+                )),
+            );
+        }
+        Ok::<serde_json::Value, String>(serde_json::json!({
+            "conversations": convs,
+            "messages": msg_ids.len(),
+        }))
+    })?;
+    let _ = app2.emit(
+        "sync_progress",
+        serde_json::json!({ "current": 1, "total": 1, "detail": "done", "finished": true }),
+    );
+    Ok(r)
+}
+
+/// 最早可重置日期（本地展示用，YYYY-MM-DD）。
+pub(crate) fn earliest_reset_date_label(now_ms: i64) -> String {
+    let t = time::OffsetDateTime::from_unix_timestamp((now_ms - RESET_MIN_START_MS) / 1000)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+    format!("{:04}-{:02}-{:02}", t.year(), u8::from(t.month()), t.day())
+}
+
 #[cfg(test)]
 mod tests {
     use ch_daemon::{DaemonState, DaemonStateConfig};
@@ -484,5 +569,62 @@ mod reset_timing_tests {
             .count_conversations()
             .expect("SQL execution failed");
         assert_eq!(count, 0, "重置后会话必须为 0");
+    }
+}
+
+#[cfg(test)]
+mod reset_range_tests {
+    use super::*;
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    #[test]
+    #[ignore = "依赖本机真实 app 数据副本"]
+    fn reset_range_keeps_old_data_on_real_copy() {
+        let app = std::path::PathBuf::from(std::env::var("HOME").expect("unexpected None"))
+            .join("Library/Application Support/com.threadock.desktop");
+        if !app.join("threadock.db").exists() {
+            panic!("本机无真实 app 数据");
+        }
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        std::fs::copy(app.join("threadock.db"), dir.path().join("threadock.db"))
+            .expect("file I/O failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+
+        let before = state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .count_conversations()
+            .expect("SQL execution failed");
+        // 31 天下限校验：更早的 start 被拒
+        let too_old = now_ms - RESET_MIN_START_MS - 86_400_000;
+        let rejected = reset_range_inner(&state, too_old);
+        assert!(rejected.is_err(), "一个月以上的开始时间必须被拒绝");
+
+        // 重置最近 7 天
+        let r = reset_range_inner(&state, now_ms - 7 * 86_400_000).expect("range reset");
+        let after = state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .count_conversations()
+            .expect("SQL execution failed");
+        println!("before={before} deleted={} after={after}", r.0);
+        assert!(after < before, "范围内会话必须被删除");
+        assert!(
+            after > 0,
+            "一个月以上的老数据必须保留（真实库 977 会话不可能全在 7 天内）"
+        );
+        assert_eq!(before - after, r.0 as i64, "删除数与返回一致");
+    }
+
+    fn reset_range_inner(state: &DaemonState, start_ms: i64) -> Result<(i64, Vec<String>), String> {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.reset_range(start_ms).map_err(|e| storage_err(e))
     }
 }

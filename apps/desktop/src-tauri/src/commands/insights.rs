@@ -303,3 +303,40 @@ pub(crate) async fn knowledge_base_list(
         "top_files": top_files,
     }))
 }
+
+#[cfg(test)]
+mod activity_tests {
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    /// 真实库副本验证 activity_stats 三块都有数据（页面空数据排查）。
+    /// cargo test --lib activity_real -- --ignored --nocapture
+    #[test]
+    #[ignore = "依赖本机真实 app 数据副本"]
+    fn activity_stats_on_real_copy() {
+        let app = std::path::PathBuf::from(std::env::var("HOME").expect("unexpected None"))
+            .join("Library/Application Support/com.threadock.desktop");
+        if !app.join("threadock.db").exists() {
+            panic!("本机无真实 app 数据");
+        }
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        std::fs::copy(app.join("threadock.db"), dir.path().join("threadock.db"))
+            .expect("file I/O failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let (heat, hours, tools) = repo.activity_stats(365).expect("activity");
+        println!(
+            "heat={} hours={} tools={}",
+            heat.len(),
+            hours.len(),
+            tools.len()
+        );
+        println!("heat sample: {:?}", heat.first());
+        println!("hours sample: {:?}", hours.first());
+        assert!(!heat.is_empty(), "热力图必须有数据");
+        assert!(!hours.is_empty(), "时段分布必须有数据");
+        assert!(!tools.is_empty(), "工具趋势必须有数据");
+    }
+}

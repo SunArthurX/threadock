@@ -1326,9 +1326,9 @@ impl Repository {
         let mut hours = Vec::new();
         {
             let mut stmt = conn.prepare(
-                "SELECT strftime('%H', ts/1000,'unixepoch','localtime') AS h, COUNT(*)
+                "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h, COUNT(*)
                  FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
-                 GROUP BY h ORDER BY CAST(h AS INTEGER)",
+                 GROUP BY h ORDER BY h",
             )?;
             let rows = stmt.query_map(params![cutoff], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?)))?;
             for row in rows {

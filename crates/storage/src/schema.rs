@@ -389,6 +389,45 @@ CREATE TABLE IF NOT EXISTS import_state (
 CREATE INDEX IF NOT EXISTS idx_import_state_provider ON import_state(provider_id);
 ";
 
+/// FTS5 行触发器（范围重置临时禁用后重建用）。
+pub const SCHEMA_FTS_TRIGGERS: &str = r"
+CREATE TRIGGER IF NOT EXISTS messages_ai_fts AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(message_id, conversation_id, provider, workspace_id, role, title, body)
+    SELECT
+        NEW.id,
+        NEW.conversation_id,
+        (SELECT p.name FROM conversations c JOIN providers p ON p.id = c.provider_id WHERE c.id = NEW.conversation_id),
+        (SELECT c.workspace_id FROM conversations c WHERE c.id = NEW.conversation_id),
+        NEW.role,
+        (SELECT COALESCE(c.user_title, c.title) FROM conversations c WHERE c.id = NEW.conversation_id),
+        COALESCE(NEW.content_text, '');
+END;
+
+-- 触发器：messages DELETE 后清理 FTS
+CREATE TRIGGER IF NOT EXISTS messages_ad_fts AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE message_id = OLD.id;
+END;
+
+-- 触发器：messages UPDATE 后重建对应 FTS 行
+CREATE TRIGGER IF NOT EXISTS messages_au_fts AFTER UPDATE ON messages BEGIN
+    DELETE FROM messages_fts WHERE message_id = OLD.id;
+    INSERT INTO messages_fts(message_id, conversation_id, provider, workspace_id, role, title, body)
+    SELECT
+        NEW.id,
+        NEW.conversation_id,
+        (SELECT p.name FROM conversations c JOIN providers p ON p.id = c.provider_id WHERE c.id = NEW.conversation_id),
+        (SELECT c.workspace_id FROM conversations c WHERE c.id = NEW.conversation_id),
+        NEW.role,
+        (SELECT COALESCE(c.user_title, c.title) FROM conversations c WHERE c.id = NEW.conversation_id),
+        COALESCE(NEW.content_text, '');
+END;
+";
+
+/// V12：范围重置/按时间检索走索引（一个月以上数据长存场景）。
+pub const SCHEMA_V12: &str = r"
+CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
+";
+
 /// V11：审计发现处置状态（忽略/误报白名单，M4 处置闭环）。
 pub const SCHEMA_V11: &str = r"
 CREATE TABLE IF NOT EXISTS audit_finding_states (

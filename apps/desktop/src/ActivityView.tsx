@@ -1,4 +1,4 @@
-// 活动节律页：按天热力图 + 24 小时分布 + 工具月度趋势
+// 活动节律页（5 轮优化版）：统计卡/时间范围/月份标签/时段分组/Top3 工具线
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BarChart } from "./charts";
@@ -19,23 +19,35 @@ export function heatColor(calls: number, max: number): string {
   return "#93c5fd";
 }
 
-/** 生成 GitHub 风格热力图的列（周）×行（周内天）布局数据。 */
-export function buildHeatGrid(cells: { day: string; calls: number }[]): { cols: ({ day: string; calls: number } | null)[][]; max: number } {
-  if (cells.length === 0) return { cols: [], max: 0 };
+/** 生成 GitHub 风格热力图布局 + 每列首月份标签。 */
+export function buildHeatGrid(cells: { day: string; calls: number }[]): {
+  cols: ({ day: string; calls: number } | null)[][];
+  labels: { col: number; label: string }[];
+  max: number;
+} {
+  if (cells.length === 0) return { cols: [], labels: [], max: 0 };
   const byDay = new Map(cells.map((c) => [c.day, c]));
   const first = new Date(cells[0].day + "T00:00:00");
   const last = new Date(cells[cells.length - 1].day + "T00:00:00");
   const max = Math.max(...cells.map((c) => c.calls), 1);
   const cols: ({ day: string; calls: number } | null)[][] = [];
+  const labels: { col: number; label: string }[] = [];
   let cur: ({ day: string; calls: number } | null)[] = new Array(first.getDay()).fill(null);
+  let lastMonth = -1;
+  let colIdx = 0;
   const d = new Date(first);
   while (d <= last) {
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     const c = byDay.get(key);
     cur.push(c ? { day: key, calls: c.calls } : { day: key, calls: 0 });
+    if (d.getMonth() !== lastMonth) {
+      labels.push({ col: colIdx, label: `${d.getMonth() + 1}月` });
+      lastMonth = d.getMonth();
+    }
     if (cur.length === 7) {
       cols.push(cur);
       cur = [];
+      colIdx += 1;
     }
     d.setDate(d.getDate() + 1);
   }
@@ -43,66 +55,114 @@ export function buildHeatGrid(cells: { day: string; calls: number }[]): { cols: 
     while (cur.length < 7) cur.push(null);
     cols.push(cur);
   }
-  return { cols, max };
+  return { cols, labels, max };
+}
+
+/** 时段分组（凌晨/上午/下午/晚上）。 */
+export function dayPart(hour: number): string {
+  if (hour < 6) return "凌晨";
+  if (hour < 12) return "上午";
+  if (hour < 18) return "下午";
+  return "晚上";
 }
 
 export default function ActivityView() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [days, setDays] = useState(365);
 
   useEffect(() => {
     (async () => {
-      try { setStats(await invoke<Stats>("activity_stats", { days: 365 })); }
+      try { setStats(await invoke<Stats>("activity_stats", { days })); }
       catch { /* 空库静默 */ }
     })();
-  }, []);
+  }, [days]);
 
   const totalCalls = (stats?.heatmap ?? []).reduce((a, b) => a + b.calls, 0);
-  const totalDays = (stats?.heatmap ?? []).filter((c) => c.calls > 0).length;
+  const activeDays = (stats?.heatmap ?? []).filter((c) => c.calls > 0).length;
+  const avgPerDay = activeDays > 0 ? Math.round(totalCalls / activeDays) : 0;
+  const peak = (stats?.hourly ?? []).reduce((a, b) => (b.calls > (a?.calls ?? -1) ? b : a), { hour: 0, calls: 0 });
   const grid = buildHeatGrid(stats?.heatmap ?? []);
+  const labelAt = new Map(grid.labels.map((l) => [l.col, l.label]));
 
-  // 工具趋势：每月取 Top 5 工具
+  // 工具趋势：全局 Top3 工具的月度线（BarChart 展示）
   const trend = (() => {
     if (!stats) return [];
+    const toolTotals = new Map<string, number>();
+    for (const t of stats.tools_trend) {
+      toolTotals.set(t.tool, (toolTotals.get(t.tool) ?? 0) + t.calls);
+    }
+    const top3 = [...toolTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
     const byMonth = new Map<string, { tool: string; calls: number }[]>();
     for (const t of stats.tools_trend) {
+      if (!top3.includes(t.tool)) continue;
       const arr = byMonth.get(t.month) ?? [];
       arr.push({ tool: t.tool, calls: t.calls });
       byMonth.set(t.month, arr);
     }
-    const out: { label: string; value: number; tool?: string }[] = [];
+    const out: { label: string; value: number }[] = [];
     for (const [month, tools] of [...byMonth.entries()].sort()) {
-      const top = tools.sort((a, b) => b.calls - a.calls).slice(0, 5);
-      for (const t of top) out.push({ label: month.slice(2) + " " + t.tool, value: t.calls, tool: t.tool });
+      for (const t of tools) out.push({ label: `${month.slice(2)} ${t.tool}`, value: t.calls });
     }
-    return out.slice(-40);
+    return out;
   })();
+
+  // 时段汇总
+  const parts = (() => {
+    const m = new Map<string, number>([["凌晨", 0], ["上午", 0], ["下午", 0], ["晚上", 0]]);
+    for (const h of stats?.hourly ?? []) {
+      m.set(dayPart(h.hour), (m.get(dayPart(h.hour)) ?? 0) + h.calls);
+    }
+    return m;
+  })();
+  const partsMax = Math.max(...parts.values(), 1);
 
   return (
     <div className="activity-page">
       <div className="ops-card">
         <div className="ops-card-title">
           📆 活动节律
-          <span className="ops-card-sub">
-            {stats ? `近一年 ${totalCalls.toLocaleString()} 次工具调用 · ${totalDays} 个活跃日` : "加载中…"}
-          </span>
+          <div className="ops-range" style={{ marginLeft: "auto" }}>
+            {([90, 180, 365] as const).map((d) => (
+              <button key={d} className={`filter-chip ${days === d ? "active" : ""}`} onClick={() => setDays(d)}>
+                {d === 365 ? "1 年" : `${d} 天`}
+              </button>
+            ))}
+          </div>
         </div>
+        <div className="kb-grid">
+          <div className="kb-stat"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
+          <div className="kb-stat"><b>{activeDays}</b><span>活跃天数</span></div>
+          <div className="kb-stat"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
+          <div className="kb-stat"><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
+        </div>
+      </div>
+
+      <div className="ops-card">
+        <div className="ops-card-title">每日协作热力图</div>
         {grid.cols.length === 0 ? (
-          <div className="ops-table-empty">暂无工具调用数据</div>
+          <div className="ops-table-empty">暂无工具调用数据（同步指标后生成）</div>
         ) : (
           <div className="heatmap-wrap">
-            <div className="heatmap">
-              {grid.cols.map((col, ci) => (
-                <div key={ci} className="heatmap-col">
-                  {col.map((cell, ri) => (
-                    <div
-                      key={ri}
-                      className="heat-cell"
-                      style={{ background: cell ? heatColor(cell.calls, grid.max) : "transparent" }}
-                      title={cell ? `${cell.day} · ${cell.calls} 次调用` : ""}
-                    />
-                  ))}
-                </div>
-              ))}
+            <div className="heatmap-scroll">
+              <div className="heatmap-months">
+                {grid.cols.map((_, ci) => (
+                  <span key={ci} className="heat-month-label">{labelAt.get(ci) ?? ""}</span>
+                ))}
+              </div>
+              <div className="heatmap">
+                {grid.cols.map((col, ci) => (
+                  <div key={ci} className="heatmap-col">
+                    {col.map((cell, ri) => (
+                      <div
+                        key={ri}
+                        className="heat-cell"
+                        style={{ background: cell ? heatColor(cell.calls, grid.max) : "transparent" }}
+                        title={cell ? `${cell.day} · ${cell.calls} 次调用` : ""}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
             </div>
             <div className="heat-legend">
               少
@@ -116,19 +176,30 @@ export default function ActivityView() {
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">⏰ 24 小时分布（什么时段和 AI 协作最多）</div>
+        <div className="ops-card-title">⏰ 24 小时分布</div>
         {(stats?.hourly ?? []).length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
-          <BarChart
-            data={(stats?.hourly ?? []).map((h) => ({ label: `${h.hour}`, value: h.calls }))}
-            height={120}
-          />
+          <>
+            <div className="day-parts">
+              {[...parts.entries()].map(([name, v]) => (
+                <div key={name} className="day-part">
+                  <span className="day-part-name">{name}</span>
+                  <div className="day-part-bar"><div className="day-part-fill" style={{ width: `${(v / partsMax) * 100}%` }} /></div>
+                  <span className="day-part-val">{v.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+            <BarChart
+              data={(stats?.hourly ?? []).map((h) => ({ label: `${h.hour}`, value: h.calls }))}
+              height={110}
+            />
+          </>
         )}
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">🔧 工具月度趋势（每月 Top 5）</div>
+        <div className="ops-card-title">🔧 Top 工具月度趋势（用量前 3）</div>
         {trend.length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
-          <BarChart data={trend.map((t) => ({ label: t.label, value: t.value }))} height={140} />
+          <BarChart data={trend} height={130} />
         )}
       </div>
     </div>

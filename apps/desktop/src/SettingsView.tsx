@@ -11,10 +11,18 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { showToast } from "./toast";
 import { formatTime } from "./types";
 
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
+
+/** 可重置的最早日期（今天 - 31 天，一个月以上数据长存）。 */
+export function resetDateBounds(): { earliest: string; today: string } {
+  const today = new Date().toISOString().slice(0, 10);
+  const earliest = new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10);
+  return { earliest, today };
+}
 
 const INTERVAL_OPTIONS: [number, string][] = [
   [0, "关闭"],
@@ -100,6 +108,16 @@ export default function SettingsView({
     return () => { un.then((f) => f()); };
   }, []);
   const [confirmText, setConfirmText] = useState("");
+  // 时间范围重置（一个月以上数据长存）；日期常量模块级一次计算（render 纯度）
+  const [resetDate, setResetDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const bounds = resetDateBounds();
+  const [rangePreview, setRangePreview] = useState<{ conversations: number; messages: number; usage_records: number } | null>(null);
+  const loadRangePreview = async () => {
+    if (!resetDate) return;
+    try {
+      setRangePreview(await invoke("reset_range_preview", { startMs: new Date(resetDate + "T00:00:00").getTime() }));
+    } catch { /* 静默 */ }
+  };
   const [lastConvSync, setLastConvSync] = useState<number | null>(null);
   const [lastOpsSync, setLastOpsSync] = useState<number | null>(null);
   const [opsSyncing, setOpsSyncing] = useState(false);
@@ -132,12 +150,21 @@ export default function SettingsView({
     setOpsSyncing(false);
   };
 
-  const canReset = confirmText === RESET_CONFIRM_TEXT && !resetting;
+  const canReset = confirmText === RESET_CONFIRM_TEXT && !resetting && !!resetDate;
 
   const doReset = async () => {
-    if (!canReset) return;
+    if (!canReset || !resetDate) return;
+    try {
+      const r = await invoke<{ conversations: number; messages: number }>("reset_range", {
+        startMs: new Date(resetDate + "T00:00:00").getTime(),
+      });
+      setConfirmText("");
+      setRangePreview(null);
+      showToast(`✓ 已重置 ${resetDate} 之后的数据（${r.conversations} 会话 / ${r.messages} 消息），正在后台刷新…`, "info", 8000);
+    } catch (e) {
+      showToast(`重置失败：${typeof e === "string" ? e : String(e)}`, "error");
+    }
     await onReset();
-    setConfirmText("");
   };
 
   return (
@@ -299,10 +326,33 @@ export default function SettingsView({
           </section>
 
           <section className="settings-section danger">
-            <h3>数据</h3>
+            <h3>按时间重置</h3>
             <div className="settings-hint">
-              重置将清空所有会话、消息、指标与搜索索引（保留数据库结构与自定义脱敏规则），不可撤销。
+              删除所选日期之后的所有会话、消息与指标。一个月以上的数据不可重置，将永久保留在库中
+              （不影响查询速度）。范围删除走时间索引 + 单事务，秒级完成。
             </div>
+            <div className="settings-row">
+              <span>开始日期（最早 {bounds.earliest}）</span>
+              <input
+                type="date"
+                value={resetDate}
+                min={bounds.earliest}
+                max={bounds.today}
+                onChange={(e) => { setResetDate(e.target.value); setRangePreview(null); }}
+              />
+            </div>
+            {resetDate && (
+              <div className="settings-row">
+                <span>将删除</span>
+                {rangePreview ? (
+                  <span className="settings-value">
+                    {rangePreview.conversations} 会话 · {rangePreview.messages} 消息 · {rangePreview.usage_records} 指标记录
+                  </span>
+                ) : (
+                  <button className="action-btn" onClick={loadRangePreview}>预览影响范围</button>
+                )}
+              </div>
+            )}
             <div className="settings-row">
               <span>输入「{RESET_CONFIRM_TEXT}」以确认</span>
               <input
@@ -314,7 +364,7 @@ export default function SettingsView({
                 onKeyDown={(e) => e.key === "Enter" && doReset()}
               />
               <button className="reset-confirm-btn" disabled={!canReset} onClick={doReset}>
-                {resetting ? "重置中…" : "重置所有数据"}
+                {resetting ? "重置中…" : `重置 ${resetDate || ""} 之后的数据`}
               </button>
               <MiniProgress p={mini} />
             </div>

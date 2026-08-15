@@ -11,7 +11,7 @@ use ch_domain::now_utc;
 use rusqlite::Connection;
 
 /// 当前 schema 目标版本。
-pub const LATEST_VERSION: u32 = 11;
+pub const LATEST_VERSION: u32 = 12;
 
 /// 一个迁移步骤：版本号 + 描述 + SQL。
 struct Migration {
@@ -77,6 +77,11 @@ fn migrations() -> Vec<Migration> {
             version: 11,
             description: "audit finding disposition states (ignore/false-positive whitelist)",
             sql: crate::schema::SCHEMA_V11,
+        },
+        Migration {
+            version: 12,
+            description: "index conversations.updated_at for time-range reset",
+            sql: crate::schema::SCHEMA_V12,
         },
     ]
 }
