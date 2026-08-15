@@ -650,6 +650,10 @@ fn auto_sync_inner_with(
     let mut cancelled = false;
     let mut total_planned: u64 = 0;
     let mut done_planned: u64 = 0;
+    // 红点口径的导入判定快照（含活跃宽限）；本轮导入不回写，尾部按快照-成功数得出剩余
+    let sync_ctx = import_ctx(state);
+    let mut new_counts = serde_json::Map::new();
+    let mut new_total: u64 = 0;
     let lim = limit.unwrap_or(500);
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
@@ -725,6 +729,15 @@ fn auto_sync_inner_with(
             .count()
             .min(lim) as u64;
         total_planned += pending_total;
+        // 剩余未导入（红点口径=imported_flag 含活跃宽限与失败版本跳过）：
+        // 用导入前快照统计，本轮成功数稍后扣减——同步完成即可带回精确计数，
+        // 前端免去第二次全量 discover（重置/同步后计数瞬时刷新）
+        let needs_full: u64 = items
+            .iter()
+            .filter(|it| {
+                !imported_flag(&sync_ctx, src.provider_id, &it.session_id, Some(it.src_ms))
+            })
+            .count() as u64;
         let mut ok = 0u32;
         let mut skip = 0u32;
         let mut imported_count = 0u32;
@@ -808,6 +821,9 @@ fn auto_sync_inner_with(
             }
         }
         stats.insert(src.stat_key, (ok, skip));
+        let remaining = needs_full.saturating_sub(u64::from(ok));
+        new_counts.insert(src.stat_key.to_string(), serde_json::json!(remaining));
+        new_total += remaining;
     }
 
     // 索引统一提交：整轮同步只有 1 次 tantivy commit
@@ -822,9 +838,11 @@ fn auto_sync_inner_with(
         }
     }
 
-    // 输出键与旧版完全一致（前端契约不变）
+    // 输出键与旧版完全一致（前端契约不变）+ 新增 new_counts（红点/菜单计数瞬时刷新）
     let mut map = serde_json::Map::new();
     map.insert("cancelled".into(), serde_json::json!(cancelled));
+    map.insert("new_counts".into(), serde_json::Value::Object(new_counts));
+    map.insert("new_total".into(), serde_json::json!(new_total));
     for (key, (ok, skip)) in stats {
         map.insert(format!("{key}_imported"), serde_json::json!(ok));
         map.insert(format!("{key}_skipped"), serde_json::json!(skip));
@@ -1083,6 +1101,14 @@ mod backlog_e2e_tests {
         }
         let (d, t, _) = events.last().expect("unexpected None");
         assert!(*d <= *t, "完成时 current 不得超过 total（失败导入会小于）");
+        // 同步返回值自带剩余计数（红点瞬时刷新数据源），应与独立计数一致
+        assert!(v.get("new_counts").is_some(), "new_counts 必须存在");
+        let nt = v
+            .get("new_total")
+            .and_then(|x| x.as_u64())
+            .expect("new_total");
+        let after_total = after.get("total").and_then(|x| x.as_u64()).unwrap_or(0);
+        assert_eq!(nt, after_total, "new_total 应与独立计数 total 一致");
         println!("before={before}");
         println!("sync={v}");
         println!("after={after}");

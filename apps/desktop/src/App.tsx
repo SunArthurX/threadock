@@ -209,6 +209,10 @@ export default function App() {
     setError(null);
     try {
       const result = await invoke<Record<string, number>>("auto_sync", {});
+      // 同步返回的剩余计数：红点/菜单瞬时刷新（免去 sources_new_count 二次全量扫描）
+      if (result.new_counts) {
+        setNewCount({ ...(result.new_counts as unknown as Record<string, number>), total: result.new_total ?? 0 });
+      }
       const parts: string[] = [];
       for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"]] as [string,string][]) {
         const ok = result[`${key}_imported`] ?? 0;
@@ -227,8 +231,7 @@ export default function App() {
       }
     }
     setSyncing(false);
-    // 同步完成：重算红点（全部消化后熄灭）与来源显隐；状态条 15 秒后自动清除
-    refreshNewCount();
+    // 同步完成：红点已由返回值瞬时更新；来源显隐与状态条清理
     refreshProviders();
     window.setTimeout(() => setSyncResult((cur) => cur?.startsWith("✓") ? null : cur), 15000);
   };
@@ -400,7 +403,8 @@ export default function App() {
       showToast("✓ 已重置（保留了脱敏规则与治理配置），正在后台重新导入（顶部有进度条）…", "info", 8000);
     } catch (e) { showError(e); }
     setResetting(false);
-    // 重置后红点/来源显隐立即归零（旧值是重置前的残留）
+    // 重置后红点/来源显隐立即归零（清旧值防误导；精确计数由后台重算/同步返回值带回）
+    setNewCount(null);
     refreshNewCount();
     refreshProviders();
     // 重新导入放后台静默执行（进度条仍可见；全量重导分钟级）
