@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    conversation_hub_desktop_lib::run()
+    threadock_lib::run()
 }

@@ -815,40 +815,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
-name = "conversation-hub-desktop"
-version = "0.1.0"
-dependencies = [
- "ch-adapter-claude-code",
- "ch-adapter-codex",
- "ch-adapter-cursor",
- "ch-adapter-jsonl",
- "ch-adapter-markdown",
- "ch-adapter-minimax",
- "ch-adapter-zcode",
- "ch-audit",
- "ch-daemon",
- "ch-domain",
- "ch-export",
- "ch-identity-resolver",
- "ch-knowledge",
- "ch-normalization",
- "ch-ops-metrics",
- "ch-raw-store",
- "ch-search",
- "ch-storage",
- "regex",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "time",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "cookie"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4570,6 +4536,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "threadock"
+version = "0.2.0"
+dependencies = [
+ "ch-adapter-claude-code",
+ "ch-adapter-codex",
+ "ch-adapter-cursor",
+ "ch-adapter-jsonl",
+ "ch-adapter-markdown",
+ "ch-adapter-minimax",
+ "ch-adapter-zcode",
+ "ch-audit",
+ "ch-daemon",
+ "ch-domain",
+ "ch-export",
+ "ch-identity-resolver",
+ "ch-knowledge",
+ "ch-normalization",
+ "ch-ops-metrics",
+ "ch-raw-store",
+ "ch-search",
+ "ch-storage",
+ "regex",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "time",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
