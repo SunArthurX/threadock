@@ -82,6 +82,7 @@ mod dto;
 mod export_cmd;
 mod import;
 mod ops;
+mod settings;
 
 pub(crate) use audit::*;
 pub(crate) use conversations::*;
@@ -89,3 +90,4 @@ pub(crate) use dto::*;
 pub(crate) use export_cmd::*;
 pub(crate) use import::*;
 pub(crate) use ops::*;
+pub(crate) use settings::*;

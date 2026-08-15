@@ -110,6 +110,8 @@ pub fn run() {
             set_favorite,
             add_tag,
             list_tags,
+            app_setting_get,
+            app_setting_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

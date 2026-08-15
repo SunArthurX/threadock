@@ -8,6 +8,7 @@ import ConversationList from "./ConversationList";
 import ConversationDetail from "./ConversationDetail";
 import SearchPanel from "./SearchPanel";
 import ImportMenu from "./ImportMenu";
+import SettingsView from "./SettingsView";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
 
@@ -50,10 +51,15 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [resetArmed, setResetArmed] = useState(false);
   const [importMenu, setImportMenu] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  // 自动同步间隔（分钟，0 = 关闭）：localStorage 快路径，DB app_settings 持久备份
+  const [syncIntervalMin, setSyncIntervalMin] = useState(() => {
+    const v = Number(localStorage.getItem("ch-sync-interval"));
+    return [0, 5, 10, 30].includes(v) ? v : 10;
+  });
 
   // source panel
   const [sourcePanel, setSourcePanel] = useState<SourceKey | null>(null);
@@ -76,9 +82,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const interval = setInterval(() => { autoSync(true); invoke("ops_sync", {force:false}).catch(() => { /* 后台任务失败不打断 UI */ }); }, 10 * 60 * 1000);
+    if (syncIntervalMin === 0) return; // 设置为关闭
+    const interval = setInterval(() => { autoSync(true); invoke("ops_sync", {force:false}).catch(() => { /* 后台任务失败不打断 UI */ }); }, syncIntervalMin * 60 * 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [syncIntervalMin]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -118,6 +125,19 @@ export default function App() {
       if (!msg.includes("同步中") && !msg.includes("重置中")) showError(e);
     }
     setSyncing(false);
+  };
+
+  const runManualSync = async () => {
+    setSyncing(true);
+    try { await invoke("auto_sync", {}); } catch { /* 失败静默：后台/可选操作 */ }
+    setSyncing(false);
+    await loadConversations();
+  };
+
+  const changeSyncInterval = (min: number) => {
+    setSyncIntervalMin(min);
+    localStorage.setItem("ch-sync-interval", String(min));
+    invoke("app_setting_set", { key: "sync_interval_min", value: String(min) }).catch(() => { /* 持久化失败不影响本地生效 */ });
   };
 
   const selectConversation = async (c: Conversation, highlightId?: string) => {
@@ -239,7 +259,7 @@ export default function App() {
       setChildConvs({}); setExpandedParents(new Set());
       setSyncResult("已重置，后台重新加载中…");
     } catch (e) { showError(e); }
-    setResetting(false); setResetArmed(false);
+    setResetting(false);
     autoSync();
   };
 
@@ -283,21 +303,22 @@ export default function App() {
               <button onClick={doSearch}>搜索</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
             </div>
-            <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)}
+            <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing}
               onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
           </>)}
-          <button className={`reset-btn ${resetArmed ? "armed" : ""}`} disabled={resetting}
-            onClick={() => { if (resetArmed) resetData(); else { setResetArmed(true); setTimeout(() => setResetArmed(false), 3000); } }}>
-            {resetting ? "重置中…" : resetArmed ? "确认重置？" : "↻ 重置"}
-          </button>
-          <button className="action-btn" title="增量导入（10 分钟自动执行）"
-            onClick={async () => { setSyncing(true); try { await invoke("auto_sync", {}); } catch { /* 失败静默：后台/可选操作 */ } setSyncing(false); await loadConversations(); }}>
-            {syncing ? "⟳" : "⇩ 增量"}
-          </button>
           <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
+          <button className="settings-toggle" title="设置" onClick={() => setSettingsOpen(true)}>⚙</button>
         </div>
+
+        {settingsOpen && (
+          <SettingsView theme={theme} onThemeChange={setTheme}
+            syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
+            onNavigate={(v) => setView(v)}
+            onReset={resetData} resetting={resetting}
+            onClose={() => setSettingsOpen(false)} />
+        )}
 
         {sourcePanel && (
           <SourcePanel panel={sourcePanel === "minimax" ? "minimax-code" : sourcePanel}
