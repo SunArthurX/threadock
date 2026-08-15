@@ -817,7 +817,6 @@ export default function App() {
         </button>
         <button
           className="action-btn"
-          disabled={syncing}
           title="增量导入所有来源的最新对话（10 分钟自动执行）"
           onClick={async () => {
             setSyncing(true);

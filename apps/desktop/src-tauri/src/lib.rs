@@ -161,7 +161,7 @@ fn cancel_sync() -> Result<(), String> {
 /// 保留 schema 和用户自定义脱敏规则。
 /// 若已有重置/同步在进行中，返回错误提示前端。
 #[tauri::command]
-fn reset_all_data(state: tauri::State<DaemonState>) -> Result<(), String> {
+async fn reset_all_data(state: tauri::State<'_, DaemonState>) -> Result<(), String> {
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return Err("重置中，请稍候…".into());
     }
@@ -631,7 +631,7 @@ const OPS_SYNC_THROTTLE_MS: i64 = 30 * 60 * 1000;
 /// 同步 ops 指标（独立于对话采集，幂等批量写入，不影响现有数据）。
 /// force=false 时 5 分钟节流（进入治理页不再每次全量扫描 32MB+ JSONL）。
 #[tauri::command]
-fn ops_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+async fn ops_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     // 持久节流：优先读库内时间戳（跨进程），内存值兜底
     let mut last = LAST_OPS_SYNC_MS.load(std::sync::atomic::Ordering::SeqCst);
@@ -795,7 +795,7 @@ fn get_conversation_by_source(
 /// 全库审计扫描：敏感信息 + 危险命令（plan codeagent-ops M4）。
 /// catch_unwind 兜底：扫描内部任何 panic 转为错误返回，绝不带崩整个应用。
 #[tauri::command]
-fn audit_scan(state: tauri::State<DaemonState>) -> Result<ch_audit::AuditReport, String> {
+async fn audit_scan(state: tauri::State<'_, DaemonState>) -> Result<ch_audit::AuditReport, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
@@ -806,7 +806,7 @@ fn audit_scan(state: tauri::State<DaemonState>) -> Result<ch_audit::AuditReport,
 
 /// 渲染 HTML 审计报告（前端保存对话框落盘）。同样带 panic 兜底。
 #[tauri::command]
-fn audit_export_html(state: tauri::State<DaemonState>) -> Result<String, String> {
+async fn audit_export_html(state: tauri::State<'_, DaemonState>) -> Result<String, String> {
     let repo = state.repo.lock().map_err(|e| e.to_string())?;
     let report = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         ch_audit::run_audit(&repo)
@@ -883,7 +883,7 @@ fn ops_month_usage(state: tauri::State<DaemonState>) -> Result<serde_json::Value
 
 /// 同步资产清单（30 分钟节流，force 可强制）。
 #[tauri::command]
-fn assets_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+async fn assets_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
@@ -932,7 +932,7 @@ fn assets_list(state: tauri::State<DaemonState>) -> Result<Vec<ch_storage::Asset
 
 /// 同步自动化任务（30 分钟节流）。
 #[tauri::command]
-fn automations_sync(state: tauri::State<DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
+async fn automations_sync(state: tauri::State<'_, DaemonState>, force: Option<bool>) -> Result<serde_json::Value, String> {
     let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     {
         let repo = state.repo.lock().map_err(|e| e.to_string())?;
@@ -1210,8 +1210,8 @@ fn ops_cost_recalc(state: tauri::State<DaemonState>) -> Result<serde_json::Value
 /// 返回导入统计。最多各导入 limit 个最新会话。
 /// 若已有重置/同步在进行中，返回「同步中」标记（不阻塞 UI）。
 #[tauri::command]
-fn auto_sync(
-    state: tauri::State<DaemonState>,
+async fn auto_sync(
+    state: tauri::State<'_, DaemonState>,
     limit: Option<usize>,
 ) -> Result<serde_json::Value, String> {
     if IS_BUSY.swap(true, std::sync::atomic::Ordering::SeqCst) {

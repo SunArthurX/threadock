@@ -484,7 +484,7 @@ export default function OpsView({ section, onJumpToConversation }: Props) {
         </div>
         )}
         <div style={{ display: "flex", gap: 8 }}>
-          <button className="action-btn" disabled={syncing} onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadSection(section); if (section === "cost") loadBudget(); }}>
+          <button className="action-btn" onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch {} setSyncing(false); loadSection(section); if (section === "cost") loadBudget(); }}>
             {syncing ? "同步指标中…" : "↻ 同步指标"}
           </button>
           {section === "cost" && (
