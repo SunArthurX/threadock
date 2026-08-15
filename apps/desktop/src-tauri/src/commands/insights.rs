@@ -13,12 +13,10 @@ use tauri::Emitter;
 pub(crate) async fn activity_stats(
     state: tauri::State<'_, DaemonState>,
     days: Option<i64>,
-) -> Result<serde_json::Value, String> {
+) -> Result<ch_storage::ActivityStats, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-    let (heat, hours, tools) = repo
-        .activity_stats(days.unwrap_or(365))
-        .map_err(|e| storage_err(e))?;
-    Ok(serde_json::json!({ "heatmap": heat, "hourly": hours, "tools_trend": tools }))
+    repo.activity_stats(days.unwrap_or(365))
+        .map_err(|e| storage_err(e))
 }
 
 // ── 项目中心 ────────────────────────────────────────────────────────────
@@ -326,17 +324,17 @@ mod activity_tests {
         })
         .expect("state open");
         let repo = state.repo.lock().expect("mutex poisoned");
-        let (heat, hours, tools) = repo.activity_stats(365).expect("activity");
+        let stats = repo.activity_stats(365).expect("activity");
         println!(
             "heat={} hours={} tools={}",
-            heat.len(),
-            hours.len(),
-            tools.len()
+            stats.heatmap.len(),
+            stats.hourly.len(),
+            stats.tools_trend.len()
         );
-        println!("heat sample: {:?}", heat.first());
-        println!("hours sample: {:?}", hours.first());
-        assert!(!heat.is_empty(), "热力图必须有数据");
-        assert!(!hours.is_empty(), "时段分布必须有数据");
-        assert!(!tools.is_empty(), "工具趋势必须有数据");
+        println!("heat sample: {:?}", stats.heatmap.first());
+        println!("hours sample: {:?}", stats.hourly.first());
+        assert!(!stats.heatmap.is_empty(), "热力图必须有数据");
+        assert!(!stats.hourly.is_empty(), "时段分布必须有数据");
+        assert!(!stats.tools_trend.is_empty(), "工具趋势必须有数据");
     }
 }

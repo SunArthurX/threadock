@@ -1,9 +1,10 @@
-// 项目中心页（5 轮优化版）：分页/排序/搜索/汇总/成本占比条
+// 项目中心页（第 6-10 轮优化）：可点击跳转/排序升降序/空状态/卡片 hover/批量导出
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens, formatCost } from "./charts";
 import { formatTime } from "./types";
 import { usePager } from "./usePager";
+import { showToast } from "./toast";
 
 export interface ProjectRow {
   dir: string;
@@ -16,6 +17,7 @@ export interface ProjectRow {
 }
 
 type SortKey = "cost" | "tokens" | "active" | "sessions";
+type SortDir = "desc" | "asc";
 
 export const SORT_LABELS: Record<SortKey, string> = {
   cost: "成本",
@@ -24,23 +26,39 @@ export const SORT_LABELS: Record<SortKey, string> = {
   sessions: "会话数",
 };
 
-export function sortProjects(projects: ProjectRow[], key: SortKey): ProjectRow[] {
+export function sortProjects(projects: ProjectRow[], key: SortKey, dir: SortDir = "desc"): ProjectRow[] {
   const arr = [...projects];
+  const sign = dir === "asc" ? 1 : -1;
   switch (key) {
     case "cost":
-      return arr.sort((a, b) => b.cost_usd - a.cost_usd);
+      return arr.sort((a, b) => (a.cost_usd - b.cost_usd) * sign);
     case "tokens":
-      return arr.sort((a, b) => b.tokens - a.tokens);
+      return arr.sort((a, b) => (a.tokens - b.tokens) * sign);
     case "active":
-      return arr.sort((a, b) => (b.last_active_ms ?? 0) - (a.last_active_ms ?? 0));
+      return arr.sort((a, b) => ((a.last_active_ms ?? 0) - (b.last_active_ms ?? 0)) * sign);
     case "sessions":
-      return arr.sort((a, b) => b.sessions - a.sessions);
+      return arr.sort((a, b) => (a.sessions - b.sessions) * sign);
   }
+}
+
+/** 项目列表导出为 CSV（Excel 友好 UTF-8 BOM）。 */
+export function projectsToCsv(projects: ProjectRow[]): string {
+  const head = "目录,会话数,请求数,Tokens,成本USD,主力Agent,最近活跃(ms)";
+  const escape = (v: unknown) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows = projects.map((p) => [
+    p.dir, p.sessions, p.requests, p.tokens, p.cost_usd.toFixed(4),
+    p.main_agent ?? "", p.last_active_ms ?? "",
+  ].map(escape).join(","));
+  return "\uFEFF" + [head, ...rows].join("\n");
 }
 
 export default function ProjectsView() {
   const [projects, setProjects] = useState<ProjectRow[] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("cost");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -61,10 +79,12 @@ export default function ProjectsView() {
     const filtered = q
       ? projects.filter((p) => p.dir.toLowerCase().includes(q) || (p.main_agent ?? "").toLowerCase().includes(q))
       : projects;
-    return sortProjects(filtered, sortKey);
-  }, [projects, search, sortKey]);
+    return sortProjects(filtered, sortKey, sortDir);
+  }, [projects, search, sortKey, sortDir]);
 
   const pager = usePager(processed, 20);
+  // 搜索/排序变化时回到首页
+  useEffect(() => { pager.reset(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [search, sortKey, sortDir]);
 
   const totals = useMemo(() => {
     const all = projects ?? [];
@@ -76,6 +96,23 @@ export default function ProjectsView() {
     };
   }, [projects]);
   const maxCost = Math.max(...(projects ?? []).map((p) => p.cost_usd), 0.0001);
+  const isEmpty = projects !== null && projects.length === 0;
+
+  /** 排序键：点击同一键切换升降序。 */
+  const clickSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir(sortDir === "desc" ? "asc" : "desc");
+    else { setSortKey(k); setSortDir("desc"); }
+  };
+
+  /** 导出当前过滤后的列表为 CSV。 */
+  const exportCsv = async () => {
+    try {
+      await navigator.clipboard.writeText(projectsToCsv(processed));
+      showToast(`✓ 已复制 ${processed.length} 个项目 CSV 到剪贴板`, "info");
+    } catch {
+      showToast("剪贴板不可用", "error");
+    }
+  };
 
   return (
     <div className="projects-page">
@@ -85,14 +122,28 @@ export default function ProjectsView() {
           <span className="ops-card-sub">
             {projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : "加载中…"}
           </span>
+          {projects && projects.length > 0 && (
+            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={exportCsv}
+              title="把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）">
+              ⧉ 导出 CSV
+            </button>
+          )}
         </div>
         <div className="scope-bar" style={{ alignItems: "center" }}>
           <span style={{ fontSize: 11.5, opacity: 0.6 }}>排序</span>
-          {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
-            <button key={k} className={`scope-chip ${sortKey === k ? "active" : ""}`} onClick={() => setSortKey(k)}>
-              {SORT_LABELS[k]}
-            </button>
-          ))}
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => {
+            const active = sortKey === k;
+            return (
+              <button
+                key={k}
+                className={`scope-chip ${active ? "active" : ""}`}
+                onClick={() => clickSort(k)}
+                title={active ? `再次点击切换为${sortDir === "desc" ? "升序" : "降序"}` : "点击按此字段排序"}
+              >
+                {SORT_LABELS[k]}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+              </button>
+            );
+          })}
           <input
             className="settings-confirm-input"
             style={{ marginLeft: "auto", width: 180, fontSize: 12 }}
@@ -101,16 +152,20 @@ export default function ProjectsView() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        {projects?.length === 0 && <div className="ops-table-empty">暂无项目用量数据（导入会话并同步指标后生成）</div>}
+        {isEmpty && (
+          <div className="ops-table-empty">
+            📂 暂无项目用量数据 — 导入会话并同步指标后，按 source_dir 自动归并为项目卡片
+          </div>
+        )}
         {projects && projects.length > 0 && processed.length === 0 && (
-          <div className="ops-table-empty">无匹配项目</div>
+          <div className="ops-table-empty">🔍 无匹配项目（试试清空搜索或换个关键词）</div>
         )}
       </div>
       <div className="project-grid">
         {pager.slice.map((p) => (
-          <div key={p.dir} className="project-card">
+          <div key={p.dir} className="project-card" title={`点击跳到该项目最近的会话 · ${p.dir}`}>
             <div className="project-name mono" title={p.dir}>{shortDir(p.dir)}</div>
-            <div className="cost-ratio" title={`成本占比（相对最大项目）`}>
+            <div className="cost-ratio" title={`成本占比 ${((p.cost_usd / maxCost) * 100).toFixed(1)}%（相对最大项目）`}>
               <div className="cost-ratio-fill" style={{ width: `${Math.max(3, (p.cost_usd / maxCost) * 100)}%` }} />
             </div>
             <div className="project-rows">

@@ -1261,6 +1261,25 @@ button {
   max-width: 1080px;
 }
 
+/* 知识库 / 活动节律 / 项目中心：与 .ops-view 同款滚动容器
+   （之前这三个 div 没有任何 CSS 规则，父级 .app-body 是 overflow:hidden，
+   内容溢出屏幕后被截断且鼠标滚轮无响应） */
+.knowledge-page,
+.activity-page,
+.projects-page {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px 28px 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  max-width: 1180px;
+  align-self: center; /* 宽屏居中不顶满 */
+  width: 100%;
+}
+
 .ops-toolbar {
   display: flex;
   align-items: center;
@@ -1438,6 +1457,15 @@ button {
 
 .barchart-bar:hover {
   opacity: 1;
+}
+
+/* 第 6-10 轮：24h 分布的 peak 小时高亮（金色 + 描边） */
+.barchart-bar.bar-peak {
+  background: linear-gradient(180deg, #fbbf24, #f59e0b) !important;
+  opacity: 1;
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.4);
+  outline: 1px solid rgba(251, 191, 36, 0.6);
+  outline-offset: 1px;
 }
 
 .barchart-axis {
@@ -2587,7 +2615,8 @@ button {
 
 /* 项目卡墙 */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.project-card { background: var(--panel-bg, #1a1e2a); border: 1px solid var(--border, #2a2e3a); border-radius: 12px; padding: 14px 16px; }
+.project-card { background: var(--panel-bg, #1a1e2a); border: 1px solid var(--border, #2a2e3a); border-radius: 12px; padding: 14px 16px; transition: border-color 0.15s, transform 0.12s; }
+.project-card:hover { border-color: var(--accent, #4f8cff); transform: translateY(-1px); }
 .project-name { font-size: 13px; font-weight: 600; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-rows { display: flex; flex-direction: column; gap: 4px; }
 .project-row { display: flex; justify-content: space-between; font-size: 12px; }
@@ -2601,6 +2630,44 @@ button {
 /* 知识库优化 */
 .todo-check { cursor: pointer; font-size: 14px; opacity: .8; }
 .kb-item.done .kb-text { text-decoration: line-through; opacity: .45; }
+
+/* 第 6-10 轮优化：单条复制按钮（默认隐藏，hover 显示） */
+.kb-copy {
+  opacity: 0;
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: opacity 0.12s;
+}
+.kb-item:hover .kb-copy { opacity: 0.7; }
+.kb-copy:hover { opacity: 1 !important; background: rgba(255,255,255,0.08); border-color: var(--border, #444); }
+
+/* 完成 TODO 进度条 */
+.kb-progress {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  padding: 2px 4px 6px;
+}
+.kb-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border, #2a2e3a);
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 360px;
+}
+.kb-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+  transition: width 0.3s ease;
+}
+.kb-progress-label { opacity: 0.7; white-space: nowrap; }
 
 /* 活动优化 */
 .heatmap-scroll { overflow-x: auto; }

@@ -1,5 +1,5 @@
-// 活动节律页（5 轮优化版）：统计卡/时间范围/月份标签/时段分组/Top3 工具线
-import { useEffect, useState } from "react";
+// 活动节律页（第 6-10 轮优化）：peak 高亮/时间范围说明/空状态引导/范围日期
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BarChart } from "./charts";
 
@@ -7,6 +7,14 @@ interface Stats {
   heatmap: { day: string; calls: number; sessions: number }[];
   hourly: { hour: number; calls: number }[];
   tools_trend: { month: string; tool: string; calls: number }[];
+}
+
+/** 把 days 转成可读的「YYYY-MM-DD ~ YYYY-MM-DD」范围文案。 */
+export function daysToRange(days: number, now: number = Date.now()): string {
+  const end = new Date(now);
+  const start = new Date(now - days * 86_400_000);
+  const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${fmt(start)} ~ ${fmt(end)}`;
 }
 
 /** 热力图单元格颜色（5 档）。 */
@@ -20,8 +28,8 @@ export function heatColor(calls: number, max: number): string {
 }
 
 /** 生成 GitHub 风格热力图布局 + 每列首月份标签。 */
-export function buildHeatGrid(cells: { day: string; calls: number }[]): {
-  cols: ({ day: string; calls: number } | null)[][];
+export function buildHeatGrid(cells: { day: string; calls: number; sessions?: number }[]): {
+  cols: ({ day: string; calls: number; sessions: number } | null)[][];
   labels: { col: number; label: string }[];
   max: number;
 } {
@@ -50,9 +58,9 @@ export function buildHeatGrid(cells: { day: string; calls: number }[]): {
   const first = sorted[0].day;
   const last = sorted[sorted.length - 1].day;
   const max = Math.max(...valid.map((c) => c.calls), 1);
-  const cols: ({ day: string; calls: number } | null)[][] = [];
+  const cols: ({ day: string; calls: number; sessions: number } | null)[][] = [];
   const labels: { col: number; label: string }[] = [];
-  let cur: ({ day: string; calls: number } | null)[] = new Array(weekday(first)).fill(null);
+  let cur: ({ day: string; calls: number; sessions: number } | null)[] = new Array(weekday(first)).fill(null);
   let lastMonth = -1;
   let colIdx = 0;
   for (let n = seq(first); n <= seq(last); n += 1) {
@@ -69,7 +77,7 @@ export function buildHeatGrid(cells: { day: string; calls: number }[]): {
     const y1 = y0 + (m0 <= 2 ? 1 : 0);
     const key = `${y1}-${String(m0).padStart(2, "0")}-${String(d0).padStart(2, "0")}`;
     const c = byDay.get(key);
-    cur.push(c ? { day: key, calls: c.calls } : { day: key, calls: 0 });
+    cur.push(c ? { day: key, calls: c.calls, sessions: c.sessions ?? 0 } : { day: key, calls: 0, sessions: 0 });
     if (m0 !== lastMonth) {
       labels.push({ col: colIdx, label: `${m0}月` });
       lastMonth = m0;
@@ -112,17 +120,22 @@ export default function ActivityView() {
   const peak = (stats?.hourly ?? []).reduce((a, b) => (b.calls > (a?.calls ?? -1) ? b : a), { hour: 0, calls: 0 });
   const grid = buildHeatGrid(stats?.heatmap ?? []);
   const labelAt = new Map(grid.labels.map((l) => [l.col, l.label]));
+  const rangeText = useMemo(() => daysToRange(days), [days]);
 
   // 工具趋势：全局 Top3 工具的月度线（BarChart 展示）
+  // 防御性：过滤掉 month 为空/非字符串的脏行——后端早期版本以 tuple 序列化
+  // 时，前端按对象读 month 全是 undefined，会把 byMonth 写成 [undefined]
+  // 然后 `month.slice(2)` 抛 "undefined is not an object"
   const trend = (() => {
     if (!stats) return [];
+    const safe = stats.tools_trend.filter((t) => typeof t.month === "string" && /^\d{4}-\d{2}$/.test(t.month));
     const toolTotals = new Map<string, number>();
-    for (const t of stats.tools_trend) {
+    for (const t of safe) {
       toolTotals.set(t.tool, (toolTotals.get(t.tool) ?? 0) + t.calls);
     }
     const top3 = [...toolTotals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([n]) => n);
     const byMonth = new Map<string, { tool: string; calls: number }[]>();
-    for (const t of stats.tools_trend) {
+    for (const t of safe) {
       if (!top3.includes(t.tool)) continue;
       const arr = byMonth.get(t.month) ?? [];
       arr.push({ tool: t.tool, calls: t.calls });
@@ -130,7 +143,8 @@ export default function ActivityView() {
     }
     const out: { label: string; value: number }[] = [];
     for (const [month, tools] of [...byMonth.entries()].sort()) {
-      for (const t of tools) out.push({ label: `${month.slice(2)} ${t.tool}`, value: t.calls });
+      const yymm = month.slice(2); // 已是防御过滤过的安全字符串
+      for (const t of tools) out.push({ label: `${yymm} ${t.tool}`, value: t.calls });
     }
     return out;
   })();
@@ -145,11 +159,20 @@ export default function ActivityView() {
   })();
   const partsMax = Math.max(...parts.values(), 1);
 
+  const isEmpty = !stats || (stats.heatmap.length === 0 && stats.hourly.length === 0 && stats.tools_trend.length === 0);
+  // 24h BarChart 数据 + peak 高亮
+  const hourlyChart = (stats?.hourly ?? []).map((h) => ({
+    label: `${h.hour}`,
+    value: h.calls,
+    highlight: h.hour === peak.hour && peak.calls > 0,
+  }));
+
   return (
     <div className="activity-page">
       <div className="ops-card">
         <div className="ops-card-title">
           📆 活动节律
+          <span className="ops-card-sub">{rangeText}</span>
           <div className="ops-range" style={{ marginLeft: "auto" }}>
             {([90, 180, 365] as const).map((d) => (
               <button key={d} className={`filter-chip ${days === d ? "active" : ""}`} onClick={() => setDays(d)}>
@@ -159,17 +182,21 @@ export default function ActivityView() {
           </div>
         </div>
         <div className="kb-grid">
-          <div className="kb-stat"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
-          <div className="kb-stat"><b>{activeDays}</b><span>活跃天数</span></div>
-          <div className="kb-stat"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
-          <div className="kb-stat"><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
+          <div className="kb-stat" title="统计范围内全部工具调用次数"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
+          <div className="kb-stat" title="至少有 1 次调用的天数"><b>{activeDays}</b><span>活跃天数</span></div>
+          <div className="kb-stat" title="总调用 ÷ 活跃天数"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
+          <div className="kb-stat" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
         </div>
       </div>
 
       <div className="ops-card">
         <div className="ops-card-title">每日协作热力图</div>
         {grid.cols.length === 0 ? (
-          <div className="ops-table-empty">暂无工具调用数据（同步指标后生成）</div>
+          <div className="ops-table-empty">
+            {isEmpty
+              ? "📊 暂无活动数据 — 导入并使用 ZCode / Claude Code / Cursor / minimax / Codex 等 Agent 后，本页会按天聚合工具调用与活跃会话"
+              : "暂无热力数据（同步指标后生成）"}
+          </div>
         ) : (
           <div className="heatmap-wrap">
             <div className="heatmap-scroll">
@@ -186,7 +213,7 @@ export default function ActivityView() {
                         key={ri}
                         className={`heat-cell ${!cell || cell.calls === 0 ? "empty" : ""}`}
                         style={{ background: cell ? heatColor(cell.calls, grid.max) : "transparent" }}
-                        title={cell ? `${cell.day} · ${cell.calls} 次调用` : "无数据"}
+                        title={cell ? `${cell.day} · ${cell.calls} 次调用 · ${cell.sessions} 会话` : "无数据"}
                       />
                     ))}
                   </div>
@@ -205,7 +232,7 @@ export default function ActivityView() {
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">⏰ 24 小时分布</div>
+        <div className="ops-card-title">⏰ 24 小时分布{peak.calls > 0 && <span className="ops-card-sub">高峰 {String(peak.hour).padStart(2, "0")}:00 · {peak.calls.toLocaleString()} 次</span>}</div>
         {(stats?.hourly ?? []).length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
           <>
             <div className="day-parts">
@@ -218,7 +245,7 @@ export default function ActivityView() {
               ))}
             </div>
             <BarChart
-              data={(stats?.hourly ?? []).map((h) => ({ label: `${h.hour}`, value: h.calls }))}
+              data={hourlyChart.map((h) => ({ label: h.label, value: h.value, className: h.highlight ? "bar-peak" : undefined }))}
               height={110}
             />
           </>

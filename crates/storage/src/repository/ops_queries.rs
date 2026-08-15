@@ -208,6 +208,37 @@ pub struct CacheTrendRow {
     pub cache_read: i64,
 }
 
+/// 活动节律：单日热力单元。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HeatCell {
+    pub day: String,
+    pub calls: i64,
+    pub sessions: i64,
+}
+
+/// 活动节律：单小时用量。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HourBucket {
+    pub hour: i64,
+    pub calls: i64,
+}
+
+/// 活动节律：工具月度趋势（按月 + 工具名）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ToolTrend {
+    pub month: String,
+    pub tool: String,
+    pub calls: i64,
+}
+
+/// 活动节律聚合三件套。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ActivityStats {
+    pub heatmap: Vec<HeatCell>,
+    pub hourly: Vec<HourBucket>,
+    pub tools_trend: Vec<ToolTrend>,
+}
+
 impl Repository {
     /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
     pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
@@ -1293,19 +1324,18 @@ impl Repository {
     // ── 洞察页面聚合 ─────────────────────────────────────────────────
 
     /// 活动节律：按天热力 / 24 小时分布 / 工具月度趋势（新页面，纯聚合）。
-    #[allow(clippy::type_complexity)]
+    ///
+    /// 返回具名字段的对象（前端按 `{ day, calls, sessions }` 读）。
+    /// 改前是 `Vec<(String, i64, i64)>`，serde 默认序列化为 `[["2026-08-10", 5, 2]]`，
+    /// 前端当对象读全是 `undefined`，导致统计 NaN 且 `month.slice(2)` 抛错。
     pub fn activity_stats(
         &self,
         days: i64,
-    ) -> StorageResult<(
-        Vec<(String, i64, i64)>,
-        Vec<(i64, i64)>,
-        Vec<(String, String, i64)>,
-    )> {
+    ) -> StorageResult<ActivityStats> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days * 86_400_000;
 
-        let mut heat = Vec::new();
+        let mut heatmap = Vec::new();
         {
             let mut stmt = conn.prepare(
                 "SELECT date(t.ts/1000,'unixepoch','localtime') AS d,
@@ -1315,28 +1345,37 @@ impl Repository {
                  WHERE t.ts >= ?1 AND t.ts IS NOT NULL
                  GROUP BY d ORDER BY d",
             )?;
-            let rows =
-                stmt.query_map(params![cutoff], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            let rows = stmt.query_map(params![cutoff], |r| {
+                Ok(HeatCell {
+                    day: r.get(0)?,
+                    calls: r.get(1)?,
+                    sessions: r.get(2)?,
+                })
+            })?;
             for row in rows {
-                let (d, c, s): (String, i64, i64) = row?;
-                heat.push((d, c, s));
+                heatmap.push(row?);
             }
         }
 
-        let mut hours = Vec::new();
+        let mut hourly = Vec::new();
         {
             let mut stmt = conn.prepare(
                 "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h, COUNT(*)
                  FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
                  GROUP BY h ORDER BY h",
             )?;
-            let rows = stmt.query_map(params![cutoff], |r| Ok((r.get::<_, i64>(0)?, r.get(1)?)))?;
+            let rows = stmt.query_map(params![cutoff], |r| {
+                Ok(HourBucket {
+                    hour: r.get(0)?,
+                    calls: r.get(1)?,
+                })
+            })?;
             for row in rows {
-                hours.push(row?);
+                hourly.push(row?);
             }
         }
 
-        let mut tools = Vec::new();
+        let mut tools_trend = Vec::new();
         {
             let mut stmt = conn.prepare(
                 "SELECT strftime('%Y-%m', ts/1000,'unixepoch','localtime') AS m,
@@ -1345,17 +1384,17 @@ impl Repository {
                  GROUP BY m, tool_name ORDER BY m, 3 DESC",
             )?;
             let rows = stmt.query_map(params![cutoff], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, i64>(2)?,
-                ))
+                Ok(ToolTrend {
+                    month: r.get(0)?,
+                    tool: r.get(1)?,
+                    calls: r.get(2)?,
+                })
             })?;
             for row in rows {
-                tools.push(row?);
+                tools_trend.push(row?);
             }
         }
-        Ok((heat, hours, tools))
+        Ok(ActivityStats { heatmap, hourly, tools_trend })
     }
 
     /// 项目中心：按 source_dir 聚合（与成本页同口径）。

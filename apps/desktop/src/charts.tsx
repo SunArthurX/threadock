@@ -90,10 +90,23 @@ export interface BarDatum {
   label: string;
   value: number;
   title?: string;
+  /** 附加到柱子 div 的 className（如 'bar-peak' 高亮峰值）。 */
+  className?: string;
 }
 
 /** 柱状图（每日 tokens 趋势）：柱子从 0 生长到目标高度（交错延迟） */
-export function BarChart({ data, height = 140, color = "var(--accent)" }: { data: BarDatum[]; height?: number; color?: string }) {
+export function BarChart({
+  data,
+  height = 140,
+  color = "var(--accent)",
+  barClassName,
+}: {
+  data: BarDatum[];
+  height?: number;
+  color?: string;
+  /** 给所有柱子追加的 className（前缀）。 */
+  barClassName?: string;
+}) {
   const mounted = useMounted();
   const items = data.slice(-30);
   if (items.length === 0) return <div className="chart-empty">无数据</div>;
@@ -106,7 +119,7 @@ export function BarChart({ data, height = 140, color = "var(--accent)" }: { data
         {items.map((d, i) => (
           <div
             key={i}
-            className="barchart-bar"
+            className={`barchart-bar ${barClassName ?? ""} ${d.className ?? ""}`.trim()}
             style={{
               width: `${bw}%`,
               height: mounted ? `${Math.max((d.value / max) * 100, 1.5)}%` : "0%",

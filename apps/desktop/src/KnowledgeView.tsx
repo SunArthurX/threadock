@@ -1,5 +1,5 @@
-// 知识库页（5 轮优化版）：分页/搜索/TODO完成勾选/导出纪要/提取引导
-import { useEffect, useMemo, useState } from "react";
+// 知识库页（第 6-10 轮优化）：单条复制/完成进度/空状态/快捷键/提取引导
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTime } from "./types";
 import { usePager } from "./usePager";
@@ -103,6 +103,30 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
   const [extracting, setExtracting] = useState(false);
   const [tab, setTab] = useState<"todos" | "decisions" | "prompts">("todos");
   const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // 快捷键 ⌘F / Ctrl+F 聚焦搜索框
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /** 单条复制（hover 出现的 📋 按钮用）。 */
+  const copyText = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`✓ 已复制 ${label}`, "info");
+    } catch {
+      showToast("剪贴板不可用", "error");
+    }
+  };
 
   const load = async () => {
     try {
@@ -141,6 +165,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
       : prompts,
     50,
   );
+  // 搜索词变化时把三个 pager 拉回首页，避免列表缩短后卡在越界页
+  useEffect(() => { todoPager.reset(); decisionPager.reset(); promptPager.reset(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [search]);
   const favPrompts = prompts.filter((p) => favs.includes(p.message_id));
 
   const pagerBar = (pg: { page: number; totalPages: number; total: number; needed: boolean; prev: () => void; next: () => void }) =>
@@ -154,6 +180,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
 
   const empty = kb && kb.extracted === 0;
   const openTodos = kb ? kb.todos.filter((t) => !doneTodos.has(t.text)).length : 0;
+  const doneCount = kb ? kb.todos.length - openTodos : 0;
+  const doneRatio = kb && kb.todos.length > 0 ? (doneCount / kb.todos.length) * 100 : 0;
 
   return (
     <div className="knowledge-page">
@@ -188,12 +216,20 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           </div>
         )}
         {kb && kb.extracted > 0 && (
-          <div className="kb-grid">
-            <div className="kb-stat"><b>{openTodos}</b><span>未完成 TODO</span></div>
-            <div className="kb-stat"><b>{kb.decisions.length}</b><span>决策</span></div>
-            <div className="kb-stat"><b>{kb.top_commands.length}</b><span>常用命令</span></div>
-            <div className="kb-stat"><b>{kb.top_files.length}</b><span>高频文件</span></div>
-          </div>
+          <>
+            <div className="kb-grid">
+              <div className="kb-stat"><b>{openTodos}</b><span>未完成 TODO</span></div>
+              <div className="kb-stat"><b>{kb.decisions.length}</b><span>决策</span></div>
+              <div className="kb-stat"><b>{kb.top_commands.length}</b><span>常用命令</span></div>
+              <div className="kb-stat"><b>{kb.top_files.length}</b><span>高频文件</span></div>
+            </div>
+            {kb.todos.length > 0 && (
+              <div className="kb-progress" title={`已完成 ${doneCount} / 共 ${kb.todos.length} 条 TODO`}>
+                <div className="kb-progress-bar"><div className="kb-progress-fill" style={{ width: `${doneRatio}%` }} /></div>
+                <span className="kb-progress-label">✅ {doneCount} / {kb.todos.length} TODO 已完成 · {doneRatio.toFixed(0)}%</span>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -205,24 +241,30 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                 <button key={k} className={`scope-chip ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button>
               ))}
               <input
+                ref={searchRef}
                 className="settings-confirm-input"
                 style={{ marginLeft: "auto", width: 180, fontSize: 12 }}
-                placeholder="🔍 搜索知识条目…"
+                placeholder="🔍 搜索知识条目…（⌘F）"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             {tab === "todos" && (
               <div className="kb-list">
-                {todoPager.slice.length === 0 && <div className="ops-table-empty">{search ? "无匹配条目" : "无 TODO 记录"}</div>}
+                {todoPager.slice.length === 0 && (
+                  <div className="ops-table-empty">
+                    {search ? "🔍 无匹配条目" : kb?.todos.length === 0 ? "🎯 当前没有提取到 TODO —— 多用 Agent 处理任务后再提取" : "✅ 所有 TODO 都已勾选完成"}
+                  </div>
+                )}
                 {todoPager.slice.map((t, i) => {
                   const done = doneTodos.has(t.text);
                   return (
                     <div key={i} className={`kb-item ${done ? "done" : ""}`}>
                       <span className="todo-check" title={done ? "标记未完成" : "标记已完成"}
                         onClick={() => setDoneTodos(toggleDoneTodo(t.text))}>{done ? "☑" : "☐"}</span>
-                      <span className="kb-text">{t.text}</span>
+                      <span className="kb-text" title={t.text}>{t.text}</span>
                       <span className="kb-src" onClick={() => onJump(t.conversation_id)} title="跳转到会话">{t.title || "(无标题)"}</span>
+                      <button className="kb-copy" title="复制 TODO 文本" onClick={() => copyText(t.text, "TODO")}>📋</button>
                     </div>
                   );
                 })}
@@ -231,11 +273,16 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             )}
             {tab === "decisions" && (
               <div className="kb-list">
-                {decisionPager.slice.length === 0 && <div className="ops-table-empty">{search ? "无匹配条目" : "无决策记录"}</div>}
+                {decisionPager.slice.length === 0 && (
+                  <div className="ops-table-empty">
+                    {search ? "🔍 无匹配条目" : "🎯 还没有决策记录 —— 让 Agent 多做方案对比、选型讨论"}
+                  </div>
+                )}
                 {decisionPager.slice.map((d, i) => (
                   <div key={i} className="kb-item">
-                    <span className="kb-text">🎯 {d.text}</span>
+                    <span className="kb-text" title={d.text}>🎯 {d.text}</span>
                     <span className="kb-src" onClick={() => onJump(d.conversation_id)} title="跳转到会话">{d.title || "(无标题)"}</span>
+                    <button className="kb-copy" title="复制决策文本" onClick={() => copyText(d.text, "决策")}>📋</button>
                   </div>
                 ))}
                 {pagerBar(decisionPager)}
@@ -243,12 +290,15 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             )}
             {tab === "prompts" && (
               <div className="kb-list">
-                {favPrompts.length === 0 && <div className="ops-table-empty">还没有收藏的提问——在下方点 ☆ 收藏好用的 prompt</div>}
+                {favPrompts.length === 0 && (
+                  <div className="ops-table-empty">⭐ 还没有收藏的提问 —— 在下方点 ☆ 把好用的 prompt 沉淀下来</div>
+                )}
                 {favPrompts.map((p) => (
                   <div key={p.message_id} className="kb-item">
                     <span className="fav-toggle on" onClick={() => setFavs(togglePromptFavorite(p.message_id))}>★</span>
-                    <span className="kb-text prompt">{p.text}</span>
+                    <span className="kb-text prompt" title={p.text}>{p.text}</span>
                     <span className="kb-src">{p.title}</span>
+                    <button className="kb-copy" title="复制 prompt" onClick={() => copyText(p.text, "prompt")}>📋</button>
                   </div>
                 ))}
                 {promptPager.slice.length > 0 && <div className="automation-sub">最近提问（点 ☆ 收藏）</div>}
@@ -256,8 +306,9 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                   <div key={p.message_id} className="kb-item">
                     <span className={`fav-toggle ${favs.includes(p.message_id) ? "on" : ""}`}
                       onClick={() => setFavs(togglePromptFavorite(p.message_id))}>{favs.includes(p.message_id) ? "★" : "☆"}</span>
-                    <span className="kb-text prompt">{p.text}</span>
+                    <span className="kb-text prompt" title={p.text}>{p.text}</span>
                     <span className="kb-src">{p.title}</span>
+                    <button className="kb-copy" title="复制 prompt" onClick={() => copyText(p.text, "prompt")}>📋</button>
                   </div>
                 ))}
                 {pagerBar(promptPager)}

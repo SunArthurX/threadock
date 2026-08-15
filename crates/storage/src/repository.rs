@@ -38,9 +38,10 @@ pub use audit_repo::{
 };
 pub use knowledge_repo::KnowledgeRecord;
 pub use ops_queries::{
-    AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat, CacheTrendRow,
-    DailyUsage, DirCost, LatencyStat, ModelUsage, MonthProjection, OpsOverview, ProviderUsage,
-    TokenWaste, ToolUsageRow, UsageSummary, WeeklySummary,
+    ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat,
+    CacheTrendRow, DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage,
+    MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
+    WeeklySummary,
 };
 pub use settings::RedactionRuleRecord;
 

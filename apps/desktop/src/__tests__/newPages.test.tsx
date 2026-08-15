@@ -1,8 +1,25 @@
 // 新页面核心逻辑测试：热力图网格 / 知识提取断言 / 提示词收藏
 import { render } from "@testing-library/react";
-import { describe, expect, it, beforeEach } from "vitest";
-import { buildHeatGrid, heatColor, dayPart } from "../ActivityView";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { buildHeatGrid, heatColor, dayPart, daysToRange } from "../ActivityView";
 import { loadPromptFavorites, togglePromptFavorite } from "../KnowledgeView";
+import { sortProjects, projectsToCsv } from "../ProjectsView";
+
+// 为「.slice 崩溃回归」专门 mock 一次 invoke
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async () => ({
+    heatmap: [],
+    hourly: [{ hour: 14, calls: 5 }],
+    tools_trend: [
+      { month: "2026-07", tool: "Bash", calls: 10 },
+      { month: undefined, tool: "Read", calls: 1 },
+      { month: null, tool: "Read", calls: 2 },
+      { month: "", tool: "Read", calls: 3 },
+      { month: "2026-08", tool: "Bash", calls: 20 },
+      { month: "2026-08", tool: "Edit", calls: 8 },
+    ],
+  })),
+}));
 
 describe("热力图（活动节律页）", () => {
   it("按周列排布、空档补 null、max 正确", () => {
@@ -109,6 +126,47 @@ describe("项目页 5 轮优化", () => {
   });
 });
 
+describe("项目页第 6-10 轮优化", () => {
+  const rows = [
+    { dir: "/a/p1", sessions: 1, tokens: 100, cost_usd: 1, requests: 1, last_active_ms: 300, main_agent: "zcode" },
+    { dir: "/a/p2", sessions: 5, tokens: 900, cost_usd: 0.5, requests: 9, last_active_ms: 100, main_agent: "codex" },
+    { dir: "/a/p3", sessions: 3, tokens: 500, cost_usd: 2, requests: 5, last_active_ms: 200, main_agent: null },
+  ] as never[];
+
+  it("sortProjects 升降序切换正确", () => {
+    expect(sortProjects(rows, "cost", "desc")[0].cost_usd).toBe(2);
+    expect(sortProjects(rows, "cost", "asc")[0].cost_usd).toBe(0.5);
+    expect(sortProjects(rows, "tokens", "asc")[0].tokens).toBe(100);
+    expect(sortProjects(rows, "active", "asc")[0].last_active_ms).toBe(100);
+    expect(sortProjects(rows, "sessions", "asc")[0].sessions).toBe(1);
+  });
+
+  it("projectsToCsv 含 UTF-8 BOM + 表头 + 转义", () => {
+    const csv = projectsToCsv([
+      { dir: '/dir with "quote",comma', sessions: 2, tokens: 100, cost_usd: 0.5, requests: 3, last_active_ms: 1, main_agent: "zcode" },
+      { dir: "/simple", sessions: 1, tokens: 50, cost_usd: 0.1, requests: 1, last_active_ms: null, main_agent: null },
+    ] as never[]);
+    // UTF-8 BOM
+    expect(csv.charCodeAt(0)).toBe(0xFEFF);
+    // 表头
+    expect(csv).toContain("目录,会话数,请求数,Tokens,成本USD,主力Agent,最近活跃(ms)");
+    // 含逗号和引号要转义
+    expect(csv).toContain('"/dir with ""quote"",comma"');
+    // null main_agent
+    expect(csv).toContain(",,");
+  });
+});
+
+describe("活动页第 6-10 轮优化", () => {
+  it("daysToRange 输出 YYYY-MM-DD ~ YYYY-MM-DD 格式", () => {
+    // 固定 now 避免时区/时间漂移
+    const now = new Date("2026-08-16T00:00:00").getTime();
+    expect(daysToRange(7, now)).toBe("2026-08-09 ~ 2026-08-16");
+    expect(daysToRange(30, now)).toBe("2026-07-17 ~ 2026-08-16");
+    expect(daysToRange(365, now)).toBe("2025-08-16 ~ 2026-08-16");
+  });
+});
+
 describe("热力图防御（黑屏回归）", () => {
   it("非法日期串不崩溃（过滤后空网格）", () => {
     expect(() => buildHeatGrid([{ day: "garbage", calls: 1 }, { day: "", calls: 2 }])).not.toThrow();
@@ -136,5 +194,18 @@ describe("热力图防御（黑屏回归）", () => {
     const { findByText } = render(<ErrorBoundary><Boom /></ErrorBoundary>);
     expect(await findByText("⚠ 页面渲染出错")).toBeTruthy();
     expect(await findByText(/BOOM/)).toBeTruthy();
+  });
+});
+
+describe("活动页 .slice 崩溃回归（month 为 undefined）", () => {
+  // 模拟后端早期版本：tools_trend 数组里有 month 字段缺失/异常的脏行
+  // 之前是 `month.slice(2)` 直接抛 "undefined is not an object"
+  // 现已在前端用 /^\d{4}-\d{2}$/ 过滤安全 month
+  it("脏 month 不进入 trend 渲染（不抛错）", async () => {
+    const { default: ActivityView } = await import("../ActivityView");
+    // 触发渲染；如果 .slice bug 还在会 throw
+    const { findByText } = render(<ActivityView />);
+    // 找到标题即视为渲染成功
+    expect(await findByText("📆 活动节律")).toBeTruthy();
   });
 });

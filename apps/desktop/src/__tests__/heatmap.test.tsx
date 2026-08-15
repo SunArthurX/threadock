@@ -34,6 +34,7 @@ describe("活动页热力图渲染", () => {
       heatmap: [], hourly: [], tools_trend: [],
     });
     const { findByText } = render(<ActivityView />);
-    expect(await findByText(/暂无工具调用数据/)).toBeTruthy();
+    // 第 6-10 轮优化后空态文案带「活动数据」字样 + 引导
+    expect(await findByText(/暂无活动数据/)).toBeTruthy();
   });
 });
