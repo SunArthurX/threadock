@@ -8,6 +8,7 @@ import SecuritySection from "./SecuritySection";
 import AssetsSection from "./AssetsSection";
 import type { Section, OpsOverview, ProviderUsage, ModelUsage, DailyUsage, ToolUsageRow, RiskyCall, AssetRow, AutomationRow, DirCost, CacheStat, AnomalyRow, AgentHealth, LatencyStat, TokenWaste, AgentBenchmark, AuditReport, PolicyRule, BudgetSettings } from "./ops-types";
 import { showToast } from "./toast";
+import ScrollArea from "./ScrollArea";
 
 type Props = {
   section: Section;
@@ -163,7 +164,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
   };
 
   return (
-    <div className="ops-view">
+    <ScrollArea className="ops-view">
       <div className="ops-toolbar">
         {section !== "assets" && (
           <div className="ops-range">
@@ -233,6 +234,6 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
       {section === "assets" && (
         <AssetsSection assets={assets} automations={automations} loading={loading} />
       )}
-    </div>
+    </ScrollArea>
   );
 }

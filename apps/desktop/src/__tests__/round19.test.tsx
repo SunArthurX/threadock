@@ -5,7 +5,7 @@
 // - thumb mousedown 拖动 → scrollTop 同步
 // - hover 显示 thumb，1s 后自动隐藏
 // - ref 转发暴露 inner div（保留原生 scrollTop / scrollTo API）
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fireEvent, render, act } from "@testing-library/react";
 import { useRef } from "react";
 import ScrollArea, { type ScrollAreaRef } from "../ScrollArea";
@@ -55,7 +55,7 @@ describe("ScrollArea ref 转发", () => {
   it("ref.inner 暴露内部 div，保留原生 scrollTop / scrollHeight", () => {
     let captured: ScrollAreaRef | null = null;
     function Wrap() {
-      const ref = useRef<ScrollAreaRef>(null);
+      const ref = useRef<ScrollAreaRef | null>(null);
       return (
         <>
           <ScrollArea ref={ref} style={{ width: 200, height: 200 }}>{makeContent(5)}</ScrollArea>
@@ -66,8 +66,8 @@ describe("ScrollArea ref 转发", () => {
     const { container, getByText } = render(<Wrap />);
     fireEvent.click(getByText("capture"));
     expect(captured).toBeTruthy();
-    expect(captured?.inner).toBeTruthy();
-    expect(captured?.inner).toBe(container.querySelector(".scroll-area-inner"));
+    expect(captured!.inner).toBeTruthy();
+    expect(captured!.inner).toBe(container.querySelector(".scroll-area-inner"));
   });
 });
 

@@ -5,6 +5,7 @@ import { formatTokens, formatCost } from "./charts";
 import { formatTime } from "./types";
 import { usePager } from "./usePager";
 import { showToast } from "./toast";
+import ScrollArea from "./ScrollArea";
 import type { Conversation } from "./types";
 
 export interface ProjectRow {
@@ -136,7 +137,7 @@ export default function ProjectsView({ onJumpToConversation }: { onJumpToConvers
   };
 
   return (
-    <div className="projects-page">
+    <ScrollArea className="projects-page">
       <div className="ops-card">
         <div className="ops-card-title">
           📁 项目中心
@@ -238,6 +239,6 @@ export default function ProjectsView({ onJumpToConversation }: { onJumpToConvers
           <button className="pager-btn" onClick={pager.next} disabled={pager.page >= pager.totalPages - 1}>下一页 ›</button>
         </div>
       )}
-    </div>
+    </ScrollArea>
   );
 }

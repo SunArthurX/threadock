@@ -7,7 +7,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { ExtractionResult } from "./types";
 import { showToast } from "./toast";
-
+import ScrollArea from "./ScrollArea";
 interface Props {
   knowledge: ExtractionResult;
   /** 所属会话 ID（用于跨会话引用排除自身）。 */
@@ -235,7 +235,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
             ))}
           </div>
         )}
-        <div className="settings-body">
+        <ScrollArea className="settings-body">
           {/* 跨会话引用：同文件/同命令 还出现在哪些会话里 */}
           {conversationId && (xrefLoading || xref.length > 0) && (
             <div className="knowledge-xref">
@@ -245,7 +245,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
               {xrefLoading ? (
                 <div className="sk-line" style={{ margin: 12 }} />
               ) : (
-                <div className="knowledge-xref-list">
+                <ScrollArea className="knowledge-xref-list">
                   {xref.map((e) => (
                     <details key={`${e.kind}-${e.keyword}`} className="knowledge-xref-item">
                       <summary>
@@ -268,7 +268,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
                       </div>
                     </details>
                   ))}
-                </div>
+                </ScrollArea>
               )}
             </div>
           )}
@@ -342,7 +342,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
               ))}
             </div>
           )}
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, forma
 import { showToast } from "./toast";
 import { splitCodeBlocks } from "./messageRender";
 import { highlightCode } from "./codeHighlight.tsx";
+import ScrollArea from "./ScrollArea";
 
 interface Props {
   conv: Conversation;
@@ -390,7 +391,7 @@ export default function ConversationDetail({
               onBlur={() => window.setTimeout(() => setShowSuggest(false), 150)}
             />
             {showSuggest && suggests.length > 0 && (
-              <div className="tag-suggest" onMouseDown={(e) => e.preventDefault()}>
+              <ScrollArea className="tag-suggest" onMouseDown={(e: any) => e.preventDefault()}>
                 {suggests.map((s, i) => (
                   <button
                     key={s.tag}
@@ -401,7 +402,7 @@ export default function ConversationDetail({
                     <span className="tag-suggest-count">{s.count}</span>
                   </button>
                 ))}
-              </div>
+              </ScrollArea>
             )}
           </div>
         </div>

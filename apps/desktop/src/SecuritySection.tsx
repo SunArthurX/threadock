@@ -5,6 +5,7 @@ import { usePager } from "./usePager";
 import type { AnomalyRow, AuditReport, AuditFinding, PolicyRule, RiskyCall } from "./ops-types";
 import { meta, SEV_LABEL } from "./ops-types";
 import { showToast } from "./toast";
+import ScrollArea from "./ScrollArea";
 
 interface Props {
   anomalies: AnomalyRow[];
@@ -208,7 +209,7 @@ export default function SecuritySection(p: Props) {
                       <div><b>退出码：</b>{r.exit_code ?? "—"}</div>
                       <div><b>耗时：</b>{r.duration_ms != null ? formatDuration(r.duration_ms) : "—"}</div>
                     </div>
-                    {r.command_text && <pre className="risk-detail-cmd mono">{r.command_text}</pre>}
+                    {r.command_text && <ScrollArea className="risk-detail-cmd mono"><pre style={{ margin: 0, whiteSpace: "pre-wrap" }}>{r.command_text}</pre></ScrollArea>}
                     <button className="action-btn" onClick={() => p.onJump(r.provider, r.source_session_id, null)}>→ 跳转到对应会话</button>
                   </div>
                 )}

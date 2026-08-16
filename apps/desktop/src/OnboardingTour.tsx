@@ -1,7 +1,7 @@
 // 首次启动引导：6 步串讲核心功能，让新用户 30 秒内知道「这工具能做什么、点哪儿」。
 // localStorage 记录是否已走完；走完后只显示「?」悬浮按钮供重新唤起。
 import { useEffect, useState } from "react";
-
+import ScrollArea from "./ScrollArea";
 const SEEN_KEY = "ch-onboarding-seen";
 const STEP_KEY = "ch-onboarding-step";
 
@@ -116,7 +116,7 @@ export default function OnboardingTour({ onClose, startStep = 0 }: { onClose: ()
           </h2>
           <button className="settings-close" onClick={finish} aria-label="跳过引导">✕</button>
         </div>
-        <div className="settings-body onboarding-body">
+        <ScrollArea className="settings-body onboarding-body">
           <div className="onboarding-progress" aria-hidden>
             {STEPS.map((_, i) => (
               <div
@@ -132,7 +132,7 @@ export default function OnboardingTour({ onClose, startStep = 0 }: { onClose: ()
           </div>
           <p className="onboarding-text">{cur.body}</p>
           {cur.hint && <div className="onboarding-hint">💡 {cur.hint}</div>}
-        </div>
+        </ScrollArea>
         <div className="settings-footer onboarding-footer">
           <button
             className="action-btn"

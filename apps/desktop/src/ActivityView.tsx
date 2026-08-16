@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart } from "./charts";
 import { showToast } from "./toast";
+import ScrollArea from "./ScrollArea";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
 import HeatmapGitHub from "./HeatmapGitHub";
@@ -557,7 +558,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                         当日没有主任务会话（仅子任务或无 started_at 数据）
                       </div>
                     ) : (
-                      <div className="day-detail-conv-list">
+                      <ScrollArea className="day-detail-conv-list">
                         {dayConvs.slice(0, 12).map((c) => (
                           <div
                             key={c.id}
@@ -575,7 +576,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                             还有 {dayConvs.length - 12} 条未展示（去 chat 页查看完整列表）
                           </div>
                         )}
-                      </div>
+                      </ScrollArea>
                     )}
                   </div>
                 )}

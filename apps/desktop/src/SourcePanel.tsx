@@ -1,4 +1,5 @@
 // 来源导入面板（从 App.tsx 拆出）
+import ScrollArea from "./ScrollArea";
 
 export interface SourceSession {
   session_id: string;
@@ -54,7 +55,7 @@ export default function SourcePanel({
             <div className="batch-progress-bar" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
           </div>
         )}
-        <div className="source-list">
+        <ScrollArea className="source-list">
           {sorted.map((s) => (
             <div
               key={s.session_id}
@@ -73,7 +74,7 @@ export default function SourcePanel({
             </div>
           ))}
           {sessions.length === 0 && <div className="source-empty">加载中或无数据…</div>}
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

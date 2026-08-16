@@ -15,7 +15,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { showToast } from "./toast";
 import { formatTime } from "./types";
 import { exportAllSettings, importAllSettings, defaultSettingsFilename } from "./settingsIO";
-
+import ScrollArea from "./ScrollArea";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
 
@@ -192,7 +192,7 @@ export default function SettingsView({
           <button className="settings-close" onClick={onClose}>✕</button>
         </div>
 
-        <div className="settings-body">
+        <ScrollArea className="settings-body">
           <section className="settings-section">
             <h3>外观</h3>
             <div className="settings-row">
@@ -419,7 +419,7 @@ export default function SettingsView({
               <MiniProgress p={mini} />
             </div>
           </section>
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

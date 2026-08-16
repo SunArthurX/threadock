@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
+import ScrollArea from "./ScrollArea";
 
 export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
 
@@ -120,7 +121,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
             placeholder="跳到页面 / 搜会话标题…  (↑↓ 选择 · Enter 跳转 · Esc 关闭)"
           />
         </div>
-        <div className="cmd-list">
+        <ScrollArea className="cmd-list">
           {items.matchedPages.length > 0 && (
             <div className="cmd-group">
               <div className="cmd-group-title">页面</div>
@@ -173,7 +174,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
           {all.length === 0 && (
             <div className="cmd-empty">没有匹配项（试试「活动」「成本」或会话标题关键词）</div>
           )}
-        </div>
+        </ScrollArea>
         <div className="cmd-footer">
           <span>↑↓ 移动</span>
           <span>⏎ 跳转</span>

@@ -11,7 +11,7 @@
 // ref 转发：forwardRef 指向内部滚动容器（保留原生 scrollTop / scrollTo API）
 import {
   forwardRef, useEffect, useImperativeHandle, useRef, useState,
-  type CSSProperties, type MouseEvent, type ReactNode,
+  type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode,
 } from "react";
 
 export interface ScrollAreaRef {
@@ -33,6 +33,8 @@ export interface ScrollAreaProps {
   thumbOffset?: number;
   /** thumb 最小高度（默认 30px，避免太短） */
   minThumbHeight?: number;
+  /** 透传到内部 div 的 mousedown（如 .tag-suggest 阻止 input blur） */
+  onMouseDown?: (e: ReactMouseEvent<HTMLDivElement>) => void;
 }
 
 const HIDE_DELAY_MS = 1000;
@@ -47,6 +49,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     thumbHoverColor = "rgba(148, 163, 199, 0.55)",
     thumbOffset = 2,
     minThumbHeight = 30,
+    onMouseDown,
   },
   ref,
 ) {
@@ -115,7 +118,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
 
   // thumb 拖动
   const dragStateRef = useRef<{ startY: number; startTop: number; maxTop: number } | null>(null);
-  const onThumbMouseDown = (e: MouseEvent) => {
+  const onThumbMouseDown = (e: ReactMouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const inner = innerRef.current;
@@ -166,6 +169,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
       <div
         ref={innerRef}
         className="scroll-area-inner"
+        onMouseDown={onMouseDown}
         style={{
           height: "100%",
           width: "100%",

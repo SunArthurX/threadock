@@ -5,6 +5,7 @@ import type { AssetRow, AutomationRow } from "./ops-types";
 import { usePager } from "./usePager";
 import { meta } from "./ops-types";
 import { showToast } from "./toast";
+import ScrollArea from "./ScrollArea";
 
 interface Props {
   assets: AssetRow[];
@@ -154,7 +155,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
               </h2>
               <button className="settings-close" onClick={() => setDetail(null)}>✕</button>
             </div>
-            <div className="settings-body">
+            <ScrollArea className="settings-body">
               <div className="asset-detail-row">
                 <span className="asset-detail-label">名称</span>
                 <span className="mono">{detail.name}</span>
@@ -187,7 +188,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
                 <span className="asset-detail-label">详情 JSON</span>
                 <button className="kb-copy" onClick={() => copyAssetField("完整 JSON", JSON.stringify(detail, null, 2))}>📋 复制</button>
               </div>
-            </div>
+            </ScrollArea>
           </div>
         </div>
       )}

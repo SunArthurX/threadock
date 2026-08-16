@@ -1,7 +1,7 @@
 // 快捷键速查面板：⌘? / Ctrl+? 唤起。
 // 列出所有全局快捷键及作用域，便于用户快速记忆与发现隐藏功能。
 import { useEffect } from "react";
-
+import ScrollArea from "./ScrollArea";
 interface ShortcutItem {
   keys: string;
   desc: string;
@@ -83,7 +83,7 @@ export default function HelpShortcuts({ onClose }: { onClose: () => void }) {
             <button className="settings-close" onClick={onClose}>✕</button>
           </div>
         </div>
-        <div className="settings-body help-shortcuts-body">
+        <ScrollArea className="settings-body help-shortcuts-body">
           {GROUPS.map((g) => (
             <section key={g.title} className="help-shortcuts-group">
               <h3>{g.title}</h3>
@@ -100,7 +100,7 @@ export default function HelpShortcuts({ onClose }: { onClose: () => void }) {
           <div className="help-shortcuts-hint">
             提示：{MOD} 在 macOS 是 ⌘ (Command)；其它平台是 Ctrl。
           </div>
-        </div>
+        </ScrollArea>
       </div>
     </div>
   );

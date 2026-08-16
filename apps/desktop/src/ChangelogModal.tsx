@@ -2,7 +2,7 @@
 // 也可在「设置 → 关于」手动点击「查看更新日志」唤起。
 import { useEffect, useState } from "react";
 import { APP_VERSION } from "./SettingsView";
-
+import ScrollArea from "./ScrollArea";
 const SEEN_KEY = "ch-last-seen-version";
 
 interface ChangelogEntry {
@@ -60,7 +60,7 @@ export default function ChangelogModal({ onClose }: { onClose: () => void }) {
           <h2>🎉 已更新到 v{APP_VERSION}</h2>
           <button className="settings-close" onClick={close}>✕</button>
         </div>
-        <div className="settings-body changelog-body">
+        <ScrollArea className="settings-body changelog-body">
           <div className="changelog-tabs">
             {CHANGELOG.map((c, i) => (
               <button
@@ -78,7 +78,7 @@ export default function ChangelogModal({ onClose }: { onClose: () => void }) {
           <div className="settings-hint" style={{ marginTop: 12 }}>
             本提示只在新版本首次启动时显示一次，后续可在「设置 → 关于 → 查看更新日志」手动唤起。
           </div>
-        </div>
+        </ScrollArea>
         <div className="settings-footer">
           <button className="action-btn" onClick={close}>✓ 知道了</button>
         </div>

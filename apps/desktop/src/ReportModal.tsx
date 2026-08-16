@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTime } from "./types";
-
+import ScrollArea from "./ScrollArea";
 interface ReportFile { name: string; size: number; mtime_ms: number }
 
 const FAV_KEY = "ch-report-favs";
@@ -84,7 +84,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
             <button className="settings-close" onClick={onClose}>✕</button>
           </div>
         </div>
-        <div className="settings-body">
+        <ScrollArea className="settings-body">
           {history.length > 0 && (
             <div className="report-history">
               <div className="report-history-header">
@@ -111,7 +111,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
                   {keyword ? `没有匹配「${keyword}」的报告` : "暂无收藏"}
                 </div>
               ) : (
-                <div className="report-history-list">
+                <ScrollArea className="report-history-list">
                   {filteredHistory.map((h) => (
                     <div key={h.name} className={`report-history-item ${current === h.name ? "active" : ""}`}>
                       <button
@@ -131,7 +131,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
                       </button>
                     </div>
                   ))}
-                </div>
+                </ScrollArea>
               )}
             </div>
           )}
@@ -144,7 +144,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
               title="周报"
             />
           )}
-        </div>
+      </ScrollArea>
       </div>
     </div>
   );
