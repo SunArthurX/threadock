@@ -17,7 +17,7 @@ pub use repository::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AuditFindingState,
     AuditMessageRow, AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyTool,
     DailyUsage, DirCost, GovernanceLogRow, HeatCell, HourBucket, KnowledgeRecord, LatencyStat,
-    ModelUsage, MonthProjection, OpsOverview, PolicyRuleRecord, ProviderUsage,
+    ModelUsage, MonthProjection, NoteDto, OpsOverview, PolicyRuleRecord, ProviderUsage,
     RedactionRuleRecord, Repository, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };

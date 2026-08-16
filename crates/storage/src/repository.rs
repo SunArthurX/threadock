@@ -43,7 +43,7 @@ pub use ops_queries::{
     MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };
-pub use settings::RedactionRuleRecord;
+pub use settings::{NoteDto, RedactionRuleRecord};
 
 impl Repository {
     /// 打开文件库，应用 PRAGMA 并迁移到最新版本。
@@ -1251,6 +1251,42 @@ impl Repository {
             });
         }
         Ok(())
+    }
+
+    /// 读取会话的私有笔记（None = 没写过）。
+    /// 返回 (note_text, updated_at_ms)。
+    pub fn get_note(&self, conversation_id: &str) -> StorageResult<Option<(String, i64)>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let r: Option<(String, i64)> = conn
+            .query_row(
+                "SELECT note, updated_at FROM conversation_notes WHERE conversation_id = ?1",
+                [conversation_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(r)
+    }
+
+    /// 设置会话的私有笔记（覆盖或删除）。
+    /// - note 为 None 或空串 → 删除该会话的笔记行
+    /// - 非空 → UPSERT (note, updated_at)
+    /// 返回笔记 updated_at 毫秒时间戳（0 = 已删除）
+    pub fn set_note(&self, conversation_id: &str, note: Option<&str>) -> StorageResult<i64> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
+        let trimmed = note.map(|s| s.trim()).filter(|s| !s.is_empty());
+        if trimmed.is_none() {
+            conn.execute("DELETE FROM conversation_notes WHERE conversation_id = ?1", [conversation_id])?;
+            return Ok(0);
+        }
+        let text = trimmed.unwrap();
+        // UPSERT: 插入或更新
+        conn.execute(
+            "INSERT INTO conversation_notes (conversation_id, note, updated_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(conversation_id) DO UPDATE SET note = ?2, updated_at = ?3",
+            params![conversation_id, text, now_ms],
+        )?;
+        Ok(now_ms)
     }
 
     /// 查询会话是否已收藏。

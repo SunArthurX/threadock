@@ -60,6 +60,8 @@ interface Props {
   resetting: boolean;
   onClose: () => void;
   onShowChangelog: () => void;
+  /** 通知 App 层从 localStorage 重新读偏好并应用（替代刷新页面）。 */
+  onReapplyImportedPrefs?: () => void;
 }
 
 const RETENTION_OPTIONS: [number, string][] = [
@@ -105,7 +107,7 @@ export default function SettingsView({
   theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
-  onNavigate, onReset, resetting, onClose, onShowChangelog,
+  onNavigate, onReset, resetting, onClose, onShowChangelog, onReapplyImportedPrefs,
 }: Props) {
   const [storage, setStorage] = useState<{ db_bytes: number; raw_count: number; raw_bytes: number; index_bytes: number } | null>(null);
   const [gcResult, setGcResult] = useState<string | null>(null);
@@ -340,7 +342,7 @@ export default function SettingsView({
             <BackupSection />
           </section>
 
-          <AboutSection onShowChangelog={onShowChangelog} />
+          <AboutSection onShowChangelog={onShowChangelog} onReapplyImportedPrefs={onReapplyImportedPrefs} />
 
           <section className="settings-section">
             <h3>显示偏好</h3>
@@ -424,7 +426,7 @@ export default function SettingsView({
 }
 
 /** 关于：版本号 + 关键依赖 + 文档链接。 */
-function AboutSection({ onShowChangelog }: { onShowChangelog: () => void }) {
+function AboutSection({ onShowChangelog, onReapplyImportedPrefs }: { onShowChangelog: () => void; onReapplyImportedPrefs?: () => void }) {
   // 依赖版本（与 package.json / Cargo.toml 对齐；本面板帮助用户/客服快速核对环境）
   const deps: { name: string; version: string; role: string }[] = [
     { name: "Tauri", version: "2.x", role: "桌面壳（Rust + WebView）" },
@@ -497,7 +499,8 @@ function AboutSection({ onShowChangelog }: { onShowChangelog: () => void }) {
             const content = await invoke<string>("read_text_file", { path });
             const mode = window.confirm("选择导入模式：\n确定 = 合并（仅覆盖文件中的 key，保留其他）\n取消 = 完全替换（清空所有现有偏好）") ? "merge" : "replace";
             const { applied, skipped } = importAllSettings(content, mode);
-            showToast(`✓ 已导入 ${applied} 项配置${skipped > 0 ? `（跳过 ${skipped} 项无效 key）` : ""}，刷新页面生效`, "info", 5000);
+            onReapplyImportedPrefs?.(); // 立即热应用（不需刷新）
+            showToast(`✓ 已导入 ${applied} 项配置${skipped > 0 ? `（跳过 ${skipped} 项无效 key）` : ""}，已立即生效`, "info", 5000);
           } catch (e) {
             showToast(`导入失败：${typeof e === "string" ? e : String(e)}`, "error");
           }

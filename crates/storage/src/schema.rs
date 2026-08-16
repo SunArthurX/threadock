@@ -428,6 +428,18 @@ pub const SCHEMA_V12: &str = r"
 CREATE INDEX IF NOT EXISTS idx_conversations_updated ON conversations(updated_at);
 ";
 
+/// V13：会话私有笔记（user-only markdown，不参与搜索/导出/统计）。
+/// 用独立表而非 conversations 列，零侵入现有 SELECT 列表。
+pub const SCHEMA_V13: &str = r"
+CREATE TABLE IF NOT EXISTS conversation_notes (
+    conversation_id TEXT PRIMARY KEY,
+    note            TEXT NOT NULL,
+    updated_at      INTEGER NOT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_conv_notes_updated ON conversation_notes(updated_at);
+";
+
 /// V11：审计发现处置状态（忽略/误报白名单，M4 处置闭环）。
 pub const SCHEMA_V11: &str = r"
 CREATE TABLE IF NOT EXISTS audit_finding_states (

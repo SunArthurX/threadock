@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
+import { splitCodeBlocks } from "./messageRender";
 
 interface Props {
   conv: Conversation;
@@ -25,6 +26,10 @@ interface Props {
   onRescanAudit: () => void;
   /** 改写 user_title（空串/null 表示清除）。 */
   onRenameTitle?: (title: string | null) => Promise<void> | void;
+  /** 私有笔记（仅个人，不参与搜索/导出/统计） */
+  note?: string | null;
+  /** 保存/清除私有笔记。空串/null 表示删除。 */
+  onNoteChange?: (note: string | null) => Promise<void> | void;
 }
 
 export default function ConversationDetail({
@@ -33,6 +38,7 @@ export default function ConversationDetail({
   onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
   onToggleFavorite, onToggleArchive,
   onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
+  note, onNoteChange,
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -122,7 +128,9 @@ export default function ConversationDetail({
       showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
     } catch { showToast("剪贴板不可用", "error"); }
   };
-  /** 渲染消息内容：高亮搜索关键词 + 复制按钮 + 长消息折叠。 */
+  /** 切分消息文本为「代码块 + 普通文本」段 —— 委托给 messageRender.splitCodeBlocks（独立可测）。 */
+
+/** 渲染消息内容：高亮搜索关键词 + 复制按钮 + 长消息折叠 + ```代码块``` 渲染。 */
   const renderContent = (m: Message, idx: number) => {
     const text = m.content_text ?? "(空)";
     const isCollapsed = collapsedMsgs.has(m.id);
@@ -130,23 +138,42 @@ export default function ConversationDetail({
     const isCurrentMatch = currentMatch === idx && search.trim();
     // 高亮匹配片段（不区分大小写，保留原大小写）
     const lower = search.trim().toLowerCase();
-    const nodes: ReactNode[] = [];
-    if (lower) {
+    const highlight = (s: string, keyPrefix: string): ReactNode => {
+      if (!lower) return s;
+      const out: ReactNode[] = [];
+      const lowerS = s.toLowerCase();
       let i = 0;
-      const lowerText = text.toLowerCase();
-      while (i < text.length) {
-        const hit = lowerText.indexOf(lower, i);
-        if (hit < 0) { nodes.push(text.slice(i)); break; }
-        if (hit > i) nodes.push(text.slice(i, hit));
-        nodes.push(<mark key={`hl-${hit}`} className="msg-search-hit">{text.slice(hit, hit + lower.length)}</mark>);
+      while (i < s.length) {
+        const hit = lowerS.indexOf(lower, i);
+        if (hit < 0) { out.push(s.slice(i)); break; }
+        if (hit > i) out.push(s.slice(i, hit));
+        out.push(<mark key={`${keyPrefix}-${hit}`} className="msg-search-hit">{s.slice(hit, hit + lower.length)}</mark>);
         i = hit + lower.length;
       }
-    } else {
-      nodes.push(text);
-    }
+      return out.length === 1 && typeof out[0] === "string" ? out[0] : <>{out}</>;
+    };
+    const segs = splitCodeBlocks(text);
     return (
       <>
-        <div className="content">{nodes}</div>
+        <div className="content">
+          {segs.map((seg, si) =>
+            seg.kind === "code" ? (
+              <div key={`cb-${si}`} className="msg-code-block">
+                <div className="msg-code-head">
+                  <span className="msg-code-lang">{seg.lang || "text"}</span>
+                  <button
+                    className="msg-action-btn"
+                    onClick={() => copyMessage(seg.content)}
+                    title="复制代码块"
+                  >📋</button>
+                </div>
+                <pre className="msg-code-pre"><code>{seg.content}</code></pre>
+              </div>
+            ) : (
+              <span key={`tx-${si}`}>{highlight(seg.content, `tx-${si}`)}</span>
+            ),
+          )}
+        </div>
         <div className="msg-actions">
           {isLong && (
             <button className="msg-action-btn" onClick={() => onToggleCollapse(m.id)}>
@@ -326,6 +353,10 @@ export default function ConversationDetail({
           />
         </div>
       )}
+      {/* 私有笔记（不参与搜索/导出/统计；折叠默认开，保存自动） */}
+      {onNoteChange && (
+        <PrivateNoteSection note={note ?? ""} onChange={onNoteChange} />
+      )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
       {timelineMode && !loading && renderTimeline()}
       {!timelineMode && visibleMsgs.map((m, idx) => (
@@ -349,6 +380,46 @@ export default function ConversationDetail({
       </>)}
     </div>
   );
+}
 
-
+/** 私有笔记 section：折叠默认开，autosave on blur（不参与搜索/导出/统计）。 */
+function PrivateNoteSection({ note, onChange }: { note: string; onChange: (n: string | null) => void }) {
+  const [text, setText] = useState(note);
+  // 受控但允许本地编辑（保存前不写回父级，autosave 触发）
+  useEffect(() => { setText(note); }, [note]);
+  const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
+  const save = async (next: string) => {
+    const trimmed = next.trim();
+    if (trimmed === (note ?? "").trim()) { setSaved("idle"); return; }
+    setSaved("saving");
+    try { await onChange(trimmed || null); setSaved("saved"); window.setTimeout(() => setSaved("idle"), 1500); }
+    catch { setSaved("idle"); }
+  };
+  const placeholder = "📝 私人笔记（不参与搜索/导出/统计）";
+  return (
+    <details className="private-note" open={!!note}>
+      <summary>
+        📝 私人笔记 {saved === "saving" && <span className="private-note-status">保存中…</span>}
+        {saved === "saved" && <span className="private-note-status saved">✓ 已保存</span>}
+      </summary>
+      <textarea
+        className="private-note-text"
+        value={text}
+        placeholder={placeholder}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={(e) => save(e.target.value)}
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            save(text);
+            (e.target as HTMLTextAreaElement).blur();
+          }
+        }}
+        rows={3}
+      />
+      <div className="private-note-hint">
+        ⌘+Enter 保存 · 失焦自动保存 · 清空内容后失焦 = 删除笔记
+      </div>
+    </details>
+  );
 }

@@ -410,7 +410,7 @@ pub(crate) async fn knowledge_xref(
     conversation_id: String,
     keywords: Vec<KnowledgeXrefKeyword>,
 ) -> Result<Vec<XrefEntry>, String> {
-    use ch_search::SearchQuery;
+    use ch_storage::SearchQuery;
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
     let mut out = Vec::with_capacity(keywords.len());
     for kw in keywords {
@@ -420,6 +420,7 @@ pub(crate) async fn knowledge_xref(
         // FTS5 模糊匹配（加上前缀通配符 * 走 MATCH 表达式）
         let q = SearchQuery {
             query: format!("\"{}\"*", kw.text.replace('"', " ")),
+            provider: None,
             role: None,
             workspace_id: None,
             limit: 50,
@@ -554,6 +555,30 @@ pub(crate) async fn set_user_title(
 ) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
     repo.set_user_title(&id, title.as_deref()).map_err(|e| storage_err(e))
+}
+
+/// 读取会话的私有笔记 + 最后修改时间。
+/// 返回 Option<(text, updated_at_ms)>：None 表示未写过。
+#[tauri::command]
+pub(crate) async fn get_conversation_note(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+) -> Result<Option<ch_storage::NoteDto>, String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    Ok(repo.get_note(&id).map_err(|e| storage_err(e))?.map(|(note, updated_at)| ch_storage::NoteDto { note, updated_at }))
+}
+
+/// 设置/清除会话的私有笔记。
+/// - note 为 None 或空串 → 删除
+/// - 非空 → 保存并返回 updated_at 毫秒时间戳（0 = 已删除）
+#[tauri::command]
+pub(crate) async fn set_conversation_note(
+    state: tauri::State<'_, DaemonState>,
+    id: String,
+    note: Option<String>,
+) -> Result<i64, String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    repo.set_note(&id, note.as_deref()).map_err(|e| storage_err(e))
 }
 
 #[tauri::command]

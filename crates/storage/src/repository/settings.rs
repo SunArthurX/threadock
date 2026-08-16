@@ -4,6 +4,13 @@ use super::Repository;
 use crate::error::StorageResult;
 use crate::timestamp;
 use ch_domain::now_utc;
+
+/// 私有笔记 DTO（前后端契约）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NoteDto {
+    pub note: String,
+    pub updated_at: i64,
+}
 use rusqlite::{params, OptionalExtension};
 
 /// 脱敏规则记录。

@@ -73,6 +73,24 @@ function FreshnessBadge() {
   return <span className="freshness-badge freshness-stale" title={`上次同步：${fmt(min)} — 数据可能过期，点导入刷新`}>🟠 {fmt(min)}</span>;
 }
 
+/** 底部状态栏：当前页 + 同步状态 + 实时时间 + 快捷键提示。 */
+function StatusBar({ syncResult, syncing, nowMs, viewLabel }: { syncResult: string | null; syncing: boolean; nowMs: number; viewLabel: string }) {
+  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+  const mod = isMac ? "⌘" : "Ctrl";
+  const time = new Date(nowMs).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return (
+    <div className="status-bar">
+      <span className="status-cell">📍 {viewLabel}</span>
+      <span className={`status-cell status-sync ${syncing ? "syncing" : syncResult ? "done" : ""}`}>
+        {syncing ? "⟳ 同步中…" : (syncResult ?? "○ 待同步")}
+      </span>
+      <span className="status-cell status-spacer" />
+      <span className="status-cell status-hint">{mod}K 命令 · {mod}? 速查 · {mod}F 搜索 · {mod}R 刷新</span>
+      <span className="status-cell status-time">{time}</span>
+    </div>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<View>(() => {
     const v = localStorage.getItem("ch-view");
@@ -117,6 +135,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importMenu, setImportMenu] = useState(false);
+  // 私有笔记（仅本地状态；切换会话时重新加载）
+  const [noteText, setNoteText] = useState<string | null>(null);
   // 未导入新内容计数（导入按钮红点）：同步/导入完成后重算
   const [newCount, setNewCount] = useState<import("./ImportMenu").NewCount | null>(null);
   const refreshNewCount = async () => {
@@ -164,6 +184,12 @@ export default function App() {
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; detail: string; finished: boolean } | null>(null);
+  // 状态栏：当前时间（每秒刷新）
+  const [nowMs, setNowMs] = useState(Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, []);
   useEffect(() => {
     const un = listen<{ current: number; total: number; detail: string; finished: boolean }>("sync_progress", (e) => {
       setSyncProgress(e.payload);
@@ -381,6 +407,11 @@ export default function App() {
       if (highlightId) setTimeout(() => document.getElementById(`msg-${highlightId}`)?.scrollIntoView({behavior:"smooth",block:"center"}), 100);
     } catch (e) { showError(e); }
     setMsgsLoading(false);
+    // 加载该会话的私有笔记（失败/不存在 → null）
+    try {
+      const n = await invoke<{ note: string; updated_at: number } | null>("get_conversation_note", { id: c.id });
+      setNoteText(n?.note ?? null);
+    } catch { setNoteText(null); }
   };
 
   const toggleExpand = async (c: Conversation) => {
@@ -749,7 +780,18 @@ export default function App() {
             onNavigate={(v) => setView(v)}
             onReset={resetData} resetting={false}
             onClose={() => setSettingsOpen(false)}
-            onShowChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }} />
+            onShowChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }}
+            onReapplyImportedPrefs={(): void => {
+              // 从 localStorage 重新读所有偏好（避免刷新页面）
+              const v = localStorage.getItem("ch-theme");
+              if (v === "light" || v === "dark") setTheme(v);
+              const nf = localStorage.getItem("ch-pref-number");
+              if (nf === "raw" || nf === "k" || nf === "wan" || nf === "yi") setNumberFormat(nf);
+              const cu = localStorage.getItem("ch-pref-currency");
+              if (cu === "USD" || cu === "CNY") setCurrency(cu);
+              const df = localStorage.getItem("ch-pref-date");
+              if (df === "relative" || df === "absolute" || df === "iso") setDateFormat(df);
+            }} />
         )}
 
         {sourcePanel && (
@@ -863,6 +905,16 @@ export default function App() {
                     onToggleFavorite={() => selectedConv && toggleFavorite(selectedConv)}
                     onToggleArchive={toggleArchive}
                     onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
+                    note={noteText}
+                    onNoteChange={async (text) => {
+                      if (!selectedConv) return;
+                      try {
+                        await invoke("set_conversation_note", { id: selectedConv.id, note: text });
+                        setNoteText(text);
+                      } catch (e) {
+                        showToast(`保存笔记失败：${String(e)}`, "error");
+                      }
+                    }}
                     onRenameTitle={async (title) => {
                       try {
                         await invoke("set_user_title", { id: selectedConv!.id, title });
@@ -891,6 +943,7 @@ export default function App() {
           </div>
         )}
         </ErrorBoundary>
+        <StatusBar syncResult={syncResult} syncing={syncing} nowMs={nowMs} viewLabel={VIEW_LABEL[view]} />
       </div>
     </div>
   );

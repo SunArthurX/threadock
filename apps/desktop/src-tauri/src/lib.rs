@@ -113,6 +113,8 @@ pub fn run() {
             read_text_file,
             set_favorite,
             set_user_title,
+            get_conversation_note,
+            set_conversation_note,
             add_tag,
             list_tags,
             app_setting_get,
