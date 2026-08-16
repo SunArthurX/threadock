@@ -1514,7 +1514,7 @@ impl Repository {
                     c.content_hash, c.raw_payload_id, c.source_parent_id
              FROM conversations c
              JOIN providers p ON p.id = c.provider_id
-             JOIN usage_records u ON u.source_conversation_id = c.source_conversation_id
+             JOIN usage_records u ON u.source_session_id = c.source_conversation_id
                                   AND u.provider_id = c.provider_id
              WHERE (?1 = '__MISSING__' AND (u.source_dir IS NULL OR u.source_dir = ''))
                 OR (?1 != '__MISSING__' AND u.source_dir = ?1)

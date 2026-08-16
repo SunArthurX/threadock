@@ -94,7 +94,7 @@ describe("DonutChart React hover tooltip", () => {
     const { container } = render(<DonutChart slices={slices} size={160} />);
     const circles = container.querySelectorAll("circle");
     expect(circles.length).toBe(2);
-    fireEvent.mouseEnter(circles[0] as HTMLElement, { clientX: 80, clientY: 80 });
+    fireEvent.mouseEnter(circles[0] as unknown as HTMLElement, { clientX: 80, clientY: 80 });
     const tooltip = container.querySelector(".barchart-tooltip") as HTMLElement;
     expect(tooltip).toBeTruthy();
     expect(tooltip.textContent).toContain("Codex");
@@ -109,7 +109,7 @@ describe("DonutChart React hover tooltip", () => {
       { label: "Codex", value: 700, color: "#2da44e" },
     ];
     const { container } = render(<DonutChart slices={slices} size={160} />);
-    const circle = container.querySelector("circle") as HTMLElement;
+    const circle = container.querySelector("circle") as unknown as HTMLElement;
     fireEvent.mouseEnter(circle, { clientX: 80, clientY: 80 });
     expect(container.querySelector(".barchart-tooltip")).toBeTruthy();
     fireEvent.mouseLeave(circle);

@@ -420,4 +420,58 @@ mod tests {
         assert!(!md_raw.messages.is_empty());
         assert!(!jl_raw.messages.is_empty());
     }
+
+    /// Round 22 回归：项目页「查看会话」SQL JOIN 列名错误。
+    /// conversations.source_conversation_id 必须 JOIN 到 usage_records.source_session_id
+    /// （不是 usage_records.source_conversation_id，那一列在表里根本不存在）
+    #[test]
+    fn projects_page_conversations_by_source_dir_uses_correct_join_key() {
+        use ch_domain::{Timestamp, UsageRecord, UsageStatus};
+
+        let repo = Repository::open_in_memory().expect("unexpected None");
+        let f = write_md(
+            "# ProjectDirTest\n\n## User\nhi\n## Assistant\nhello\n",
+        );
+        let summary = import_markdown(&repo, None, f.path(), Some("project-x"))
+            .expect("unexpected None");
+        let conv = repo
+            .get_conversation(&summary.conversation_id)
+            .expect("get_conversation")
+            .expect("conversation exists");
+        let source_session_id = conv.source_conversation_id.clone();
+
+        // 插入带 source_dir 的 usage_record
+        let usage = UsageRecord {
+            id: format!("u_{}", conv.id),
+            provider: Provider::Generic,
+            source_session_id: source_session_id.clone(),
+            turn_id: Some("t1".into()),
+            model: Some("gpt-4".into()),
+            ts: Timestamp::now_utc(),
+            input_tokens: 100,
+            output_tokens: 50,
+            reasoning_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: Some(0.001),
+            status: UsageStatus::Completed,
+            duration_ms: Some(500),
+            retry_count: Some(0),
+            source_dir: Some("project-x".into()),
+            context_exceeded: 0,
+        };
+        let n = repo.upsert_usage_batch(&[usage]).expect("upsert");
+        assert_eq!(n, 1);
+
+        // 之前会因 `u.source_conversation_id` 列不存在而炸：no such column
+        let res = repo.conversations_by_source_dir("project-x");
+        assert!(res.is_ok(), "conversations_by_source_dir must not fail: {res:?}");
+        let list = res.unwrap();
+        assert_eq!(list.len(), 1, "应找到 1 条 source_dir=project-x 的会话，conv.id={:?} conv.source_conversation_id={:?} usage.source_session_id={:?}", conv.id, conv.source_conversation_id, source_session_id);
+        assert_eq!(list[0].id, conv.id);
+
+        // 哨兵路径：空字符串/未知目录也要能走（不会因 SQL 报错）
+        let res2 = repo.conversations_by_source_dir("(未知目录)");
+        assert!(res2.is_ok());
+    }
 }
