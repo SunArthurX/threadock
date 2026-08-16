@@ -136,6 +136,12 @@ export function BarChart({
       style={{ height }}
       onMouseLeave={() => setHover(null)}
     >
+      {/* 横向网格线：4 条（25% / 50% / 75% / 100%）便于读数 */}
+      <div className="barchart-grid" style={{ pointerEvents: "none" }} aria-hidden>
+        {[0.25, 0.5, 0.75].map((p) => (
+          <div key={p} className="barchart-grid-line" style={{ bottom: `${p * 100}%` }} />
+        ))}
+      </div>
       <div className="barchart-bars">
         {items.map((d, i) => (
           <div

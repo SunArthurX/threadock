@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
 import { splitCodeBlocks } from "./messageRender";
+import { highlightCode } from "./codeHighlight.tsx";
 
 interface Props {
   conv: Conversation;
@@ -202,7 +203,7 @@ export default function ConversationDetail({
                     title="复制代码块"
                   >📋</button>
                 </div>
-                <pre className="msg-code-pre"><code>{seg.content}</code></pre>
+                <pre className="msg-code-pre"><code>{highlightCode(seg.content, seg.lang)}</code></pre>
               </div>
             ) : (
               <span key={`tx-${si}`}>{highlight(seg.content, `tx-${si}`)}</span>

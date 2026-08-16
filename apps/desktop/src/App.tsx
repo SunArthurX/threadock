@@ -18,6 +18,7 @@ import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
 import HelpShortcuts from "./HelpShortcuts";
 import ChangelogModal, { shouldShowChangelog } from "./ChangelogModal";
+import OnboardingTour, { isOnboardingSeen, markOnboardingSeen, resetOnboarding } from "./OnboardingTour";
 import { Toasts } from "./Toasts";
 import ErrorBoundary from "./ErrorBoundary";
 import { CommandPalette, type Page } from "./CommandPalette";
@@ -102,6 +103,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   // 更新日志：版本变化时启动自动显示一次
   const [changelogOpen, setChangelogOpen] = useState(() => shouldShowChangelog());
+  // 首次启动引导：未看过时自动显示；走完后只通过右下角「?」按钮重新唤起
+  const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingSeen());
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
 
@@ -778,6 +781,22 @@ export default function App() {
         {helpOpen && <HelpShortcuts onClose={() => setHelpOpen(false)} />}
 
         {changelogOpen && <ChangelogModal onClose={() => setChangelogOpen(false)} />}
+
+        {onboardingOpen && (
+          <OnboardingTour
+            onClose={() => { markOnboardingSeen(); setOnboardingOpen(false); }}
+          />
+        )}
+
+        {isOnboardingSeen() && !onboardingOpen && (
+          <button
+            className="onboarding-fab"
+            onClick={() => { resetOnboarding(); setOnboardingOpen(true); }}
+            title="重新查看新手引导"
+            aria-label="新手引导"
+            data-testid="onboarding-fab"
+          >?</button>
+        )}
 
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={changeTheme}

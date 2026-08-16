@@ -2863,11 +2863,11 @@ button {
 
 /* 活动热力图 */
 .heatmap-wrap { padding: 8px 0 4px; }
-.heatmap { display: flex; gap: 3px; min-width: max-content; }
-.heatmap-col { display: flex; flex-direction: column; gap: 3px; }
+.heatmap { display: flex; gap: 4px; min-width: max-content; }
+.heatmap-col { display: flex; flex-direction: column; gap: 4px; }
 .heat-cell {
-  width: 15px;
-  height: 24px; /* 15×24 竖向长方形，比之前 14×18 更突出，hover 缩放 1.4 倍后清晰可见 */
+  width: 17px;
+  height: 30px; /* 17×30 矩形（7 行 × 30 = 210px + 6 gap × 4 = 234px），比 GitHub 风格更突出 */
   border-radius: 3px;
   cursor: pointer;
   transition: transform 0.12s, box-shadow 0.12s, filter 0.12s;
@@ -2886,7 +2886,7 @@ button {
   box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.5);
 }
 .heat-legend { display: flex; align-items: center; gap: 5px; font-size: 10.5px; opacity: .6; margin-top: 8px; }
-.heat-legend-cell { width: 14px; height: 22px; border-radius: 3px; display: inline-block; }
+.heat-legend-cell { width: 16px; height: 28px; border-radius: 3px; display: inline-block; }
 
 /* 项目卡墙 */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
@@ -3259,8 +3259,12 @@ button {
 .jump-bottom-btn { position: sticky; bottom: 12px; margin: 10px auto 4px; display: block; width: 36px; height: 36px; border-radius: 50%; background: var(--accent, #4f8cff); color: #fff; border: none; font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 5; }
 .jump-bottom-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
-/* BarChart 悬停时间 pill：直接浮在柱顶上方，不依赖 tooltip */
+/* BarChart 横向网格线 */
 .barchart { position: relative; }
+.barchart-grid { position: absolute; inset: 0 0 24px 0; pointer-events: none; }
+.barchart-grid-line { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.06); }
+
+/* BarChart 悬停时间 pill：直接浮在柱顶上方，不依赖 tooltip */
 .barchart-hover-label { position: absolute; top: 0; transform: translateX(-50%); background: var(--accent, #4f8cff); color: #fff; font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 4px; pointer-events: none; z-index: 3; white-space: nowrap; box-shadow: 0 1px 4px rgba(0,0,0,0.3); }
 .barchart-hover-label::after { content: ""; position: absolute; bottom: -4px; left: 50%; transform: translateX(-50%); border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid var(--accent, #4f8cff); }
 
@@ -3270,3 +3274,31 @@ button {
 .msg-code-lang { font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: uppercase; letter-spacing: 0.5px; }
 .msg-code-pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.5; }
 .msg-code-pre code { background: transparent; padding: 0; color: var(--text); }
+
+/* 代码语法高亮（简易 regex-based） */
+.tok-keyword { color: #c678dd; font-weight: 600; }  /* 紫：关键字 */
+.tok-string { color: #98c379; }  /* 绿：字符串 */
+.tok-comment { color: #7f848e; font-style: italic; }  /* 灰：注释 */
+.tok-number { color: #d19a66; }  /* 橙：数字 */
+.tok-operator { color: #56b6c2; }  /* 青：操作符 */
+.tok-punct { color: #abb2bf; }  /* 浅灰：标点 */
+
+/* Onboarding 引导（6 步串讲核心功能） */
+.onboarding-modal { width: 540px; max-width: 92vw; }
+.onboarding-body { padding: 6px 22px 18px; }
+.onboarding-progress { display: flex; justify-content: center; gap: 6px; margin: 4px 0 14px; }
+.onboarding-dot { width: 26px; height: 4px; border-radius: 2px; background: var(--border, rgba(255,255,255,0.1)); cursor: pointer; transition: background 0.15s; }
+.onboarding-dot.done { background: var(--accent, #4f8cff); opacity: 0.5; }
+.onboarding-dot.active { background: var(--accent, #4f8cff); opacity: 1; }
+.onboarding-step-title { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.onboarding-step-title h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.onboarding-step-num { font-size: 11px; opacity: 0.5; font-weight: 600; letter-spacing: 0.5px; }
+.onboarding-text { margin: 0 0 12px; line-height: 1.6; font-size: 13.5px; opacity: 0.9; }
+.onboarding-hint { font-size: 12px; opacity: 0.75; padding: 8px 12px; background: rgba(79,140,255,0.08); border-left: 2px solid var(--accent, #4f8cff); border-radius: 0 6px 6px 0; }
+.onboarding-footer { padding: 10px 20px; }
+.onboarding-skip-hint { font-size: 11.5px; opacity: 0.5; cursor: pointer; padding: 4px 8px; }
+.onboarding-skip-hint:hover { opacity: 0.85; text-decoration: underline; }
+
+/* 右下角 onboarding 重新唤起按钮 */
+.onboarding-fab { position: fixed; right: 16px; bottom: 38px; width: 36px; height: 36px; border-radius: 50%; background: var(--accent, #4f8cff); color: #fff; border: none; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 90; opacity: 0.85; transition: opacity 0.15s, transform 0.15s; }
+.onboarding-fab:hover { opacity: 1; transform: scale(1.06); }
