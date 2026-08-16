@@ -2,13 +2,17 @@
 // 解决 WKWebView overlay 滚动条颜色不可控问题（深色主题下原生 thumb 显示为亮白）
 //
 // 设计：
-// - 内部 div 走原生 overflow-y: auto，wheel/键盘/触摸板全部走浏览器
+// - 单一 div 同时承担容器（flex: 1 / min-height: 0）和内部滚动（overflow-y: auto）
 // - 用 CSS `::-webkit-scrollbar { display: none }` + `scrollbar-width: none` 隐藏原生滚动条
-// - 自定义 thumb 用绝对定位 + 监听原生 scroll 事件 + ResizeObserver 同步
+// - 自定义 thumb 用 position: sticky 浮在容器内右上角，跟随 scrollTop 更新 top
 // - thumb 支持 mousedown 拖动（不阻塞原生滚动，hover 时显形，1s 后渐隐）
 // - 横向滚动暂不支持（项目内 .heatmap-scroll / .ops-table-wrap 等横向区域走原生即可）
 //
-// ref 转发：forwardRef 指向内部滚动容器（保留原生 scrollTop / scrollTo API）
+// 关键坑：早期版本用外层 position:relative + overflow:hidden 包裹 inner overflow:auto，
+// macOS WKWebView 下 nested scroll 链断裂 → wheel 事件被截断，**完全不能滚**。
+// 现在改为单一 div：滚轮直接打到滚动容器，无中间层截断。
+//
+// ref 转发：forwardRef 指向滚动 div（保留原生 scrollTop / scrollTo API）
 import {
   forwardRef, useEffect, useImperativeHandle, useRef, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode,
@@ -46,7 +50,8 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     style,
     thumbWidth = 8,
     thumbColor = "rgba(148, 163, 199, 0.28)",
-    thumbHoverColor = "rgba(148, 163, 199, 0.55)",
+    // thumbHoverColor 保留 prop API；当前 hover 状态由 useEffect 直接设到 DOM
+    thumbHoverColor: _thumbHoverColor,
     thumbOffset = 2,
     minThumbHeight = 30,
     onMouseDown,
@@ -68,12 +73,10 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
   useEffect(() => {
     const inner = innerRef.current;
     if (!inner) return;
-    const parent = inner.parentElement;
-    if (!parent) return;
 
     const update = () => {
       const ch = inner.scrollHeight;
-      const sh = parent.clientHeight;
+      const sh = inner.clientHeight;
       if (ch <= sh || sh <= 0) {
         setThumbHeight(0);
         return;
@@ -89,7 +92,6 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     update();
     const ro = new ResizeObserver(update);
     ro.observe(inner);
-    ro.observe(parent);
     inner.addEventListener("scroll", update, { passive: true });
     return () => {
       ro.disconnect();
@@ -123,9 +125,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     e.stopPropagation();
     const inner = innerRef.current;
     if (!inner) return;
-    const parent = inner.parentElement;
-    if (!parent) return;
-    const sh = parent.clientHeight;
+    const sh = inner.clientHeight;
     const maxTop = Math.max(0, sh - thumbHeight);
     dragStateRef.current = { startY: e.clientY, startTop: thumbTop, maxTop };
     setIsDragging(true);
@@ -138,7 +138,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
       const newTop = Math.max(0, Math.min(state.maxTop, state.startTop + dy));
       setThumbTop(newTop);
       const ch2 = inner.scrollHeight;
-      const sh2 = parent.clientHeight;
+      const sh2 = inner.clientHeight;
       const scrollable = ch2 - sh2;
       const maxTop2 = Math.max(0, sh2 - thumbHeight);
       if (maxTop2 > 0) inner.scrollTop = (newTop / maxTop2) * scrollable;
@@ -153,53 +153,90 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     document.addEventListener("mouseup", onUp);
   };
 
+  // thumb 位置：position fixed + 跟着 inner 位置 + scrollTop 同步
+  // innerRef 在每次 render 时可能不同，但 thumb 渲染是 state-driven → 每次 state 变都 re-render
+  // 页面整体滚动时 inner.getBoundingClientRect().top 会变 → 用 ref + rAF 直接更新 DOM 避免 re-render 风暴
+  const thumbRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const inner = innerRef.current;
+    const thumb = thumbRef.current;
+    if (!inner || !thumb) return;
+    let raf = 0;
+    const update = () => {
+      const r = inner.getBoundingClientRect();
+      const visible = thumbHeight > 0;
+      if (visible) {
+        thumb.style.top = `${r.top + thumbTop + thumbOffset}px`;
+        thumb.style.right = `${Math.max(0, window.innerWidth - r.right + thumbOffset)}px`;
+        thumb.style.opacity = showThumb || hover || isDragging ? "1" : "0";
+      } else {
+        thumb.style.opacity = "0";
+      }
+    };
+    const onScroll = () => { if (raf) return; raf = requestAnimationFrame(() => { raf = 0; update(); }); };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    inner.addEventListener("scroll", onScroll);
+    update();
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+      inner.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [thumbTop, thumbHeight, thumbOffset, showThumb, hover, isDragging]);
+
   const hasScroll = thumbHeight > 0;
 
   return (
-    <div
-      className={`scroll-area ${className}`}
-      style={{
-        position: "relative",
-        overflow: "hidden",
-        ...style,
-      }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
+    <div style={{ display: "contents" }}>
+      {/* 滚动容器：直接放在父级 grid/flex 布局里。
+          关键修复：滚轮事件直接打到此 div（不再被外层 overflow:hidden 截断）。 */}
       <div
         ref={innerRef}
-        className="scroll-area-inner"
+        data-testid="scroll-area-inner"
+        className={`scroll-area-inner ${className}`}
         onMouseDown={onMouseDown}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         style={{
-          height: "100%",
-          width: "100%",
+          display: "block",
+          // flex 容器里用 min-height:0 才能让 overflow:auto 触发滚动
+          minHeight: 0,
+          // grid item 默认 stretch → 高度 = 父级 grid track 高度
           overflowY: "auto",
           overflowX: "hidden",
           scrollbarWidth: "none",
+          // 强制隐藏 webkit 原生滚动条
+          ...style,
         }}
       >
         {children}
+        <style>{`.scroll-area-inner::-webkit-scrollbar { display: none; }`}</style>
       </div>
+      {/* thumb：position fixed 浮层，display:contents 不占 grid cell。
+          位置由 useEffect rAF 节流同步（页面/inner/resize 滚动时更新）。 */}
       {hasScroll && (
         <div
+          ref={thumbRef}
           data-testid="scroll-area-thumb"
           onMouseDown={onThumbMouseDown}
           style={{
-            position: "absolute",
-            top: thumbTop,
-            right: thumbOffset,
+            position: "fixed",
+            top: 0,
+            right: 0,
             width: thumbWidth,
             height: thumbHeight,
             borderRadius: thumbWidth / 2,
-            background: hover || isDragging ? thumbHoverColor : thumbColor,
-            opacity: showThumb || hover || isDragging ? 1 : 0,
+            background: thumbColor,
+            opacity: 0,
             transition: "opacity 0.2s, background 0.15s",
-            cursor: isDragging ? "grabbing" : "grab",
+            cursor: "grab",
             zIndex: 10,
+            pointerEvents: "auto",
           }}
         />
       )}
-      <style>{`.scroll-area-inner::-webkit-scrollbar { display: none; }`}</style>
     </div>
   );
 });
