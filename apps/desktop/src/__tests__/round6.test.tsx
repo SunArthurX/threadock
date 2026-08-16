@@ -129,11 +129,21 @@ describe("KnowledgeModal 第 6 轮增强", () => {
     expect(todoTab.textContent).toContain("2");
   });
 
-  it("导出 MD 按钮调用 save_text_file", async () => {
+  it("导出 MD dropdown → 选 MD 触发 save_text_file", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
     const { container } = render(<KnowledgeModal knowledge={sample} convTitle="测试会话" onClose={() => {}} onReextract={() => {}} />);
-    const mdBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "⤓ MD") as HTMLButtonElement;
-    fireEvent.click(mdBtn);
+    // 第 14 轮：MD/JSON 合并为单一 dropdown 按钮"⤓ 导出"
+    const exportBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("⤓ 导出")) as HTMLButtonElement;
+    expect(exportBtn).toBeTruthy();
+    fireEvent.click(exportBtn);
+    // 展开 dropdown 后点 Markdown
+    const mdItem = await waitFor(() => {
+      const items = container.querySelectorAll(".list-dropdown-item");
+      const found = Array.from(items).find((b) => b.textContent?.includes("Markdown"));
+      if (!found) throw new Error("Markdown option not found");
+      return found as HTMLButtonElement;
+    });
+    fireEvent.click(mdItem);
     await waitFor(() => {
       expect(invoke).toHaveBeenCalledWith("save_text_file", expect.objectContaining({
         path: expect.stringMatching(/\.md$/),

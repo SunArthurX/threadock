@@ -35,21 +35,18 @@ describe("活动页热力图渲染", () => {
     // 8月1日(周六)~5日(周三)：首列补 6 个 null + 数据天 + 尾列补齐 → 至少 14 格
     const cells = container.querySelectorAll(".heat-cell");
     expect(cells.length).toBeGreaterThanOrEqual(14);
-    // 有数据格子带 title 明细（含「次调用」+「会话」）
-    const titled = container.querySelectorAll('.heat-cell[title*="次调用"]');
-    expect(titled.length).toBeGreaterThanOrEqual(3);
     // 月份标签（GitHub 风格英文 Aug）
     expect(container.querySelector(".heat-month-label")?.textContent).toContain("Aug");
-    // day-of-week 标签
-    const dowLabels = container.querySelectorAll(".heat-dow-label");
-    expect(dowLabels.length).toBeGreaterThanOrEqual(7);
+    // day-of-week 标签（横向布局：顶部 7 个 .heat-weekday-cell）
+    const dowLabels = container.querySelectorAll(".heat-weekday-cell");
+    expect(dowLabels.length).toBe(7);
   });
 
   it("点击格子后显示 day detail panel", async () => {
     const { container, findByText } = render(<ActivityView />);
     await findByText(/contributions in the last/);
-    // 找有 title 的格子点一下
-    const dataCell = container.querySelector('.heat-cell[title*="次调用"]');
+    // 找一个非空 cell 点一下（用 className 判断：非 .empty）
+    const dataCell = container.querySelector(".heat-cell:not(.empty)");
     expect(dataCell).toBeTruthy();
     fireEvent.click(dataCell!);
     // day detail 出现
@@ -105,7 +102,7 @@ describe("活动页热力图渲染", () => {
     const onJump = vi.fn();
     const { container, findByText } = render(<ActivityView onJumpToConversation={onJump} />);
     await findByText(/contributions in the last/);
-    const dataCell = container.querySelector('.heat-cell[title*="次调用"]');
+    const dataCell = container.querySelector(".heat-cell:not(.empty)");
     fireEvent.click(dataCell!);
     // 等 day detail 出现
     await waitFor(() => {

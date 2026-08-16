@@ -125,7 +125,7 @@ interface Props {
   onToggleExpand: (c: Conversation) => void;
   onClearWs: () => void;
   /** 切换收藏（星标）。 */
-  onToggleFavorite: (c: Conversation) => void;
+  onToggleFavorite?: (c: Conversation) => void;
   /** 单条归档/取消归档（右键菜单）。 */
   onArchiveOne?: (c: Conversation) => void;
   /** 单条删除（带 undo）。 */
@@ -272,7 +272,7 @@ export default function ConversationList({
         onClick: async () => {
           const fn = onBulkFavorite ? (ids: string[]) => onBulkFavorite(ids, !c.favorite) : undefined;
           if (fn) { await fn(targetIds); showToast(`✓ ${!c.favorite ? "已收藏" : "已取消收藏"} ${targetCount} 条`, "info"); }
-          else onToggleFavorite(c);
+          else onToggleFavorite?.(c);
         },
         group: 1,
       });

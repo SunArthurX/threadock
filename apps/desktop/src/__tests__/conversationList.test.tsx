@@ -29,7 +29,7 @@ function makeProps(
     onSelect: vi.fn(),
     onToggleExpand: vi.fn(),
     onClearWs: vi.fn(),
-    onToggleFavorite: vi.fn(),
+   
     ...extra,
   };
 }

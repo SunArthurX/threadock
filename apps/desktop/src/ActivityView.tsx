@@ -233,6 +233,8 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   const [days, setDays] = useState(365);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayConvs, setDayConvs] = useState<Conversation[] | null>(null);
+  /** 热力图 hover 自定义 tooltip：存当前 hover 的 cell + 鼠标位置 */
+  const [hoverCell, setHoverCell] = useState<{ cell: { day: string; calls: number; sessions: number }; x: number; y: number } | null>(null);
   const [dayConvsLoading, setDayConvsLoading] = useState(false);
   // 热力图维度：all=全工具 / 单一工具
   const [toolFilter, setToolFilter] = useState<string | "all">("all");
@@ -480,41 +482,52 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         ) : (
           <div className="heatmap-wrap">
             <div className="heatmap-scroll">
-              <div className="heat-months-wrap">
-                <div className="heat-dow-label" />
-                <div className="heatmap-months">
-                  {grid.cols.map((_, ci) => (
-                    <span key={ci} className="heat-month-label">{labelAt.get(ci) ?? ""}</span>
+              {/* 横向布局：每行 = 1 周（7 cells 横排），多行垂直堆叠 */}
+              <div className="heatmap-rows-wrap">
+                {/* 周几 header：Mon Tue Wed Thu Fri Sat Sun 横排 */}
+                <div className="heatmap-weekday-header">
+                  <div className="heat-month-spacer" />
+                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, i) => (
+                    <div key={i} className="heat-weekday-cell">{d}</div>
                   ))}
                 </div>
+                {/* 每周 1 行 */}
+                {grid.cols.map((col, ci) => (
+                  <div key={ci} className="heatmap-row">
+                    <span className="heat-month-label">{labelAt.get(ci) ?? ""}</span>
+                    {col.map((cell, ri) => {
+                      if (!cell) return <span key={ri} className="heat-cell empty" />;
+                      const isSelected = selectedDay === cell.day;
+                      const isToday = cell.day === todayKey;
+                      return (
+                        <div
+                          key={ri}
+                          className={`heat-cell ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${cell.calls === 0 ? "empty" : ""}`}
+                          style={{ background: cell.calls > 0 ? heatColor(cell.calls, grid.max) : undefined }}
+                          onMouseEnter={(e) => setHoverCell({ cell, x: e.clientX, y: e.clientY })}
+                          onMouseMove={(e) => setHoverCell((c) => c ? { ...c, x: e.clientX, y: e.clientY } : null)}
+                          onMouseLeave={() => setHoverCell(null)}
+                          onClick={() => setSelectedDay(isSelected ? null : cell.day)}
+                        />
+                      );
+                    })}
+                  </div>
+                ))}
               </div>
-              <div className="heatmap-grid">
-                <div className="heat-dow-col">
-                  {["", "Mon", "", "Wed", "", "Fri", ""].map((d, ri) => (
-                    <span key={ri} className="heat-dow-label">{d}</span>
-                  ))}
+              {/* Hover 自定义 tooltip：避开 title 原生 tooltip（macOS 下会延迟） */}
+              {hoverCell && (
+                <div
+                  className="heat-tooltip"
+                  style={{ left: hoverCell.x, top: hoverCell.y }}
+                  data-testid="heat-tooltip"
+                >
+                  <div className="heat-tooltip-day">{hoverCell.cell.day} · {weekdayCN(hoverCell.cell.day)}</div>
+                  <div className="heat-tooltip-stats">
+                    <b>{hoverCell.cell.calls.toLocaleString()}</b> 次调用 · <b>{hoverCell.cell.sessions}</b> 活跃会话
+                  </div>
+                  {hoverCell.cell.day === todayKey && <div className="heat-tooltip-tag">今天</div>}
                 </div>
-                <div className="heatmap">
-                  {grid.cols.map((col, ci) => (
-                    <div key={ci} className="heatmap-col">
-                      {col.map((cell, ri) => {
-                        if (!cell) return <span key={ri} className="heat-cell empty" />;
-                        const isSelected = selectedDay === cell.day;
-                        const isToday = cell.day === todayKey;
-                        return (
-                          <div
-                            key={ri}
-                            className={`heat-cell ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${cell.calls === 0 ? "empty" : ""}`}
-                            style={{ background: cell.calls > 0 ? heatColor(cell.calls, grid.max) : undefined }}
-                            title={`${cell.day} ${weekdayCN(cell.day)} · ${cell.calls} 次调用 · ${cell.sessions} 会话${isToday ? "（今天）" : ""}`}
-                            onClick={() => setSelectedDay(isSelected ? null : cell.day)}
-                          />
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
             <div className="heat-legend">
               Less

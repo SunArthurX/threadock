@@ -22,8 +22,6 @@ interface Props {
   onExport: (format: "markdown" | "json") => void;
   onExtractKnowledge: () => void;
   onToggleCollapse: (id: string) => void;
-  onToggleFavorite: () => void;
-  onToggleArchive: () => void;
   onAddTag: (tag: string) => void;
   onRemoveTag: (tag: string) => void;
   onRescanAudit: () => void;
@@ -41,7 +39,6 @@ export default function ConversationDetail({
   conv, messages, events, completenessLabel, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
   scrollContainerRef, onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
-  onToggleFavorite, onToggleArchive,
   onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
   note, onNoteChange, allTags,
 }: Props) {
@@ -310,7 +307,7 @@ export default function ConversationDetail({
         {conv.source_parent_id && " · 子任务"}
       </div>
       <div className="detail-actions">
-        <button className="action-btn" onClick={onToggleFavorite}>{conv.favorite ? "★ 已收藏" : "☆ 收藏"}</button>
+        {/* 收藏 / 归档 已移至右键菜单（避免顶栏拥挤，参考 macOS 设计） */}
         <button className={`action-btn ${timelineMode ? "active" : ""}`} onClick={onToggleTimeline}>
           {timelineMode ? "💬 消息" : "🕐 时间线"}
         </button>
@@ -325,7 +322,6 @@ export default function ConversationDetail({
         >
           👤 仅用户消息
         </button>
-        <button className="action-btn" onClick={onToggleArchive}>{conv.archived ? "📤 取消归档" : "🗄 归档"}</button>
         <button
           className="action-btn"
           onClick={() => setSearchOpen((v) => !v)}

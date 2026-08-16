@@ -852,12 +852,16 @@ button {
   letter-spacing: 0;
 }
 
-/* 用户消息：气泡化 */
+/* 用户消息：气泡化（dark 下用 accent 蓝紫透明 / light 下用浅蓝紫） */
 .message.user .content {
-  background: var(--bg-elevated);
+  background: var(--msg-user-bg, var(--accent-bg, rgba(79, 140, 255, 0.08)));
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 12px 16px;
+}
+:root[data-theme="light"] .message.user .content {
+  --msg-user-bg: rgba(79, 140, 255, 0.06);
+  border-color: rgba(79, 140, 255, 0.18);
 }
 
 .message .content {
@@ -2881,9 +2885,15 @@ button {
 .knowledge-hint { font-size: 11.5px; opacity: .55; }
 
 /* 知识弹窗 */
-.knowledge-modal { width: min(620px, calc(100vw - 48px)); }
+/* 知识弹窗：可缩小（resize: both + min 尺寸限制，避免拖太小） */
+.knowledge-modal { width: min(620px, calc(100vw - 48px)); resize: both; overflow: auto; min-width: 320px; min-height: 240px; max-width: 90vw; max-height: 86vh; }
 .knowledge-modal-actions { display: flex; align-items: center; gap: 8px; }
 .knowledge-modal-sub { font-size: 12px; opacity: .55; margin-left: 8px; font-weight: 400; }
+/* 弹窗内 dropdown 主题色一致：light 下用浅灰底 + dark 下用深色 */
+.knowledge-modal .list-dropdown-btn { background: var(--bg-2, transparent); color: var(--text); border: 1px solid var(--border); }
+.knowledge-modal .list-dropdown-btn:hover { background: var(--bg-hover, var(--accent-bg, rgba(79,140,255,0.08))); }
+.knowledge-modal .list-dropdown-panel { background: var(--bg-modal, var(--bg-elevated, #1a1e2a)); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+:root[data-theme="light"] .knowledge-modal .list-dropdown-panel { background: #ffffff; box-shadow: 0 6px 20px rgba(0,0,0,0.15); }
 
 .sync-progress.done .sync-progress-fill { background: #22c55e; }
 
@@ -3068,11 +3078,16 @@ button {
 }
 .kb-progress-label { opacity: 0.7; white-space: nowrap; }
 
-/* 活动优化 */
+/* 活动优化 - 横向布局：每行 = 1 周（7 cells 横排），多行垂直堆叠 */
 .heatmap-scroll { overflow-x: auto; padding-bottom: 2px; }
+.heatmap-rows-wrap { display: inline-flex; flex-direction: column; gap: 3px; min-width: 0; }
+.heatmap-weekday-header { display: flex; gap: 3px; align-items: center; margin-bottom: 4px; }
+.heat-month-spacer { width: 28px; flex-shrink: 0; }
+.heat-weekday-cell { width: 12px; font-size: 9.5px; opacity: 0.55; text-align: center; flex-shrink: 0; }
+.heatmap-row { display: flex; gap: 3px; align-items: center; }
+.heat-month-label { width: 28px; font-size: 10.5px; opacity: 0.7; white-space: nowrap; flex-shrink: 0; }
+/* 保留旧 class 兼容（部分子组件可能仍引用） */
 .heatmap-months { display: flex; gap: 3px; margin-bottom: 4px; min-width: 0; }
-.heat-month-label { width: 26px; font-size: 10.5px; opacity: 0.7; white-space: nowrap; flex-shrink: 0; }
-/* Day-of-week 左侧固定列（高度对齐到 12px cell + 3px gap） */
 .heatmap-grid { display: flex; gap: 6px; min-width: 0; }
 .heat-dow-col { display: flex; flex-direction: column; gap: 3px; padding-top: 0; }
 .heat-dow-label { width: 26px; height: 12px; font-size: 10.5px; opacity: 0.55; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
@@ -3294,6 +3309,26 @@ button {
   border-color: rgba(255, 255, 255, 0.3);
 }
 
+/* 热力图 hover 自定义 tooltip：定位在鼠标位置，避开原生 title 延迟 */
+.heat-tooltip {
+  position: fixed;
+  z-index: 100;
+  background: var(--bg-elevated, #161a25);
+  border: 1px solid var(--border-default, rgba(148, 163, 199, 0.14));
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  pointer-events: none;
+  transform: translate(12px, 12px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  min-width: 180px;
+  line-height: 1.5;
+}
+.heat-tooltip-day { font-weight: 600; color: var(--text-primary, #e6e9f2); margin-bottom: 2px; }
+.heat-tooltip-stats { color: var(--text-secondary, #9aa3bd); font-size: 11px; }
+.heat-tooltip-stats b { color: var(--accent, #4f8cff); font-weight: 600; }
+.heat-tooltip-tag { display: inline-block; margin-top: 4px; padding: 1px 6px; background: rgba(96, 165, 250, 0.18); color: #60a5fa; border-radius: 3px; font-size: 10px; }
+
 .error-boundary { margin: 40px auto; max-width: 480px; text-align: center; }
 .error-boundary-title { font-size: 16px; font-weight: 600; color: #f59e0b; margin-bottom: 10px; }
 .error-boundary-msg { font-size: 12.5px; opacity: .7; margin-bottom: 14px; word-break: break-all; }
@@ -3385,9 +3420,29 @@ button {
 .list-dropdown-item.active { color: var(--accent, #4f8cff); font-weight: 600; }
 
 /* 来源 chip 折叠：仅在多来源时显示 */
-.list-provider-chips { display: flex; flex-wrap: wrap; gap: 3px; padding: 0; }
-.provider-chip { padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 10.5px; cursor: pointer; transition: all 0.12s; }
-.provider-chip:hover { color: var(--text); border-color: var(--accent); }
+/* 来源 chip：常用 ZCode/ClaudeCode/MiniMax/Codex 强调（始终有边框 + 颜色），与列表分隔 */
+.list-provider-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 0 6px;
+  margin-top: 4px;
+  border-top: 1px dashed var(--border-subtle, rgba(255,255,255,0.08));
+  border-bottom: 1px dashed var(--border-subtle, rgba(255,255,255,0.08));
+}
+.provider-chip {
+  padding: 3px 9px;
+  border: 1px solid var(--c-accent, var(--accent, #4f8cff));
+  border-radius: 999px;
+  background: var(--c-accent-bg, rgba(79, 140, 255, 0.08));
+  color: var(--c-accent, var(--accent, #4f8cff));
+  font-size: 10.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.provider-chip:hover { background: var(--c-accent, var(--accent, #4f8cff)); color: #fff; }
+.provider-chip.active { background: var(--accent, #4f8cff); color: #fff; border-color: var(--accent); }
 .provider-chip.active { background: var(--accent, #4f8cff); color: #fff; border-color: var(--accent); }
 
 /* 列表项：去复选框后，padding 调整；pinned 状态左侧细金线 */

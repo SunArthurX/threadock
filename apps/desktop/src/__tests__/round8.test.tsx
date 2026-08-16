@@ -60,7 +60,7 @@ describe("ConversationDetail 私人笔记", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         note="" onNoteChange={() => {}}
       />,
@@ -74,7 +74,7 @@ describe("ConversationDetail 私人笔记", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         note="我的笔记内容"
         onNoteChange={() => {}}
@@ -95,7 +95,7 @@ describe("ConversationDetail 私人笔记", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         note="" onNoteChange={onNote}
       />,
@@ -113,7 +113,7 @@ describe("ConversationDetail 私人笔记", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         note="旧笔记" onNoteChange={onNote}
       />,
@@ -141,7 +141,7 @@ describe("消息内代码块渲染", () => {
         conv={baseConv} messages={[sampleMsg]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
       />,
     );

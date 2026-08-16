@@ -590,7 +590,7 @@ export default function App() {
       loadDetail(c.id);
     } catch (e) { showError(e); }
   };
-  // 单条归档（右键菜单触发）：复用 toggleArchive 但传 c
+  // 单条归档（右键菜单触发）：用 archiveOne 替代旧 toggleArchive（已移至右键菜单）
   const archiveOne = async (c: Conversation) => {
     try {
       await invoke("set_archived", { id: c.id, archived: !c.archived });
@@ -632,17 +632,6 @@ export default function App() {
     // 预留给未来「跨会话跳到指定消息」场景；当前由 jumpFromAudit 直接调用 selectConversation。
   };
   void jumpToMessage;
-
-  const toggleArchive = async () => {
-    if (!selectedConv) return;
-    try {
-      await invoke("set_archived", { id: selectedConv.id, archived: !selectedConv.archived });
-      const next = { ...selectedConv, archived: !selectedConv.archived };
-      setSelectedConv(next);
-      await loadConversations();
-      showToast(next.archived ? "🗄 已归档" : "📤 已取消归档");
-    } catch (e) { showError(e); }
-  };
 
   const restoreConv = async (c: Conversation) => {
     try {
@@ -977,8 +966,6 @@ export default function App() {
                     loading={msgsLoading} exporting={exporting} timelineMode={timelineMode}
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
                     tags={detailTags}
-                    onToggleFavorite={() => selectedConv && toggleFavorite(selectedConv)}
-                    onToggleArchive={toggleArchive}
                     onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
                     note={noteText}
                     onNoteChange={async (text) => {

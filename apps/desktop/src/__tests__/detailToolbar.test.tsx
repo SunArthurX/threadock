@@ -15,22 +15,25 @@ const baseDetail = {
   loading: false, exporting: false, timelineMode: false, highlightMsgId: null,
   collapsedMsgs: new Set<string>(), tags: [],
   onToggleTimeline: vi.fn(), onExport: vi.fn(), onExtractKnowledge: vi.fn(),
-  onToggleCollapse: vi.fn(), onToggleFavorite: vi.fn(), onToggleArchive: vi.fn(),
+  onToggleCollapse: vi.fn(),onToggleArchive: vi.fn(),
   onAddTag: vi.fn(), onRemoveTag: vi.fn(), onRescanAudit: vi.fn(),
 };
 
 describe("详情页按钮清单", () => {
-  it("工具栏为：收藏/时间线/知识/重扫/仅用户消息/归档/搜索消息/复制全部/下载（顺序一致）", () => {
+  it("工具栏为：时间线/知识/重扫/仅用户消息/搜索消息/复制全部/下载（收藏/归档已移至右键菜单）", () => {
     render(<ConversationDetail {...baseDetail} />);
     const bar = screen.getByText(/时间线/).closest("div.detail-actions")!;
     expect(bar).toBeTruthy();
-    const labels = ["收藏", "时间线", "知识", "重扫", "仅用户消息", "归档", "搜索消息", "复制全部", "下载"];
+    const labels = ["时间线", "知识", "重扫", "仅用户消息", "搜索消息", "复制全部", "下载"];
     let last = -1;
     for (const label of labels) {
       const idx = (bar.textContent ?? "").indexOf(label);
       expect(idx).toBeGreaterThan(last);
       last = idx;
     }
+    // 收藏/归档不在 toolbar
+    expect(bar.textContent).not.toContain("收藏");
+    expect(bar.textContent).not.toContain("归档");
   });
 
   it("用户消息筛选：开启后仅显示 user 消息，关闭恢复全部", () => {
@@ -100,7 +103,7 @@ describe("provider chips 显隐", () => {
     selectedWs: null, expandedParents: new Set<string>(), childConvs: {},
     scope: "all" as const, onScopeChange: vi.fn(), onFilter: vi.fn(),
     onSelect: vi.fn(), onToggleExpand: vi.fn(), onClearWs: vi.fn(),
-    onToggleFavorite: vi.fn(), onRestore: vi.fn(),
+   onRestore: vi.fn(),
   };
 
   it("availableProviders 不含 cursor 时隐藏 Cursor 标签", () => {

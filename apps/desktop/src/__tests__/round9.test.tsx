@@ -28,7 +28,7 @@ describe("ConversationList 列表内搜索", () => {
     conversations: convs, selectedConv: null, loading: false, providerFilter: null, selectedWs: null,
     expandedParents: new Set<string>(), childConvs: {}, scope: "all" as const, onScopeChange: () => {},
     onFilter: () => {}, onSelect: () => {}, onToggleExpand: () => {}, onClearWs: () => {},
-    onToggleFavorite: () => {}, ...over,
+    ...over,
   });
 
   it("无搜索关键词 → 显示全部", () => {
@@ -100,7 +100,7 @@ describe("ConversationDetail 标签自动补全", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={["urgent"]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         allTags={allTags}
       />,
@@ -120,7 +120,7 @@ describe("ConversationDetail 标签自动补全", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={[]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         allTags={allTags}
       />,
@@ -140,7 +140,7 @@ describe("ConversationDetail 标签自动补全", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={["urgent"]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}} 
         onAddTag={onAddTag} onRemoveTag={() => {}} onRescanAudit={() => {}}
         allTags={allTags}
       />,
@@ -160,7 +160,7 @@ describe("ConversationDetail 标签自动补全", () => {
         conv={baseConv} messages={[]} events={[]} completenessLabel="" loading={false} exporting={false}
         timelineMode={false} highlightMsgId={null} collapsedMsgs={new Set()} tags={["urgent"]}
         onToggleTimeline={() => {}} onExport={() => {}} onExtractKnowledge={() => {}}
-        onToggleCollapse={() => {}} onToggleFavorite={() => {}} onToggleArchive={() => {}}
+        onToggleCollapse={() => {}}
         onAddTag={() => {}} onRemoveTag={() => {}} onRescanAudit={() => {}}
         allTags={allTags}
       />,

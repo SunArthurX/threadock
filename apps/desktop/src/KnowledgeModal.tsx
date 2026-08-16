@@ -2,7 +2,7 @@
 // 一键复制为 Markdown 交接文档，支持重新提取与 Esc 关闭。
 // 增强：类型筛选 tabs（点击只看一类）+ JSON/Markdown 文件下载导出 +
 //       跨会话引用（同文件/同命令还出现在哪些会话里）
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { ExtractionResult } from "./types";
@@ -88,6 +88,17 @@ export function knowledgeToJson(k: ExtractionResult): string {
 export default function KnowledgeModal({ knowledge, conversationId, convTitle, onClose, onReextract, onJumpToConversation }: Props) {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
+  /** 导出 dropdown 开关（合并 MD/JSON 后的单按钮） */
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const downloadRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!downloadOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (downloadRef.current && !downloadRef.current.contains(e.target as Node)) setDownloadOpen(false);
+    };
+    window.addEventListener("mousedown", onClick);
+    return () => window.removeEventListener("mousedown", onClick);
+  }, [downloadOpen]);
 
   // Esc 关闭（与设置弹窗一致的交互习惯）
   useEffect(() => {
@@ -172,8 +183,24 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
           </h2>
           <div className="knowledge-modal-actions">
             <button className="action-btn" onClick={onReextract}>↻ 重新提取</button>
-            <button className="action-btn" onClick={() => exportFile("md")} title="导出为 Markdown 文件">⤓ MD</button>
-            <button className="action-btn" onClick={() => exportFile("json")} title="导出为 JSON 文件">⤓ JSON</button>
+            {/* MD/JSON 下载合并为单一 dropdown 按钮：节省顶栏空间 */}
+            <div className={`list-dropdown ${downloadOpen ? "open" : ""}`} ref={downloadRef}>
+              <button
+                className={`action-btn list-dropdown-btn ${downloadOpen ? "active" : ""}`}
+                onClick={() => setDownloadOpen((o) => !o)}
+                title="导出为 Markdown / JSON 文件"
+              >⤓ 导出 <span className="list-dropdown-caret">▾</span></button>
+              {downloadOpen && (
+                <div className="list-dropdown-panel right">
+                  <button className="list-dropdown-item" onClick={() => { setDownloadOpen(false); exportFile("md"); }}>
+                    <span className="list-dropdown-icon">📄</span><span>Markdown（.md）</span>
+                  </button>
+                  <button className="list-dropdown-item" onClick={() => { setDownloadOpen(false); exportFile("json"); }}>
+                    <span className="list-dropdown-icon">🧾</span><span>JSON（.json）</span>
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               className="action-btn"
               onClick={async () => {
