@@ -3,13 +3,27 @@
    参考 Linear / Raycast / Arc 的设计语言：克制的深色、精致的细节
    ═══════════════════════════════════════════════════════════════════ */
 
-/* 全局滚动条：macOS 风格（窄 + 圆角 + 渐隐） */
-* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
-*::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
-*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); border: 2px solid transparent; background-clip: padding-box; }
+/* 全局滚动条：macOS 风格（窄 + 圆角 + 渐隐，WKWebView overlay 模式适配） */
+html, body { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 199, 0.28) transparent; }
+* { scrollbar-width: thin; scrollbar-color: rgba(148, 163, 199, 0.28) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; -webkit-appearance: none; appearance: none; }
+*::-webkit-scrollbar-track { background: transparent; -webkit-appearance: none; }
+*::-webkit-scrollbar-track-piece { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 199, 0.22);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  -webkit-appearance: none;
+  transition: background 0.15s;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 199, 0.45);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 *::-webkit-scrollbar-corner { background: transparent; }
+*::-webkit-scrollbar-button { display: none; height: 0; width: 0; }
 
 /* 全局焦点环：键盘用户可见，鼠标点击隐藏 */
 :focus { outline: none; }
@@ -129,23 +143,23 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* 细滚动条 */
+/* 细滚动条（兼容旧 `::-webkit-scrollbar` 选择器，已被上方 `*::-webkit-scrollbar` 统一覆盖） */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 4px;
+  background: rgba(148, 163, 199, 0.22);
+  border-radius: 5px;
   border: 2px solid transparent;
-  background-clip: content-box;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-faint);
-  background-clip: content-box;
+  background: rgba(148, 163, 199, 0.45);
+  background-clip: padding-box;
 }
 
 ::selection {
