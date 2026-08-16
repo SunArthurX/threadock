@@ -165,6 +165,15 @@ export function BarChart({
           {tooltip}
         </div>
       )}
+      {/* 悬停柱子上方的时间 pill：直接在柱顶上方浮一个时间标签，比 tooltip 更显眼 */}
+      {hovered && hover && (
+        <div
+          className="barchart-hover-label"
+          style={{ left: hover.x }}
+        >
+          {axisLabel ? axisLabel(hovered) : hovered.label}
+        </div>
+      )}
     </div>
   );
 }

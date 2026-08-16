@@ -568,6 +568,17 @@ pub(crate) async fn get_conversation_note(
     Ok(repo.get_note(&id).map_err(|e| storage_err(e))?.map(|(note, updated_at)| ch_storage::NoteDto { note, updated_at }))
 }
 
+/// 列出全部会话标签（去重 + 频次倒序）—— 供前端标签自动补全。
+#[tauri::command]
+pub(crate) async fn list_all_tags(
+    state: tauri::State<'_, DaemonState>,
+    limit: Option<i64>,
+) -> Result<Vec<ch_storage::TagCountDto>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let rows = repo.list_all_tags(limit.unwrap_or(50)).map_err(|e| storage_err(e))?;
+    Ok(rows.into_iter().map(|(tag, count)| ch_storage::TagCountDto { tag, count }).collect())
+}
+
 /// 设置/清除会话的私有笔记。
 /// - note 为 None 或空串 → 删除
 /// - 非空 → 保存并返回 updated_at 毫秒时间戳（0 = 已删除）

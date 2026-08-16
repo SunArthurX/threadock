@@ -85,6 +85,8 @@ export default function ConversationList({
   });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pinned, setPinned] = useState<Set<string>>(loadPinnedIds);
+  // 列表内文本搜索：仅在标题/标签上匹配（不查内容避免 FTS 调用）
+  const [listSearch, setListSearch] = useState("");
   // 批量加标签：input + Enter 触发
   const [bulkTagInput, setBulkTagInput] = useState("");
   const togglePin = (id: string) => {
@@ -103,9 +105,20 @@ export default function ConversationList({
     return conversations.filter((c) => (c.started_at_ms ?? 0) >= cutoff);
   }, [conversations, dateFilter]);
 
+  // 列表内搜索：在 user_title / title 上做大小写不敏感子串匹配
+  const searchFiltered = useMemo(() => {
+    const kw = listSearch.trim().toLowerCase();
+    if (!kw) return dateFiltered;
+    return dateFiltered.filter((c) => {
+      const t1 = (c.user_title ?? "").toLowerCase();
+      const t2 = (c.title ?? "").toLowerCase();
+      return t1.includes(kw) || t2.includes(kw);
+    });
+  }, [dateFiltered, listSearch]);
+
   // 排序 + Pin 置顶优先（持久排序：state 变化时缓存到 localStorage）
   const sorted = useMemo(() => {
-    const arr = [...dateFiltered];
+    const arr = [...searchFiltered];
     arr.sort((a, b) => {
       // Pin 优先：置顶的永远在最前
       const pa = pinned.has(a.id) ? 0 : 1;
@@ -119,7 +132,7 @@ export default function ConversationList({
       return kb - ka;
     });
     return arr;
-  }, [dateFiltered, sortBy, pinned]);
+  }, [searchFiltered, sortBy, pinned]);
   const changeSortBy = (s: SortBy) => { setSortBy(s); try { localStorage.setItem("ch-sort-by", s); } catch { /* 静默 */ } };
 
   const toggleSelected = (id: string) => {
@@ -217,8 +230,24 @@ export default function ConversationList({
   return (
     <>
       <div className="panel-header">
-        会话 ({dateFilter === "all" ? conversations.length : `${dateFiltered.length}/${conversations.length}`})
+        会话 ({listSearch ? `${searchFiltered.length}/${dateFiltered.length}` : dateFilter === "all" ? conversations.length : `${dateFiltered.length}/${conversations.length}`})
         {selectedWs && <span className="clear-ws" onClick={onClearWs}>✕</span>}
+      </div>
+      {/* 列表内文本搜索：标题/user_title 子串匹配（不查内容） */}
+      <div className="list-search-row">
+        <input
+          className="list-search-input"
+          type="search"
+          placeholder="🔍 搜索会话标题…"
+          value={listSearch}
+          onChange={(e) => setListSearch(e.target.value)}
+        />
+        {listSearch && (
+          <button className="list-search-clear" onClick={() => setListSearch("")} title="清空搜索">✕</button>
+        )}
+        {listSearch && (
+          <span className="list-search-count">{searchFiltered.length} 匹配</span>
+        )}
       </div>
       {selectedIds.size > 0 && (
         <div className="bulk-bar">
@@ -311,6 +340,9 @@ export default function ConversationList({
       )}
       {!loading && conversations.length > 0 && dateFiltered.length === 0 && (
         <div className="empty">当前日期范围无会话（试试「全部」）</div>
+      )}
+      {!loading && conversations.length > 0 && dateFiltered.length > 0 && searchFiltered.length === 0 && (
+        <div className="empty">无匹配「{listSearch}」的会话（清空搜索试试）</div>
       )}
     </>
   );

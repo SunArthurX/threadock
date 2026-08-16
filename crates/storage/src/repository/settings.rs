@@ -11,6 +11,13 @@ pub struct NoteDto {
     pub note: String,
     pub updated_at: i64,
 }
+
+/// 标签频次 DTO（前后端契约）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TagCountDto {
+    pub tag: String,
+    pub count: i64,
+}
 use rusqlite::{params, OptionalExtension};
 
 /// 脱敏规则记录。

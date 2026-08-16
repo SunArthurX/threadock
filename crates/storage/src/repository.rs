@@ -43,7 +43,7 @@ pub use ops_queries::{
     MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };
-pub use settings::{NoteDto, RedactionRuleRecord};
+pub use settings::{NoteDto, RedactionRuleRecord, TagCountDto};
 
 impl Repository {
     /// 打开文件库，应用 PRAGMA 并迁移到最新版本。
@@ -1361,6 +1361,25 @@ impl Repository {
         let mut stmt = conn
             .prepare("SELECT tag FROM conversation_tags WHERE conversation_id = ? ORDER BY tag")?;
         let rows = stmt.query_map([conversation_id], |r| r.get::<_, String>(0))?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 列出全部会话标签（去重 + 按使用频次倒序）。
+    /// 返回 (tag, count) 列表。
+    pub fn list_all_tags(&self, limit: i64) -> StorageResult<Vec<(String, i64)>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT tag, COUNT(DISTINCT conversation_id) AS cnt
+             FROM conversation_tags
+             GROUP BY tag
+             ORDER BY cnt DESC, tag ASC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([limit], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
         let mut v = Vec::new();
         for r in rows {
             v.push(r?);

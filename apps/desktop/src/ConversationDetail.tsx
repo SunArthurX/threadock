@@ -15,6 +15,8 @@ interface Props {
   highlightMsgId: string | null;
   collapsedMsgs: Set<string>;
   tags: string[];
+  /** 父级滚动容器的 ref（用于「滚到底部」按钮 + 滚动检测） */
+  scrollContainerRef?: React.RefObject<HTMLElement | null>;
   onToggleTimeline: () => void;
   onExport: (format: "markdown" | "json") => void;
   onExtractKnowledge: () => void;
@@ -30,15 +32,17 @@ interface Props {
   note?: string | null;
   /** 保存/清除私有笔记。空串/null 表示删除。 */
   onNoteChange?: (note: string | null) => Promise<void> | void;
+  /** 全部标签（按使用频次倒序），供输入时自动补全 */
+  allTags?: { tag: string; count: number }[];
 }
 
 export default function ConversationDetail({
   conv, messages, events, completenessLabel, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
-  onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
+  scrollContainerRef, onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
   onToggleFavorite, onToggleArchive,
   onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
-  note, onNoteChange,
+  note, onNoteChange, allTags,
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -53,6 +57,37 @@ export default function ConversationDetail({
   // inline 标题编辑：双击标题进入 input；Enter 保存 / Esc 取消 / 失焦保存
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(conv.user_title ?? "");
+
+  // 标签自动补全：取已存在标签按子串匹配 + 排除当前会话已有的
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [sugIdx, setSugIdx] = useState(0);
+  const suggests = useMemo(() => {
+    const list = allTags ?? [];
+    const kw = tagInput.trim().toLowerCase();
+    const tagSet = new Set(tags);
+    const filtered = list.filter((s) => !tagSet.has(s.tag) && (kw === "" || s.tag.toLowerCase().includes(kw)));
+    return filtered.slice(0, 8);
+  }, [allTags, tags, tagInput]);
+  useEffect(() => { setSugIdx(0); }, [tagInput]);
+
+  // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
+  const [showJumpBottom, setShowJumpBottom] = useState(false);
+  useEffect(() => {
+    const el = scrollContainerRef?.current;
+    if (!el) return;
+    const onScroll = () => {
+      const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
+      setShowJumpBottom(dist > 200);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [scrollContainerRef, conv.id, timelineMode, messages.length]);
+  const jumpToBottom = () => {
+    const el = scrollContainerRef?.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
 
   // ⌘F / Ctrl+F 唤起消息内搜索
   useEffect(() => {
@@ -334,7 +369,7 @@ export default function ConversationDetail({
           <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); }} title="关闭（Esc）">✕</button>
         </div>
       )}
-      {/* 标签行始终显示（含输入框） */}
+      {/* 标签行始终显示（含输入框 + 自动补全） */}
       {(
         <div className="tag-row">
           {tags.map((t) => (
@@ -342,15 +377,36 @@ export default function ConversationDetail({
               #{t} <span className="tag-x">✕</span>
             </span>
           ))}
-          <input
-            className="tag-input"
-            value={tagInput}
-            placeholder="+ 标签"
-            onChange={(e) => setTagInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); }
-            }}
-          />
+          <div className="tag-input-wrap">
+            <input
+              className="tag-input"
+              value={tagInput}
+              placeholder="+ 标签"
+              onChange={(e) => setTagInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); setShowSuggest(false); }
+                if (e.key === "Escape") setShowSuggest(false);
+                if (e.key === "ArrowDown" && suggests.length > 0) { e.preventDefault(); setSugIdx((i) => Math.min(i + 1, suggests.length - 1)); }
+                if (e.key === "ArrowUp" && suggests.length > 0) { e.preventDefault(); setSugIdx((i) => Math.max(i - 1, 0)); }
+              }}
+              onFocus={() => setShowSuggest(true)}
+              onBlur={() => window.setTimeout(() => setShowSuggest(false), 150)}
+            />
+            {showSuggest && suggests.length > 0 && (
+              <div className="tag-suggest" onMouseDown={(e) => e.preventDefault()}>
+                {suggests.map((s, i) => (
+                  <button
+                    key={s.tag}
+                    className={`tag-suggest-item ${i === sugIdx ? "active" : ""}`}
+                    onClick={() => { onAddTag(s.tag); setTagInput(""); setShowSuggest(false); }}
+                  >
+                    <span>#{s.tag}</span>
+                    <span className="tag-suggest-count">{s.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
       {/* 私有笔记（不参与搜索/导出/统计；折叠默认开，保存自动） */}
@@ -378,6 +434,9 @@ export default function ConversationDetail({
           </div>
         ))}
       </>)}
+      {showJumpBottom && (
+        <button className="jump-bottom-btn" onClick={jumpToBottom} title="滚到底部">↓</button>
+      )}
     </div>
   );
 }

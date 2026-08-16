@@ -137,6 +137,8 @@ export default function App() {
   const [importMenu, setImportMenu] = useState(false);
   // 私有笔记（仅本地状态；切换会话时重新加载）
   const [noteText, setNoteText] = useState<string | null>(null);
+  // 全部标签（按使用频次倒序；懒加载，启动后 1.5s 拉一次）
+  const [allTags, setAllTags] = useState<{ tag: string; count: number }[]>([]);
   // 未导入新内容计数（导入按钮红点）：同步/导入完成后重算
   const [newCount, setNewCount] = useState<import("./ImportMenu").NewCount | null>(null);
   const refreshNewCount = async () => {
@@ -169,9 +171,10 @@ export default function App() {
   const [numberFormat, setNumberFormat] = useState<NumberFormat>(loadNumberFormat);
   const [currency, setCurrency] = useState<Currency>(loadCurrency);
   const [dateFormat, setDateFormat] = useState<DateFormat>(loadDateFormat);
-  const changeNumberFormat = (f: NumberFormat) => { setNumberFormat(f); saveNumberFormat(f); };
-  const changeCurrency = (c: Currency) => { setCurrency(c); saveCurrency(c); };
-  const changeDateFormat = (f: DateFormat) => { setDateFormat(f); saveDateFormat(f); };
+  const changeNumberFormat = (f: NumberFormat) => { setNumberFormat(f); saveNumberFormat(f); invoke("app_setting_set", { key: "pref_number_format", value: f }).catch(() => {}); };
+  const changeCurrency = (c: Currency) => { setCurrency(c); saveCurrency(c); invoke("app_setting_set", { key: "pref_currency", value: c }).catch(() => {}); };
+  const changeDateFormat = (f: DateFormat) => { setDateFormat(f); saveDateFormat(f); invoke("app_setting_set", { key: "pref_date_format", value: f }).catch(() => {}); };
+  const changeTheme = (t: "dark" | "light") => { setTheme(t); invoke("app_setting_set", { key: "pref_theme", value: t }).catch(() => {}); };
 
   // source panel
   const [sourcePanel, setSourcePanel] = useState<SourceKey | null>(null);
@@ -180,6 +183,7 @@ export default function App() {
   const [batchProgress, setBatchProgress] = useState<{done:number;total:number}|null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const detailPanelRef = useRef<HTMLDivElement>(null);
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
@@ -412,6 +416,12 @@ export default function App() {
       const n = await invoke<{ note: string; updated_at: number } | null>("get_conversation_note", { id: c.id });
       setNoteText(n?.note ?? null);
     } catch { setNoteText(null); }
+    // 刷新全部标签（标签增删后保持最新，乐观策略：每次选会话都拉一次；命中缓存避免重复调用）
+    refreshAllTags();
+  };
+  const refreshAllTags = async () => {
+    try { setAllTags(await invoke<{ tag: string; count: number }[]>("list_all_tags", { limit: 100 })); }
+    catch { /* 静默 */ }
   };
 
   const toggleExpand = async (c: Conversation) => {
@@ -605,13 +615,13 @@ export default function App() {
 
   const addTag = async (tag: string) => {
     if (!selectedConv) return;
-    try { await invoke("add_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); }
+    try { await invoke("add_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); refreshAllTags(); }
     catch (e) { showError(e); }
   };
 
   const removeTag = async (tag: string) => {
     if (!selectedConv) return;
-    try { await invoke("remove_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); }
+    try { await invoke("remove_tag", { id: selectedConv.id, tag }); await loadDetail(selectedConv.id); refreshAllTags(); }
     catch (e) { showError(e); }
   };
 
@@ -708,7 +718,7 @@ export default function App() {
           )}
           {/* 数据新鲜度：5 分内绿 / 30 分内黄 / 超期橙（悬停看精确时间） */}
           <FreshnessBadge />
-          <button className="theme-toggle" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <button className="theme-toggle" onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
           <button
@@ -770,7 +780,7 @@ export default function App() {
         {changelogOpen && <ChangelogModal onClose={() => setChangelogOpen(false)} />}
 
         {settingsOpen && (
-          <SettingsView theme={theme} onThemeChange={setTheme}
+          <SettingsView theme={theme} onThemeChange={changeTheme}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
             retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
             notifyOnExceed={notifyOnExceed} onNotifyOnExceedChange={changeNotifyOnExceed}
@@ -784,7 +794,7 @@ export default function App() {
             onReapplyImportedPrefs={(): void => {
               // 从 localStorage 重新读所有偏好（避免刷新页面）
               const v = localStorage.getItem("ch-theme");
-              if (v === "light" || v === "dark") setTheme(v);
+              if (v === "light" || v === "dark") changeTheme(v);
               const nf = localStorage.getItem("ch-pref-number");
               if (nf === "raw" || nf === "k" || nf === "wan" || nf === "yi") setNumberFormat(nf);
               const cu = localStorage.getItem("ch-pref-currency");
@@ -895,10 +905,11 @@ export default function App() {
                     }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </div>
-            <div className="panel">
+            <div className="panel" ref={detailPanelRef}>
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}
                     completenessLabel={completenessLabel}
+                    scrollContainerRef={detailPanelRef}
                     loading={msgsLoading} exporting={exporting} timelineMode={timelineMode}
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
                     tags={detailTags}
@@ -915,6 +926,7 @@ export default function App() {
                         showToast(`保存笔记失败：${String(e)}`, "error");
                       }
                     }}
+                    allTags={allTags}
                     onRenameTitle={async (title) => {
                       try {
                         await invoke("set_user_title", { id: selectedConv!.id, title });
