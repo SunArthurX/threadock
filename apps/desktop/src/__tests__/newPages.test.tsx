@@ -53,14 +53,16 @@ describe("热力图（活动节律页）", () => {
     expect(buildHeatGrid([]).cols).toHaveLength(0);
   });
 
-  it("颜色分档：0=近透明，最大=最深", () => {
-    expect(heatColor(0, 10)).toBe("rgba(255, 255, 255, 0.04)"); // 空档极淡底
+  it("颜色分档：0=透明，最大=亮绿（GitHub 5 档绿）", () => {
+    expect(heatColor(0, 10)).toBe("transparent"); // 0 档透明 + CSS 边框
     const darkest = heatColor(10, 10);
     const lightest = heatColor(2, 10);
     expect(darkest).not.toBe(lightest);
     // 5 档不同
     expect(heatColor(0, 100)).not.toBe(heatColor(20, 100));
     expect(heatColor(40, 100)).not.toBe(heatColor(70, 100));
+    // GitHub 绿色：最深档 = #39d353
+    expect(heatColor(100, 100)).toBe("#39d353");
   });
 });
 
@@ -78,7 +80,7 @@ describe("提示词收藏（知识库页）", () => {
 });
 
 describe("活动页 5 轮优化", () => {
-  it("热力图带月份标签", () => {
+  it("热力图带月份标签（GitHub 风格英文 Jan/Feb/...）", () => {
     const cells = Array.from({ length: 40 }, (_, i) => ({
       day: `2026-07-${String(20 + i).padStart(2, "0")}`,
       calls: i,
@@ -88,8 +90,8 @@ describe("活动页 5 轮优化", () => {
     })));
     const { labels } = buildHeatGrid(cells);
     const texts = labels.map((l) => l.label);
-    expect(texts).toContain("7月");
-    expect(texts).toContain("8月");
+    expect(texts).toContain("Jul");
+    expect(texts).toContain("Aug");
   });
 
   it("时段分组正确", () => {
@@ -266,14 +268,14 @@ describe("热力图防御（黑屏回归）", () => {
     expect(r.cols).toHaveLength(0);
   });
 
-  it("合法数据网格与月份标签正常", () => {
+  it("合法数据网格与月份标签正常（GitHub 风格英文 Aug）", () => {
     const r = buildHeatGrid([
       { day: "2026-08-10", calls: 3 },
       { day: "2026-08-11", calls: 5 },
       { day: "2026-08-12", calls: 1 },
     ]);
     expect(r.max).toBe(5);
-    expect(r.labels[0].label).toBe("8月");
+    expect(r.labels[0].label).toBe("Aug");
     expect(r.cols.length).toBeGreaterThanOrEqual(1);
     // 08-10 周一：首列首格补 null，第二格为 08-10
     expect(r.cols[0][0]).toBeNull();

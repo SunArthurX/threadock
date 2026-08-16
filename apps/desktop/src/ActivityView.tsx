@@ -70,16 +70,28 @@ export function activityToCsv(s: {
   return "\uFEFF" + out.join("\n");
 }
 
-/** 热力图单元格颜色（5 档 sky 渐变）。 */
+/** 热力图单元格颜色（5 档 GitHub 风格绿色梯度）。 */
 export function heatColor(calls: number, max: number): string {
-  if (calls === 0) return "rgba(255, 255, 255, 0.04)";
+  if (calls === 0) return "transparent"; // 0 档：透明 + 边框（CSS）
   const r = max > 0 ? calls / max : 0;
-  if (r > 0.75) return "#0369a1"; // sky-700
-  if (r > 0.5) return "#0284c7"; // sky-600
-  if (r > 0.25) return "#0ea5e9"; // sky-500
-  if (r > 0.1) return "#38bdf8"; // sky-400
-  return "#7dd3fc"; // sky-300
+  if (r > 0.75) return "#39d353"; // 4 档：亮绿
+  if (r > 0.5) return "#26a641"; // 3 档：中绿
+  if (r > 0.25) return "#006d32"; // 2 档：深绿
+  return "#0e4429"; // 1 档：最深绿（>0 但比例小）
 }
+
+/** 0-4 档分档（与 heatColor 一致），用于 legend 显示 5 个独立色块。 */
+export function heatLevel(calls: number, max: number): number {
+  if (calls === 0) return 0;
+  const r = max > 0 ? calls / max : 0;
+  if (r > 0.75) return 4;
+  if (r > 0.5) return 3;
+  if (r > 0.25) return 2;
+  return 1;
+}
+
+/** 5 档 GitHub 绿色（按 0-4 索引）。legend 渲染用。 */
+export const HEAT_LEVELS = ["transparent", "#0e4429", "#006d32", "#26a641", "#39d353"];
 
 /** 工作日判定（0=周日）。 */
 export function isWeekend(day: string): boolean {
@@ -139,7 +151,8 @@ export function buildHeatGrid(cells: { day: string; calls: number; sessions?: nu
     const c = byDay.get(key);
     cur.push(c ? { day: key, calls: c.calls, sessions: c.sessions ?? 0 } : { day: key, calls: 0, sessions: 0 });
     if (m0 !== lastMonth) {
-      labels.push({ col: colIdx, label: `${m0}月` });
+      const en = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      labels.push({ col: colIdx, label: en[m0] ?? `${m0}月` });
       lastMonth = m0;
     }
     if (cur.length === 7) {
@@ -432,9 +445,10 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">
-          每日协作热力图
-          <span className="ops-card-sub">点击格子查看当日详情</span>
+        <div className="ops-card-title" style={{ alignItems: "center" }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+            {totalCalls.toLocaleString()} contributions in the last {days} days
+          </span>
           {toolList.length > 0 && (
             <span className="heat-tool-filter" style={{ marginLeft: "auto", display: "inline-flex", gap: 4, alignItems: "center" }}>
               <span style={{ fontSize: 11, opacity: 0.6 }}>维度：</span>
@@ -476,7 +490,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
               </div>
               <div className="heatmap-grid">
                 <div className="heat-dow-col">
-                  {["", "一", "", "三", "", "五", ""].map((d, ri) => (
+                  {["", "Mon", "", "Wed", "", "Fri", ""].map((d, ri) => (
                     <span key={ri} className="heat-dow-label">{d}</span>
                   ))}
                 </div>
@@ -503,11 +517,11 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
               </div>
             </div>
             <div className="heat-legend">
-              少
-              {[0, 0.15, 0.35, 0.6, 0.85, 1].map((r) => (
-                <span key={r} className="heat-legend-cell" style={{ background: heatColor(r * grid.max, grid.max) }} />
+              Less
+              {HEAT_LEVELS.map((c, i) => (
+                <span key={i} className="heat-legend-cell" style={{ background: c, border: i === 0 ? "1px solid rgba(255,255,255,0.1)" : "1px solid transparent" }} />
               ))}
-              多 · <span style={{ marginLeft: 12, opacity: 0.6 }}>▢ 今天边框 · ⬛ 选中黄框</span>
+              More
             </div>
 
             {selectedCell && (
