@@ -29,17 +29,22 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 describe("活动页热力图渲染", () => {
-  it("真实形态数据下必须渲染出热力格（含月份标签 + day-of-week）", async () => {
+  it("真实形态数据下必须渲染出热力格（GitHub 7×N 布局：含月份标签 + day-of-week）", async () => {
     const { container, findByText } = render(<ActivityView />);
     expect(await findByText(/contributions in the last/)).toBeTruthy();
     // 8月1日(周六)~5日(周三)：首列补 6 个 null + 数据天 + 尾列补齐 → 至少 14 格
     const cells = container.querySelectorAll(".heat-cell");
     expect(cells.length).toBeGreaterThanOrEqual(14);
-    // 月份标签（GitHub 风格英文 Aug）
-    expect(container.querySelector(".heat-month-label")?.textContent).toContain("Aug");
-    // day-of-week 标签（横向布局：顶部 7 个 .heat-weekday-cell）
-    const dowLabels = container.querySelectorAll(".heat-weekday-cell");
+    // 月份标签（顶部 .heat-month-label-cell 含 GitHub 风格英文 Aug）
+    const monthLabels = container.querySelectorAll(".heat-month-label-cell");
+    expect(monthLabels.length).toBeGreaterThan(0);
+    const monthTexts = [...monthLabels].map((m) => m.textContent ?? "");
+    expect(monthTexts.some((t) => t === "Aug")).toBe(true);
+    // day-of-week 标签（左侧 .heat-dow-col 7 个：Mon-Sun）
+    const dowLabels = container.querySelectorAll(".heat-dow-label");
     expect(dowLabels.length).toBe(7);
+    const dowTexts = [...dowLabels].map((d) => d.textContent ?? "");
+    expect(dowTexts).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
   });
 
   it("点击格子后显示 day detail panel", async () => {

@@ -3078,21 +3078,15 @@ button {
 }
 .kb-progress-label { opacity: 0.7; white-space: nowrap; }
 
-/* 活动优化 - 横向布局：每行 = 1 周（7 cells 横排），多行垂直堆叠 */
+/* 活动优化 - GitHub 标准：7 行（Mon→Sun）× N 列（周数），整体横躺 */
 .heatmap-scroll { overflow-x: auto; padding-bottom: 2px; }
-.heatmap-rows-wrap { display: inline-flex; flex-direction: column; gap: 3px; min-width: 0; }
-.heatmap-weekday-header { display: flex; gap: 3px; align-items: center; margin-bottom: 4px; }
-.heat-month-spacer { width: 28px; flex-shrink: 0; }
-.heat-weekday-cell { width: 12px; font-size: 9.5px; opacity: 0.55; text-align: center; flex-shrink: 0; }
-.heatmap-row { display: flex; gap: 3px; align-items: center; }
-.heat-month-label { width: 28px; font-size: 10.5px; opacity: 0.7; white-space: nowrap; flex-shrink: 0; }
-/* 保留旧 class 兼容（部分子组件可能仍引用） */
-.heatmap-months { display: flex; gap: 3px; margin-bottom: 4px; min-width: 0; }
+.heatmap-months-row { display: flex; gap: 3px; margin-bottom: 4px; padding-left: 30px; min-width: 0; }
+.heat-dow-spacer { width: 30px; flex-shrink: 0; }
+.heat-month-label-cell { width: 15px; flex-shrink: 0; font-size: 10.5px; opacity: 0.7; white-space: nowrap; text-align: left; }
+/* Day-of-week 左侧固定列（高度对齐到 12px cell + 3px gap） */
 .heatmap-grid { display: flex; gap: 6px; min-width: 0; }
-.heat-dow-col { display: flex; flex-direction: column; gap: 3px; padding-top: 0; }
-.heat-dow-label { width: 26px; height: 12px; font-size: 10.5px; opacity: 0.55; display: flex; align-items: center; justify-content: flex-end; padding-right: 6px; }
-.heat-months-wrap { display: flex; align-items: center; margin-bottom: 2px; }
-.heat-months-wrap .heat-dow-label { opacity: 0; }
+.heat-dow-col { display: flex; flex-direction: column; gap: 3px; padding-top: 0; flex-shrink: 0; }
+.heat-dow-label { width: 30px; height: 12px; font-size: 9.5px; opacity: 0.55; display: flex; align-items: center; justify-content: flex-start; flex-shrink: 0; }
 
 /* 数据新鲜度徽标（顶栏） */
 .freshness-badge {
@@ -3308,26 +3302,6 @@ button {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35);
   border-color: rgba(255, 255, 255, 0.3);
 }
-
-/* 热力图 hover 自定义 tooltip：定位在鼠标位置，避开原生 title 延迟 */
-.heat-tooltip {
-  position: fixed;
-  z-index: 100;
-  background: var(--bg-elevated, #161a25);
-  border: 1px solid var(--border-default, rgba(148, 163, 199, 0.14));
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 11.5px;
-  pointer-events: none;
-  transform: translate(12px, 12px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
-  min-width: 180px;
-  line-height: 1.5;
-}
-.heat-tooltip-day { font-weight: 600; color: var(--text-primary, #e6e9f2); margin-bottom: 2px; }
-.heat-tooltip-stats { color: var(--text-secondary, #9aa3bd); font-size: 11px; }
-.heat-tooltip-stats b { color: var(--accent, #4f8cff); font-weight: 600; }
-.heat-tooltip-tag { display: inline-block; margin-top: 4px; padding: 1px 6px; background: rgba(96, 165, 250, 0.18); color: #60a5fa; border-radius: 3px; font-size: 10px; }
 
 .error-boundary { margin: 40px auto; max-width: 480px; text-align: center; }
 .error-boundary-title { font-size: 16px; font-weight: 600; color: #f59e0b; margin-bottom: 10px; }
