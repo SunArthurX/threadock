@@ -136,7 +136,7 @@ describe("ConversationList 批量加标签", () => {
     { id: "c2", provider: "claude-code", source_conversation_id: "sc2", title: "标题2", user_title: null, status: null, model: null, completeness_score: null, workspace_id: null, source_parent_id: null, started_at_ms: Date.now() - 7200_000, updated_at_ms: Date.now() - 7200_000, child_count: 0, favorite: false, archived: false },
   ];
 
-  it("输入 # 标签 + Enter → 调用 onBulkAddTag 去除 # 前缀", () => {
+  it("输入 # 标签 + Enter → 调用 onBulkAddTag 去除 # 前缀", async () => {
     const onBulkAddTag = vi.fn(async () => {});
     const { container } = render(
       <ConversationList
@@ -146,11 +146,13 @@ describe("ConversationList 批量加标签", () => {
         onToggleFavorite={() => {}} onBulkAddTag={onBulkAddTag}
       />,
     );
-    // 全选
-    const checkboxes = container.querySelectorAll(".list-item-check") as NodeListOf<HTMLInputElement>;
-    checkboxes.forEach((c) => { if (!c.checked) fireEvent.click(c); });
+    // 第 11 轮：⌘点击多选替代 checkbox
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
+    fireEvent.click(items[1], { metaKey: true });
     // 输入标签 + Enter
     const input = container.querySelector(".bulk-tag-input") as HTMLInputElement;
+    expect(input).toBeTruthy();
     fireEvent.change(input, { target: { value: "# urgent" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onBulkAddTag).toHaveBeenCalledWith(["c1", "c2"], "urgent");
@@ -165,9 +167,11 @@ describe("ConversationList 批量加标签", () => {
         onToggleFavorite={() => {}}
       />,
     );
-    const checkboxes = container.querySelectorAll(".list-item-check") as NodeListOf<HTMLInputElement>;
-    checkboxes.forEach((c) => fireEvent.click(c));
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
+    fireEvent.click(items[1], { metaKey: true });
     const input = container.querySelector(".bulk-tag-input") as HTMLInputElement;
+    expect(input).toBeTruthy();
     fireEvent.change(input, { target: { value: "x" } });
     // 不抛错即可
     expect(() => fireEvent.keyDown(input, { key: "Enter" })).not.toThrow();

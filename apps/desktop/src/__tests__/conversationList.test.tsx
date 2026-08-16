@@ -1,4 +1,5 @@
-// 会话列表日期快筛测试
+// 会话列表测试：日期 dropdown + ⌘点击多选 + 批量操作
+// 第 11 轮改版：4 行 filter-chip → 1 行 toolbar + 3 dropdown；checkbox 移除 → ⌘点击多选。
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationList from "../ConversationList";
@@ -6,7 +7,6 @@ import type { Conversation } from "../types";
 
 const now = Date.now();
 
-/** 构造单个测试 props，必要时注入批量回调 */
 function makeProps(
   convs: Conversation[],
   extra: Partial<{
@@ -52,101 +52,127 @@ const make = (id: string, startedAgoDays: number | null): Conversation => ({
   completeness_score: null,
 });
 
-describe("ConversationList 日期快筛", () => {
+/** 打开第 N 个 dropdown（第 0=scope, 1=date, 2=sort），返回面板元素（异步等 React 渲染）。 */
+async function openDropdown(container: HTMLElement, idx: number) {
+  const btns = container.querySelectorAll<HTMLButtonElement>(".list-dropdown-btn");
+  fireEvent.click(btns[idx]!);
+  // 只有打开的 dropdown 才渲染 panel；用「开放中」筛选
+  await waitFor(() => {
+    const opens = container.querySelectorAll(".list-dropdown.open");
+    expect(opens.length).toBeGreaterThanOrEqual(1);
+  });
+  // 拿刚打开的那个 panel（按 btn index 配对）
+  const panels = container.querySelectorAll(".list-dropdown-panel");
+  // panels 顺序 = DOM 顺序，但只有打开的渲染。简单方案：取最后一个
+  // 实际上更稳的是：找第 N 个 .list-dropdown 下的 panel
+  const dropdownDivs = container.querySelectorAll(".list-dropdown");
+  const targetPanel = dropdownDivs[idx]?.querySelector(".list-dropdown-panel") as HTMLElement;
+  return targetPanel ?? panels[panels.length - 1] as HTMLElement;
+}
+
+/** 在指定 dropdown 面板里点击指定 label 的选项。 */
+async function pickDropdownItem(container: HTMLElement, idx: number, label: string) {
+  const panel = await openDropdown(container, idx);
+  const item = [...panel.querySelectorAll(".list-dropdown-item")].find((b) => b.textContent === label);
+  expect(item).toBeTruthy();
+  fireEvent.click(item!);
+}
+
+describe("ConversationList 日期快筛（dropdown）", () => {
   it("默认「全部」显示所有会话", () => {
     const convs = [make("a", 0), make("b", 5), make("c", 100)];
     const { container } = render(<ConversationList {...makeProps(convs)} />);
     expect(container.querySelectorAll(".list-item").length).toBe(3);
-    expect(container.querySelector(".panel-header")?.textContent).toContain("(3)");
+    expect(container.querySelector(".panel-header")?.textContent).toContain("3");
   });
 
   it("切到「今日」只显示当天会话", async () => {
     const convs = [make("today", 0), make("yesterday", 1.5), make("old", 100)];
-    const { container, getByText } = render(<ConversationList {...makeProps(convs)} />);
-    fireEvent.click(getByText("今日"));
+    const { container } = render(<ConversationList {...makeProps(convs)} />);
+    await pickDropdownItem(container, 1, "今日");
     await waitFor(() => {
       expect(container.querySelectorAll(".list-item").length).toBe(1);
       expect(container.querySelector(".list-item")?.textContent).toContain("today");
     });
-    // header 显示 filtered/total
-    expect(container.querySelector(".panel-header")?.textContent).toContain("1/3");
+    expect(container.querySelector(".panel-header")?.textContent).toContain("1 / 3");
   });
 
   it("切到「近 7 天」排除更早的会话", async () => {
     const convs = [make("a", 0), make("b", 3), make("c", 6), make("d", 10)];
-    const { container, getByText } = render(<ConversationList {...makeProps(convs)} />);
-    fireEvent.click(getByText("近 7 天"));
+    const { container } = render(<ConversationList {...makeProps(convs)} />);
+    await pickDropdownItem(container, 1, "近 7 天");
     await waitFor(() => {
-      // 0/3/6 天都在 7 天内，10 天不在
-      expect(container.querySelectorAll(".list-item").length).toBe(3);
+      expect(container.querySelectorAll(".list-item").length).toBe(3); // 0/3/6 在内，10 在外
     });
   });
 
   it("所有会话都超期时显示「当前日期范围无会话」空态", async () => {
     const convs = [make("a", 100), make("b", 200)];
-    const { container, getByText } = render(<ConversationList {...makeProps(convs)} />);
-    fireEvent.click(getByText("近 7 天"));
+    const { container } = render(<ConversationList {...makeProps(convs)} />);
+    await pickDropdownItem(container, 1, "近 7 天");
     await waitFor(() => {
       expect(container.querySelector(".empty")?.textContent).toMatch(/当前日期范围无会话/);
     });
   });
 
-  it("切回「全部」恢复显示", async () => {
+  it("切回「全部时间」恢复显示", async () => {
     const convs = [make("a", 0), make("b", 100)];
     const { container } = render(<ConversationList {...makeProps(convs)} />);
-    // 第二个「全部」是 date filter 的 chip
-    const allChips = [...container.querySelectorAll(".filter-chip")].filter((b) => b.textContent === "全部");
-    expect(allChips.length).toBeGreaterThanOrEqual(1);
-    // 点 date filter 的「近 7 天」
-    const weekChip = [...container.querySelectorAll(".filter-chip")].find((b) => b.textContent === "近 7 天");
-    fireEvent.click(weekChip!);
+    await pickDropdownItem(container, 1, "近 7 天");
     await waitFor(() => expect(container.querySelectorAll(".list-item").length).toBe(1));
-    // 找日期行的「全部」（第二个）
-    const dateAllChip = allChips[allChips.length - 1];
-    fireEvent.click(dateAllChip);
+    await pickDropdownItem(container, 1, "全部时间");
     await waitFor(() => expect(container.querySelectorAll(".list-item").length).toBe(2));
   });
 });
 
-describe("ConversationList 多选 + 批量操作", () => {
-  it("勾选 2 个 checkbox → 出现 bulk-bar 显示「已选 2 条」+ 5 个动作按钮", async () => {
+describe("ConversationList ⌘点击多选 + 批量操作", () => {
+  it("⌘点击 2 个 list-item → 出现 bulk-bar 显示「已选 2 条」", async () => {
     const convs = [make("a", 0), make("b", 1), make("c", 2)];
     const { container } = render(<ConversationList {...makeProps(convs)} />);
-    const checks = container.querySelectorAll<HTMLInputElement>(".list-item-check");
-    expect(checks.length).toBe(3);
-    fireEvent.click(checks[0]);
-    fireEvent.click(checks[1]);
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
+    fireEvent.click(items[1], { metaKey: true });
     await waitFor(() => {
       const bar = container.querySelector(".bulk-bar");
       expect(bar).toBeTruthy();
       expect(bar?.textContent).toContain("已选 2");
     });
-    expect(container.querySelectorAll(".bulk-btn").length).toBeGreaterThanOrEqual(5);
   });
 
-  it("点 ★ 收藏触发 onBulkFavorite([ids], true)", async () => {
+  it("点 ★ 收藏按钮触发 onBulkFavorite([ids], true)", async () => {
     const onBulkFav = vi.fn();
     const convs = [make("a", 0), make("b", 1)];
     const { container } = render(<ConversationList {...makeProps(convs)} onBulkFavorite={onBulkFav} />);
-    const checks = container.querySelectorAll<HTMLInputElement>(".list-item-check");
-    fireEvent.click(checks[0]);
-    fireEvent.click(checks[1]);
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
+    fireEvent.click(items[1], { metaKey: true });
     await waitFor(() => expect(container.querySelector(".bulk-bar")).toBeTruthy());
-    fireEvent.click(container.querySelectorAll(".bulk-btn")[2]); // index 0=全选, 1=清空, 2=收藏
+    const favBtn = [...container.querySelectorAll(".bulk-btn")].find((b) => b.textContent?.includes("收藏"))!;
+    fireEvent.click(favBtn);
     await waitFor(() => expect(onBulkFav).toHaveBeenCalledWith(["a", "b"], true));
   });
 
   it("全选/清空切换", async () => {
     const convs = [make("a", 0), make("b", 1), make("c", 2)];
     const { container } = render(<ConversationList {...makeProps(convs)} />);
-    const checks = container.querySelectorAll<HTMLInputElement>(".list-item-check");
-    fireEvent.click(checks[0]);
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
     await waitFor(() => expect(container.querySelector(".bulk-bar")?.textContent).toContain("已选 1"));
     // 全选
     fireEvent.click([...container.querySelectorAll(".bulk-btn")].find((b) => b.textContent === "全选")!);
     await waitFor(() => expect(container.querySelector(".bulk-bar")?.textContent).toContain("已选 3"));
     // 清空
     fireEvent.click([...container.querySelectorAll(".bulk-btn")].find((b) => b.textContent === "清空")!);
+    await waitFor(() => expect(container.querySelector(".bulk-bar")).toBeNull());
+  });
+
+  it("Esc 清空多选", async () => {
+    const convs = [make("a", 0), make("b", 1)];
+    const { container } = render(<ConversationList {...makeProps(convs)} />);
+    const items = container.querySelectorAll<HTMLDivElement>(".list-item");
+    fireEvent.click(items[0], { metaKey: true });
+    await waitFor(() => expect(container.querySelector(".bulk-bar")?.textContent).toContain("已选 1"));
+    fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(container.querySelector(".bulk-bar")).toBeNull());
   });
 });

@@ -3302,3 +3302,103 @@ button {
 /* 右下角 onboarding 重新唤起按钮 */
 .onboarding-fab { position: fixed; right: 16px; bottom: 38px; width: 36px; height: 36px; border-radius: 50%; background: var(--accent, #4f8cff); color: #fff; border: none; font-size: 16px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 90; opacity: 0.85; transition: opacity 0.15s, transform 0.15s; }
 .onboarding-fab:hover { opacity: 1; transform: scale(1.06); }
+
+/* ──────────────────────────────────────────────────────────
+   第 11 轮：对话页左侧精简（4 行 filter → 1 行 toolbar + 3 dropdown）
+   列表项去复选框 / 去 hover-pin-toggle —— 全部走右键菜单
+   ────────────────────────────────────────────────────────── */
+.list-toolbar { padding: 6px 10px 4px; border-bottom: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 5px; }
+.list-toolbar .list-search-input { width: 100%; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); color: var(--text); font-size: 12px; }
+.list-toolbar .list-search-input:focus { outline: none; border-color: var(--accent, #4f8cff); }
+.list-search-clear { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; padding: 0 4px; }
+.list-search-clear:hover { color: var(--text); }
+.list-toolbar-row { display: flex; gap: 4px; align-items: stretch; min-width: 0; }
+.list-toolbar-row .list-dropdown { flex: 1; min-width: 0; }
+
+.panel-header-count { font-size: 10.5px; opacity: 0.55; font-weight: 540; margin-left: 6px; }
+
+/* 通用 dropdown：苹果风（细边 + 圆角 + 阴影） */
+.list-dropdown { position: relative; min-width: 0; }
+.list-dropdown-btn { width: 100%; display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-2); color: var(--text); font-size: 11.5px; cursor: pointer; transition: border-color 0.12s, background 0.12s; min-width: 0; }
+.list-dropdown-btn:hover { border-color: var(--accent, #4f8cff); }
+.list-dropdown-btn.active { border-color: var(--accent, #4f8cff); background: var(--accent-bg, rgba(79,140,255,0.06)); }
+.list-dropdown-icon { flex-shrink: 0; font-size: 11px; opacity: 0.85; }
+.list-dropdown-label { flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.list-dropdown-caret { flex-shrink: 0; font-size: 9px; opacity: 0.55; transition: transform 0.15s; }
+.list-dropdown.open .list-dropdown-caret { transform: rotate(180deg); }
+.list-dropdown-panel { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 100%; max-width: 220px; background: var(--bg-elevated, #1f232e); border: 1px solid var(--border, rgba(255,255,255,0.1)); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.4); padding: 3px; display: flex; flex-direction: column; }
+.list-dropdown-panel.right { left: auto; right: 0; }
+.list-dropdown-item { display: flex; align-items: center; gap: 7px; padding: 5px 9px; border: none; background: transparent; color: var(--text); font-size: 11.5px; cursor: pointer; border-radius: 4px; text-align: left; }
+.list-dropdown-item:hover { background: var(--accent-bg, rgba(79,140,255,0.12)); }
+.list-dropdown-item.active { color: var(--accent, #4f8cff); font-weight: 600; }
+
+/* 来源 chip 折叠：仅在多来源时显示 */
+.list-provider-chips { display: flex; flex-wrap: wrap; gap: 3px; padding: 0; }
+.provider-chip { padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-muted); font-size: 10.5px; cursor: pointer; transition: all 0.12s; }
+.provider-chip:hover { color: var(--text); border-color: var(--accent); }
+.provider-chip.active { background: var(--accent, #4f8cff); color: #fff; border-color: var(--accent); }
+
+/* 列表项：去复选框后，padding 调整；pinned 状态左侧细金线 */
+.list-item { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background var(--transition); border-left: 2px solid transparent; position: relative; }
+.list-item:hover { background: var(--bg-hover); }
+.list-item.active { background: var(--accent-bg); border-left-color: var(--accent); }
+.list-item.pinned::before { content: "📌"; position: absolute; left: -2px; top: 50%; transform: translateY(-50%); font-size: 8px; opacity: 0; }
+.list-item.selected-multi { background: var(--accent-bg, rgba(79,140,255,0.08)); }
+.list-item .title { font-size: 13px; font-weight: 540; color: var(--text-primary); margin-bottom: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 5px; }
+.list-item .title .pin-star { font-size: 11px; flex-shrink: 0; }
+.list-item .meta { font-size: 10.5px; color: var(--text-muted); display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.list-item .meta .meta-time { font-variant-numeric: tabular-nums; }
+.list-item .meta .meta-child { font-size: 9.5px; opacity: 0.7; }
+.list-item .meta .meta-model { font-size: 9.5px; opacity: 0.65; font-family: ui-monospace, "SF Mono", monospace; }
+.list-item .meta .restore-btn { margin-left: auto; color: var(--accent); font-size: 10.5px; cursor: pointer; }
+.list-item .meta .restore-btn:hover { text-decoration: underline; }
+
+/* 子任务缩进 + 灰化（视觉降级） */
+.list-item.child-item { padding-left: 26px; opacity: 0.78; }
+.list-item.child-item .title { font-size: 12px; }
+.child-list { border-left: 1px dashed var(--border-subtle, rgba(255,255,255,0.08)); margin-left: 14px; }
+.child-arrow { color: var(--text-muted); opacity: 0.6; font-size: 11px; flex-shrink: 0; }
+.expand-toggle { color: var(--text-muted); font-size: 9px; width: 10px; flex-shrink: 0; cursor: pointer; opacity: 0.65; transition: transform 0.15s, opacity 0.12s; }
+.expand-toggle:hover { opacity: 1; }
+
+/* 通用右键菜单 */
+.contextmenu-backdrop { position: fixed; inset: 0; z-index: 199; }
+.contextmenu { position: fixed; z-index: 200; min-width: 180px; max-width: 240px; background: var(--bg-elevated, #1f232e); border: 1px solid var(--border, rgba(255,255,255,0.12)); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,0.5); padding: 4px; font-size: 12.5px; }
+.contextmenu-item { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 5px; cursor: pointer; user-select: none; transition: background 0.1s; color: var(--text); }
+.contextmenu-item.active { background: var(--accent, #4f8cff); color: #fff; }
+.contextmenu-item.disabled { opacity: 0.4; cursor: not-allowed; }
+.contextmenu-item.danger { color: #f87171; }
+.contextmenu-item.danger.active { background: #dc2626; color: #fff; }
+.contextmenu-icon { width: 14px; flex-shrink: 0; text-align: center; font-size: 12px; }
+.contextmenu-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contextmenu-sep { height: 1px; background: var(--border-subtle, rgba(255,255,255,0.06)); margin: 3px 4px; }
+
+/* 活动页热力图：宽度自适应（容器缩放时横向渐隐提示可滚） */
+.heatmap-scroll { overflow-x: auto; padding-bottom: 2px; position: relative; mask-image: linear-gradient(to right, black 96%, transparent 100%); -webkit-mask-image: linear-gradient(to right, black 96%, transparent 100%); }
+.heatmap { display: flex; gap: 4px; min-width: 0; }
+.heatmap-col { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+.heatmap-months { display: flex; gap: 4px; margin-bottom: 4px; min-width: 0; }
+.heatmap-grid { display: flex; gap: 6px; min-width: 0; }
+
+/* 维度下拉框：max-width + 文本省略，避免撑破工具栏 */
+.heat-tool-filter .heat-tool-select { max-width: 180px; text-overflow: ellipsis; overflow: hidden; }
+
+/* 工具栏自适应 wrap：避免在窄屏挤出 */
+.ops-card-title { flex-wrap: wrap; row-gap: 6px; }
+.ops-card-title .ops-range { flex-wrap: wrap; }
+.ops-card-title .heat-tool-filter { flex-wrap: wrap; max-width: 100%; }
+
+/* 空态 CTA：突出行动按钮 */
+.empty-cta { padding: 48px 32px; text-align: center; }
+.empty-cta .empty-icon { font-size: 48px; opacity: 0.55; margin-bottom: 12px; }
+.empty-cta .empty-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.empty-cta .empty-hint { font-size: 12.5px; opacity: 0.7; line-height: 1.7; }
+.empty-cta kbd { display: inline-block; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; font-family: ui-monospace, monospace; font-size: 11px; background: var(--bg-2); }
+
+/* 详情页（右侧 panel）自适应宽度：占满剩余空间 */
+.panel:last-child { display: flex; flex-direction: column; min-width: 0; }
+.conv-detail { flex: 1; min-width: 0; max-width: 100%; }
+
+/* Settings / Knowledge / Help / Onboarding / Changelog / Report modal 自适应视口 */
+.settings-modal { max-width: 92vw; max-height: 88vh; overflow: hidden; display: flex; flex-direction: column; }
+.settings-modal .settings-body { overflow-y: auto; flex: 1; min-height: 0; }

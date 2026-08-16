@@ -586,6 +586,48 @@ export default function App() {
       loadDetail(c.id);
     } catch (e) { showError(e); }
   };
+  // 单条归档（右键菜单触发）：复用 toggleArchive 但传 c
+  const archiveOne = async (c: Conversation) => {
+    try {
+      await invoke("set_archived", { id: c.id, archived: !c.archived });
+      await loadConversations();
+      if (selectedConv?.id === c.id) setSelectedConv({ ...selectedConv, archived: !c.archived });
+      showToast(!c.archived ? "🗄 已归档" : "📤 已取消归档");
+    } catch (e) { showError(e); }
+  };
+  // 单条删除（带 undo）：复用 onBulkDelete 内部循环
+  const deleteOneWithUndo = async (c: Conversation) => {
+    const snapshot = conversations.filter((x) => x.id === c.id).map((x) => ({ ...x }));
+    try {
+      for (const id of [c.id]) {
+        try { await invoke("soft_delete_conversation", { id }); } catch { /* 单条失败不影响整体 */ }
+      }
+      await loadConversations();
+      if (selectedConv?.id === c.id) setSelectedConv(null);
+      showToast(
+        `🗑 已移入回收站（${c.user_title ?? c.title ?? "未命名"}）`,
+        "info",
+        6000,
+        async () => {
+          try { await invoke("restore_conversation", { id: c.id }); await loadConversations(); showToast("↩ 已恢复", "info"); }
+          catch (e) { showError(e); }
+        },
+        "撤销",
+      );
+    } catch (e) { showError(e); }
+    void snapshot;
+  };
+  // 复制标题到剪贴板
+  const copyConvTitle = async (c: Conversation) => {
+    const t = c.user_title ?? c.title ?? "";
+    try { await navigator.clipboard.writeText(t); showToast("✓ 标题已复制", "info", 1500); }
+    catch { showToast("剪贴板不可用", "error"); }
+  };
+  // 跳到详情并滚动到指定消息
+  const jumpToMessage = async (_c: Conversation, _messageId?: string) => {
+    // 预留给未来「跨会话跳到指定消息」场景；当前由 jumpFromAudit 直接调用 selectConversation。
+  };
+  void jumpToMessage;
 
   const toggleArchive = async () => {
     if (!selectedConv) return;
@@ -873,7 +915,9 @@ export default function App() {
                     expandedParents={expandedParents} childConvs={childConvs}
                     scope={scope} onScopeChange={setScope} availableProviders={availableProviders}
                     onFilter={setProviderFilter} onSelect={selectConversation}
-                    onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite} onRestore={restoreConv}
+                    onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite}
+                    onArchiveOne={archiveOne} onDeleteOne={deleteOneWithUndo} onCopyTitle={copyConvTitle}
+                    onRestore={restoreConv}
                     onBulkFavorite={async (ids, favorite) => {
                       // 单次逐条 set_favorite：未来如需可换 batch 接口
                       for (const id of ids) {
@@ -962,13 +1006,28 @@ export default function App() {
                     onExport={exportCurrent} onExtractKnowledge={extractKnowledge}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
                 : <div className="empty empty-cta">
-                    <div className="empty-icon">💬</div>
-                    <div className="empty-title">选择一条会话查看详情</div>
-                    <div className="empty-hint">
-                      还没数据？试试
-                      <button className="action-btn" style={{ marginLeft: 6 }} onClick={() => setImportMenu(true)}>⬇ 导入会话</button>
-                      或按 <kbd>⌘K</kbd> 唤起命令面板
-                    </div>
+                    {!conversations.length && !convsLoading ? (
+                      <>
+                        <div className="empty-icon">📥</div>
+                        <div className="empty-title">还没有任何会话</div>
+                        <div className="empty-hint">
+                          点
+                          <button className="action-btn" style={{ margin: "0 6px" }} onClick={() => setImportMenu(true)}>⬇ 导入会话</button>
+                          把 Cursor / Claude Code / ZCode / Codex 里的历史对话同步进来
+                        </div>
+                        <div className="empty-hint" style={{ marginTop: 8, opacity: 0.7 }}>或按 <kbd>⌘K</kbd> 唤起命令面板</div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="empty-icon">💬</div>
+                        <div className="empty-title">选择一条会话查看详情</div>
+                        <div className="empty-hint">
+                          {convsLoading ? "加载中…" : (
+                            <>试试按 <kbd>⌘K</kbd> 搜索会话，或 <kbd>⌘1</kbd> 跳到本视图</>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>}
             </div>
           </div>

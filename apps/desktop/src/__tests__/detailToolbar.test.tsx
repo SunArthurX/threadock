@@ -114,12 +114,21 @@ describe("provider chips 显隐", () => {
     expect(screen.getByText("Cursor")).toBeTruthy();
   });
 
-  it("scope 栏不含「已删除」（回收站入口已按要求移除）", () => {
+  it("默认 scope dropdown 显示「全部会话」（第 11 轮：4 行 filter → dropdown）", () => {
+    render(<ConversationList {...listProps} />);
+    // scope dropdown 第一个，默认 label 是"全部会话"
+    const scopeBtn = screen.getAllByText("全部会话")[0]?.closest(".list-dropdown-btn")!;
+    expect(scopeBtn).toBeTruthy();
+  });
+
+  it("scope dropdown 打开后包含「全部会话/收藏/已归档/回收站」4 项", () => {
     const { container } = render(<ConversationList {...listProps} />);
-    const bar = container.querySelector(".scope-bar")!;
-    expect(bar.textContent).toContain("全部");
-    expect(bar.textContent).toContain("收藏");
-    expect(bar.textContent).toContain("已归档");
-    expect(bar.textContent).not.toContain("已删除");
+    const scopeBtn = container.querySelectorAll(".list-dropdown-btn")[0]!;
+    fireEvent.click(scopeBtn);
+    const panel = container.querySelectorAll(".list-dropdown-panel")[0]!;
+    expect(panel.textContent).toContain("全部会话");
+    expect(panel.textContent).toContain("收藏");
+    expect(panel.textContent).toContain("已归档");
+    expect(panel.textContent).toContain("回收站");
   });
 });
