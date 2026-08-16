@@ -535,19 +535,6 @@ pub(crate) async fn prompt_reuse_search(
         .map_err(|e| storage_err(e))
 }
 
-/// 会话续做（round 25）：导出会话上下文为 markdown。
-/// 前端「续做」按钮调用 → 用户粘贴到新会话即可从断点继续。
-#[tauri::command]
-#[tracing::instrument(skip_all, level = "debug")]
-pub(crate) async fn export_conversation_context_md(
-    state: tauri::State<'_, DaemonState>,
-    conversation_id: String,
-) -> Result<String, String> {
-    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-    repo.export_conversation_context_md(&conversation_id)
-        .map_err(|e| storage_err(e))
-}
-
 /// 按 provider + source_conversation_id 精确查会话（审计命中跳转用，含子任务）。
 #[tauri::command]
 pub(crate) async fn get_conversation_by_source(

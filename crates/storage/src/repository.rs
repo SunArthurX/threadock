@@ -1199,57 +1199,6 @@ impl Repository {
         Ok(id)
     }
 
-    /// 导出会话上下文为 markdown（round 25 「会话续做」用）：
-    /// - 标题 + 元数据（provider/model/时间）作为 front-matter 风格 header
-    /// - 所有 message 按 user/assistant/tool 角色格式化
-    /// - 用途：复制到新会话作为上下文；或导出备份
-    pub fn export_conversation_context_md(&self, conversation_id: &str) -> StorageResult<String> {
-        let conv = self
-            .get_conversation(conversation_id)?
-            .ok_or_else(|| crate::error::StorageError::NotFound {
-                entity: "conversation",
-                id: conversation_id.into(),
-            })?;
-        let messages = self.list_messages(conversation_id)?;
-        let mut out = String::new();
-        // Header：会话元数据
-        out.push_str(&format!("# {}\n\n", conv.user_title.as_deref().or(conv.title.as_deref()).unwrap_or("（无标题）")));
-        out.push_str(&format!("- 会话 ID：`{}`\n", conv.id));
-        out.push_str(&format!("- 来源：`{}`\n", conv.provider.as_str()));
-        if let Some(m) = &conv.model {
-            out.push_str(&format!("- 模型：`{}`\n", m));
-        }
-        if let Some(s) = conv.started_at {
-            out.push_str(&format!("- 开始：{}\n", s.format(&time::format_description::well_known::Rfc3339).unwrap_or_default()));
-        }
-        if let Some(u) = conv.updated_at {
-            out.push_str(&format!("- 最后更新：{}\n", u.format(&time::format_description::well_known::Rfc3339).unwrap_or_default()));
-        }
-        out.push_str(&format!("- 消息条数：{}\n", messages.len()));
-        out.push_str("\n---\n\n");
-        out.push_str("> 由 Threadock 自动导出的会话上下文——粘贴到新会话即可「续做」。\n\n");
-        // Body：所有消息
-        for m in &messages {
-            let role_label = match m.role {
-                ch_domain::Role::User => "User",
-                ch_domain::Role::Assistant => "Assistant",
-                ch_domain::Role::System => "System",
-                ch_domain::Role::Tool => "Tool",
-            };
-            out.push_str(&format!("## {}\n\n", role_label));
-            if let Some(t) = &m.content_text {
-                out.push_str(t);
-                out.push_str("\n\n");
-            } else if let Some(j) = &m.content_json {
-                // JSON content 退化为原始 dump
-                out.push_str("```json\n");
-                out.push_str(&j.to_string());
-                out.push_str("\n```\n\n");
-            }
-        }
-        Ok(out)
-    }
-
     pub fn list_messages(&self, conversation_id: &str) -> StorageResult<Vec<Message>> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let mut stmt = conn.prepare(

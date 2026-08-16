@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"默认 capability：允许前端调用核心 command。","local":true,"windows":["main"],"permissions":["core:default","opener:default","dialog:default","clipboard-manager:default"]}}
+{"default":{"identifier":"default","description":"默认 capability：允许前端调用核心 command。","local":true,"windows":["main"],"permissions":["core:default","opener:default","dialog:default"]}}

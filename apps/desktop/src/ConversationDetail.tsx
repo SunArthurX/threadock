@@ -140,17 +140,15 @@ export default function ConversationDetail({
 
   /** 复制消息文本。 */
   const copyMessage = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      showToast("✓ 消息已复制", "info");
-    } catch { showToast("剪贴板不可用", "error"); }
+    const r = await copyToClipboard(text);
+    if (r.ok) showToast("✓ 消息已复制", "info");
+    else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 复制 message_id（排错用：粘到 issue 里能直接定位 DB 行）。 */
   const copyMsgId = async (id: string) => {
-    try {
-      await navigator.clipboard.writeText(id);
-      showToast(`✓ message_id 已复制 (${id.slice(0, 12)}…)`, "info");
-    } catch { showToast("剪贴板不可用", "error"); }
+    const r = await copyToClipboard(id);
+    if (r.ok) showToast(`✓ message_id 已复制 (${id.slice(0, 12)}…)`, "info");
+    else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 复制整条会话的纯文本（user + assistant 顺序拼接，无 metadata）。 */
   const copyAllMessages = async () => {
@@ -159,10 +157,10 @@ export default function ConversationDetail({
       const ts = m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN") : "";
       return `[${ts}] ${role}:\n${m.content_text ?? ""}`;
     });
-    try {
-      await navigator.clipboard.writeText(lines.join("\n\n"));
-      showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
-    } catch { showToast("剪贴板不可用", "error"); }
+    const text = lines.join("\n\n");
+    const r = await copyToClipboard(text);
+    if (r.ok) showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
+    else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 切分消息文本为「代码块 + 普通文本」段 —— 委托给 messageRender.splitCodeBlocks（独立可测）。 */
 
@@ -333,26 +331,6 @@ export default function ConversationDetail({
         <button className="action-btn" onClick={copyAllMessages} title={`复制 ${visibleMsgs.length} 条消息为纯文本`}>
           📋 复制全部
         </button>
-        <button
-          className="action-btn"
-          onClick={async () => {
-            try {
-              const md = await invoke<string>("export_conversation_context_md", { conversationId: conv.id });
-              const r = await copyToClipboard(md);
-              if (r.ok) {
-                showToast("✓ 会话上下文已复制到剪贴板——粘贴到新会话即可「续做」", "info", 5000);
-              } else {
-                // 显示真实错误：可能是 Tauri 端没装好 / 权限不够
-                showToast(`⚠ 复制失败：${r.error ?? "unknown"}`, "error", 8000);
-              }
-            } catch (e) {
-              showToast(`续做失败：${typeof e === "string" ? e : String(e)}`, "error");
-            }
-          }}
-          disabled={loading || messages.length === 0}
-          title="导出本会话的完整上下文（标题 + 元数据 + 全部消息）为 markdown，复制到剪贴板——粘贴到新会话即可从断点续做"
-          data-testid="continue-conversation"
-        >🔁 续做</button>
         <div className="download-dropdown">
           <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
             {exporting ? "导出中…" : "⤓ 下载 ▾"}

@@ -46,7 +46,6 @@ ch-audit = { path = "../../../crates/audit" }
 ch-knowledge = { path = "../../../crates/knowledge" }
 ch-export = { path = "../../../crates/export" }
 ch-backup = { path = "../../../crates/backup" }
-tauri-plugin-clipboard-manager = "2.3.2"
 arboard = "3.6.1"
 
 [features]
