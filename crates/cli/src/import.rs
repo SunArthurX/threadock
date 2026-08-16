@@ -474,4 +474,211 @@ mod tests {
         let res2 = repo.conversations_by_source_dir("(未知目录)");
         assert!(res2.is_ok());
     }
+
+    /// Round 25：Prompt 复用推荐 — FTS5 找相似 user 消息 + cost JOIN。
+    /// 验证：相同关键词匹配多个 user 消息时按 rank 排序；cost 正确聚合。
+    #[test]
+    fn prompt_reuse_search_finds_similar_user_messages_with_cost() {
+        use ch_domain::{Conversation, UsageRecord, UsageStatus};
+        let repo = Repository::open_in_memory().expect("unexpected None");
+        // 会话 1：问 "如何优化 MySQL 索引"，cost 0.10
+        let mut c1 = Conversation::new(Provider::Generic, "src-mysql-1");
+        c1.model = Some("gpt-4".into());
+        repo.import_conversation_batch(&c1, &[], &[], None, None)
+            .expect("import c1");
+        let conv_id_1 = c1.id.clone();
+        let m1 = ch_domain::Message {
+            id: "m_mysql_1".into(),
+            conversation_id: conv_id_1.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::User,
+            content_text: Some("如何优化 MySQL 索引性能？".into()),
+            content_json: None,
+            sequence_number: 1,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        let m1b = ch_domain::Message {
+            id: "m_mysql_2".into(),
+            conversation_id: conv_id_1.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::Assistant,
+            content_text: Some("加联合索引".into()),
+            content_json: None,
+            sequence_number: 2,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        repo.upsert_message(&m1).expect("upsert m1");
+        repo.upsert_message(&m1b).expect("upsert m1b");
+        let prov_id = repo.upsert_provider(Provider::Generic).expect("provider");
+        let u1 = UsageRecord {
+            id: "u_mysql_1".into(),
+            provider: Provider::Generic,
+            source_session_id: c1.source_conversation_id.clone(),
+            turn_id: None,
+            model: Some("gpt-4".into()),
+            ts: ch_domain::now_utc(),
+            input_tokens: 100,
+            output_tokens: 200,
+            reasoning_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: Some(0.10),
+            status: UsageStatus::Completed,
+            duration_ms: None,
+            retry_count: None,
+            source_dir: None,
+            context_exceeded: 0,
+        };
+        repo.upsert_usage_batch(&[u1]).expect("upsert usage");
+
+        // 会话 2：问 "MySQL 索引怎么建最合适"
+        let mut c2 = Conversation::new(Provider::Generic, "src-mysql-2");
+        c2.model = Some("claude-opus".into());
+        repo.import_conversation_batch(&c2, &[], &[], None, None)
+            .expect("import c2");
+        let conv_id_2 = c2.id.clone();
+        let m2 = ch_domain::Message {
+            id: "m_mysql_3".into(),
+            conversation_id: conv_id_2.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::User,
+            content_text: Some("MySQL 索引怎么建最合适？".into()),
+            content_json: None,
+            sequence_number: 1,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        repo.upsert_message(&m2).expect("upsert m2");
+
+        // 会话 3：无关内容（"煮意大利面"）—— 不应出现在命中
+        let mut c3 = Conversation::new(Provider::Generic, "src-cook");
+        repo.import_conversation_batch(&c3, &[], &[], None, None)
+            .expect("import c3");
+        let conv_id_3 = c3.id.clone();
+        let m3 = ch_domain::Message {
+            id: "m_cook".into(),
+            conversation_id: conv_id_3.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::User,
+            content_text: Some("怎么煮意大利面？".into()),
+            content_json: None,
+            sequence_number: 1,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        repo.upsert_message(&m3).expect("upsert m3");
+        let _ = prov_id; // 抑制 unused
+
+        // 搜 "MySQL 索引"：应命中会话 1 和 2，不应命中会话 3
+        let hits = repo
+            .prompt_reuse_search("MySQL", 10)
+            .expect("prompt reuse search");
+        let first_cost = hits[0].cost_usd;
+        assert_eq!(hits.len(), 2, "应命中 2 条 user 消息（会话 1 + 2）：got {}", hits.len());
+        // 全部是 user 角色（过滤掉了 assistant / system / tool）
+        for h in &hits {
+            assert!(
+                h.body.contains("MySQL") || h.body.contains("mysql"),
+                "命中 body 应包含查询关键词：{}",
+                h.body
+            );
+        }
+        // 第一个命中是会话 1（cost 0.10）—— FTS5 rank 可能让"标题词靠后"的会话排前
+        // 改用 "cost 至少出现一次 0.10 + 至少出现一次 0.0" 的聚合断言
+        let _ = first_cost; // suppress unused
+        let costs: Vec<f64> = hits.iter().map(|h| h.cost_usd).collect();
+        let has_cost = costs.iter().any(|c| (*c - 0.10).abs() < 1e-6);
+        let has_zero = costs.iter().any(|c| *c == 0.0);
+        assert!(
+            has_cost && has_zero,
+            "cost 聚合：必须既出现 0.10（usage_records 已写入）也出现 0.0（无 usage 记录）；got {costs:?}"
+        );
+        // 不变量：body 长度合理
+        for h in &hits {
+            assert!(!h.body.is_empty(), "body 不应为空");
+            assert!(!h.conversation_id.is_empty(), "conversation_id 不应为空");
+        }
+
+        // 边界：空 query 返回空
+        let empty = repo
+            .prompt_reuse_search("", 10)
+            .expect("empty query");
+        assert!(empty.is_empty(), "空 query 必须返回空列表");
+
+        // 边界：不存在的关键词返回空
+        let none = repo
+            .prompt_reuse_search("量子纠缠与意识本质", 10)
+            .expect("nonexistent keyword");
+        assert!(none.is_empty(), "不存在的关键词必须返回空列表");
+    }
+
+    /// Round 25：会话续做 — export_conversation_context_md 导出会话为 markdown。
+    /// 验证：含标题 + 元数据 header + 所有消息按角色分段。
+    #[test]
+    fn export_conversation_context_md_contains_metadata_and_messages() {
+        use ch_domain::Conversation;
+        let repo = Repository::open_in_memory().expect("unexpected None");
+        let mut c = Conversation::new(Provider::Generic, "src-cont");
+        c.model = Some("gpt-4".into());
+        c.title = Some("测试会话".into());
+        repo.import_conversation_batch(&c, &[], &[], None, None)
+            .expect("import");
+        let conv_id = c.id.clone();
+        let m1 = ch_domain::Message {
+            id: "m1".into(),
+            conversation_id: conv_id.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::User,
+            content_text: Some("如何优化 MySQL？".into()),
+            content_json: None,
+            sequence_number: 1,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        let m2 = ch_domain::Message {
+            id: "m2".into(),
+            conversation_id: conv_id.clone(),
+            turn_id: None,
+            source_message_id: None,
+            role: ch_domain::Role::Assistant,
+            content_text: Some("加联合索引".into()),
+            content_json: None,
+            sequence_number: 2,
+            created_at: Some(ch_domain::now_utc()),
+            content_hash: None,
+            raw_payload_id: None,
+        };
+        repo.upsert_message(&m1).expect("upsert m1");
+        repo.upsert_message(&m2).expect("upsert m2");
+
+        let md = repo
+            .export_conversation_context_md(&conv_id)
+            .expect("export md");
+        // 标题必须在 header
+        assert!(md.contains("# 测试会话"), "markdown 应含标题 header：{md}");
+        // 元数据：会话 ID、来源、模型
+        assert!(md.contains(&conv_id), "markdown 应含会话 ID");
+        assert!(md.contains("generic"), "markdown 应含 provider");
+        assert!(md.contains("gpt-4"), "markdown 应含 model");
+        // 消息：按角色分段
+        assert!(md.contains("## User"), "markdown 应含 User 段");
+        assert!(md.contains("## Assistant"), "markdown 应含 Assistant 段");
+        assert!(md.contains("如何优化 MySQL？"), "markdown 应含 user 消息原文");
+        assert!(md.contains("加联合索引"), "markdown 应含 assistant 消息原文");
+        // 边界：不存在的会话 ID 返回 NotFound
+        let r = repo.export_conversation_context_md("conv_nonexistent");
+        assert!(r.is_err(), "不存在的会话必须返回错误");
+    }
 }

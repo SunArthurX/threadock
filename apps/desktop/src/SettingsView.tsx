@@ -75,6 +75,8 @@ interface Props {
   resetting: boolean;
   onClose: () => void;
   onShowChangelog: () => void;
+  /** 重新查看新手引导（round 25：从右下角 fab 移入设置）。 */
+  onShowOnboarding?: () => void;
   /** 通知 App 层从 localStorage 重新读偏好并应用（替代刷新页面）。 */
   onReapplyImportedPrefs?: () => void;
 }
@@ -122,7 +124,7 @@ export default function SettingsView({
   theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
-  onNavigate, onReset, resetting, onClose, onShowChangelog, onReapplyImportedPrefs,
+  onNavigate, onReset, resetting, onClose, onShowChangelog, onShowOnboarding, onReapplyImportedPrefs,
 }: Props) {
   const [storage, setStorage] = useState<{ db_bytes: number; raw_count: number; raw_bytes: number; index_bytes: number } | null>(null);
   const [gcResult, setGcResult] = useState<string | null>(null);
@@ -360,7 +362,11 @@ export default function SettingsView({
             <BackupSection />
           </section>
 
-          <AboutSection onShowChangelog={onShowChangelog} onReapplyImportedPrefs={onReapplyImportedPrefs} />
+          <AboutSection
+            onShowChangelog={onShowChangelog}
+            onShowOnboarding={onShowOnboarding}
+            onReapplyImportedPrefs={onReapplyImportedPrefs}
+          />
 
           <section className="settings-section">
             <h3>显示偏好</h3>
@@ -445,7 +451,15 @@ export default function SettingsView({
 }
 
 /** 关于：版本号 + 关键依赖 + 文档链接。 */
-function AboutSection({ onShowChangelog, onReapplyImportedPrefs }: { onShowChangelog: () => void; onReapplyImportedPrefs?: () => void }) {
+function AboutSection({
+  onShowChangelog,
+  onShowOnboarding,
+  onReapplyImportedPrefs,
+}: {
+  onShowChangelog: () => void;
+  onShowOnboarding?: () => void;
+  onReapplyImportedPrefs?: () => void;
+}) {
   // 依赖版本（与 package.json / Cargo.toml 对齐；本面板帮助用户/客服快速核对环境）
   const deps: { name: string; version: string; role: string }[] = [
     { name: "Tauri", version: "2.x", role: "桌面壳（Rust + WebView）" },
@@ -498,6 +512,12 @@ function AboutSection({ onShowChangelog, onReapplyImportedPrefs }: { onShowChang
         <span>查看本版本更新日志</span>
         <button className="action-btn" onClick={onShowChangelog}>📋 查看更新日志</button>
       </div>
+      {onShowOnboarding && (
+        <div className="settings-row" style={{ marginTop: 8 }}>
+          <span>新手引导</span>
+          <button className="action-btn" onClick={onShowOnboarding} data-testid="settings-show-onboarding">❓ 重新查看新手引导</button>
+        </div>
+      )}
       <div className="settings-row" style={{ marginTop: 8 }}>
         <span>配置导入/导出</span>
         <button className="action-btn" onClick={async () => {

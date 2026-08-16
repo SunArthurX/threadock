@@ -63,6 +63,8 @@ pub fn run() {
             extract_knowledge,
             knowledge_xref,
             search,
+            prompt_reuse_search,
+            export_conversation_context_md,
             import_file,
             list_zcode_sessions,
             import_from_zcode,

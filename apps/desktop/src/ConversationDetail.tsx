@@ -1,5 +1,6 @@
 // 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制）
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
 import { splitCodeBlocks } from "./messageRender";
@@ -331,6 +332,21 @@ export default function ConversationDetail({
         <button className="action-btn" onClick={copyAllMessages} title={`复制 ${visibleMsgs.length} 条消息为纯文本`}>
           📋 复制全部
         </button>
+        <button
+          className="action-btn"
+          onClick={async () => {
+            try {
+              const md = await invoke<string>("export_conversation_context_md", { conversationId: conv.id });
+              await navigator.clipboard.writeText(md);
+              showToast("✓ 会话上下文已复制到剪贴板——粘贴到新会话即可「续做」", "info", 5000);
+            } catch (e) {
+              showToast(`续做失败：${typeof e === "string" ? e : String(e)}`, "error");
+            }
+          }}
+          disabled={loading || messages.length === 0}
+          title="导出本会话的完整上下文（标题 + 元数据 + 全部消息）为 markdown，复制到剪贴板——粘贴到新会话即可从断点续做"
+          data-testid="continue-conversation"
+        >🔁 续做</button>
         <div className="download-dropdown">
           <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
             {exporting ? "导出中…" : "⤓ 下载 ▾"}

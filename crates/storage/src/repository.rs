@@ -91,6 +91,62 @@ impl Repository {
         search::search(&conn, q)
     }
 
+    /// Prompt 复用推荐（round 25）：用 FTS5 找相似历史 user 消息，
+    /// JOIN usage_records 拿当时的 cost / model / provider，让用户看到
+    /// 「你之前 3 个会话问过类似问题 + 那次花了多少钱」。
+    pub fn prompt_reuse_search(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> StorageResult<Vec<search::PromptReuseHit>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let match_expr = search::build_match_expr(query);
+        if match_expr.is_empty() {
+            return Ok(Vec::new());
+        }
+        // FTS5 命中后 JOIN 取会话元数据 + 聚合 cost（按 source_session_id）
+        let mut stmt = conn.prepare(
+            "SELECT m.id, m.conversation_id, c.title, c.user_title, c.model,
+                    p.name as provider_name,
+                    snippet(messages_fts, 6, char(1), char(2), '…', 16) AS snip,
+                    m.content_text,
+                    (SELECT COALESCE(SUM(u.cost_usd), 0.0)
+                       FROM usage_records u
+                      WHERE u.source_session_id = c.source_conversation_id
+                        AND u.provider_id = c.provider_id) AS cost
+             FROM messages m
+             JOIN messages_fts fts ON fts.rowid = m.rowid
+             JOIN conversations c ON c.id = m.conversation_id
+             JOIN providers p ON p.id = c.provider_id
+             WHERE m.role = 'user' AND messages_fts MATCH ?1
+             ORDER BY rank, m.created_at DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![match_expr, limit as i64], |r| {
+            let raw_snip: String = r.get(6)?;
+            let snippet = ch_domain::html::escape_html(&raw_snip)
+                .replace('\u{1}', "<b>")
+                .replace('\u{2}', "</b>");
+            let body: Option<String> = r.get(7)?;
+            Ok(search::PromptReuseHit {
+                message_id: r.get(0)?,
+                conversation_id: r.get(1)?,
+                title: r.get(2)?,
+                user_title: r.get(3)?,
+                model: r.get(4)?,
+                provider_name: r.get(5)?,
+                snippet,
+                body: body.unwrap_or_default(),
+                cost_usd: r.get(8)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     // ── Provider / Installation ──────────────────────────────────────────
 
     /// 写入或更新 provider 记录（按 name 去重）。
@@ -713,6 +769,10 @@ impl Repository {
     /// 清空所有数据（conversations 级联删除 messages/events/tags/knowledge）。
     /// 保留 schema 和 `redaction_rules（用户自定义规则`）。
     /// 用于「重置数据」功能。
+    ///
+    /// ⚠️ 必须同步清 `import_state`（V10 新鲜度表）—— 否则 autoSync 走增量时
+    /// `existing.contains(&key)` 为真就全 skip，导致「重置后数据全丢」
+    /// （round 24 复盘：用户报告"全部重置后 zcode 少了 142 条，重新点导入才解决"）
     pub fn clear_all(&self) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         // conversations 有 ON DELETE CASCADE，会自动清理 messages/events/turns/tags/knowledge
@@ -723,6 +783,8 @@ impl Repository {
         conn.execute("DELETE FROM installations", [])?;
         conn.execute("DELETE FROM usage_records", [])?;
         conn.execute("DELETE FROM tool_call_records", [])?;
+        // 关键：清 import_state（不在 FK CASCADE 链上）
+        conn.execute("DELETE FROM import_state", [])?;
         Ok(())
     }
 
@@ -1135,6 +1197,57 @@ impl Repository {
             ],
         )?;
         Ok(id)
+    }
+
+    /// 导出会话上下文为 markdown（round 25 「会话续做」用）：
+    /// - 标题 + 元数据（provider/model/时间）作为 front-matter 风格 header
+    /// - 所有 message 按 user/assistant/tool 角色格式化
+    /// - 用途：复制到新会话作为上下文；或导出备份
+    pub fn export_conversation_context_md(&self, conversation_id: &str) -> StorageResult<String> {
+        let conv = self
+            .get_conversation(conversation_id)?
+            .ok_or_else(|| crate::error::StorageError::NotFound {
+                entity: "conversation",
+                id: conversation_id.into(),
+            })?;
+        let messages = self.list_messages(conversation_id)?;
+        let mut out = String::new();
+        // Header：会话元数据
+        out.push_str(&format!("# {}\n\n", conv.user_title.as_deref().or(conv.title.as_deref()).unwrap_or("（无标题）")));
+        out.push_str(&format!("- 会话 ID：`{}`\n", conv.id));
+        out.push_str(&format!("- 来源：`{}`\n", conv.provider.as_str()));
+        if let Some(m) = &conv.model {
+            out.push_str(&format!("- 模型：`{}`\n", m));
+        }
+        if let Some(s) = conv.started_at {
+            out.push_str(&format!("- 开始：{}\n", s.format(&time::format_description::well_known::Rfc3339).unwrap_or_default()));
+        }
+        if let Some(u) = conv.updated_at {
+            out.push_str(&format!("- 最后更新：{}\n", u.format(&time::format_description::well_known::Rfc3339).unwrap_or_default()));
+        }
+        out.push_str(&format!("- 消息条数：{}\n", messages.len()));
+        out.push_str("\n---\n\n");
+        out.push_str("> 由 Threadock 自动导出的会话上下文——粘贴到新会话即可「续做」。\n\n");
+        // Body：所有消息
+        for m in &messages {
+            let role_label = match m.role {
+                ch_domain::Role::User => "User",
+                ch_domain::Role::Assistant => "Assistant",
+                ch_domain::Role::System => "System",
+                ch_domain::Role::Tool => "Tool",
+            };
+            out.push_str(&format!("## {}\n\n", role_label));
+            if let Some(t) = &m.content_text {
+                out.push_str(t);
+                out.push_str("\n\n");
+            } else if let Some(j) = &m.content_json {
+                // JSON content 退化为原始 dump
+                out.push_str("```json\n");
+                out.push_str(&j.to_string());
+                out.push_str("\n```\n\n");
+            }
+        }
+        Ok(out)
     }
 
     pub fn list_messages(&self, conversation_id: &str) -> StorageResult<Vec<Message>> {

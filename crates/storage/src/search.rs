@@ -75,6 +75,24 @@ pub struct SearchResult {
     pub created_at: Option<Timestamp>,
 }
 
+/// Prompt 复用推荐命中（round 25）：相似历史 user 消息 + 当时 cost/model。
+/// 用于「你之前 3 个会话问过类似问题」+ 一键跳到原会话复用。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PromptReuseHit {
+    pub message_id: String,
+    pub conversation_id: String,
+    pub title: Option<String>,
+    pub user_title: Option<String>,
+    pub model: Option<String>,
+    pub provider_name: String,
+    /// 命中片段（FTS5 snippet，已 HTML 转义并高亮 `<b>...</b>`）。
+    pub snippet: String,
+    /// 该消息原文（用于复制到剪贴板）。
+    pub body: String,
+    /// 该会话累计 cost（USD；按 source_session_id 聚合）。
+    pub cost_usd: f64,
+}
+
 /// 把用户输入的裸关键词转成 FTS5 安全的 MATCH 表达式。
 ///
 /// 策略：对每个 token 加双引号包裹，避免被当 FTS5 语法（如 `OR`、`*`、`:`）误解析。

@@ -105,7 +105,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
   // 更新日志：版本变化时启动自动显示一次
   const [changelogOpen, setChangelogOpen] = useState(() => shouldShowChangelog());
-  // 首次启动引导：未看过时自动显示；走完后只通过右下角「?」按钮重新唤起
+  // 首次启动引导：未看过时自动显示；走完后通过设置「重新查看新手引导」唤起
+  // （round 25：原右下角 ? 浮动按钮移到设置中，避免遮挡主内容）
   const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingSeen());
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
@@ -817,15 +818,7 @@ export default function App() {
           />
         )}
 
-        {isOnboardingSeen() && !onboardingOpen && (
-          <button
-            className="onboarding-fab"
-            onClick={() => { resetOnboarding(); setOnboardingOpen(true); }}
-            title="重新查看新手引导"
-            aria-label="新手引导"
-            data-testid="onboarding-fab"
-          >?</button>
-        )}
+        {/* round 25：右下角 ? 浮动按钮移到设置中（避免遮挡主内容） */}
 
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={changeTheme}
@@ -839,6 +832,7 @@ export default function App() {
             onReset={resetData} resetting={false}
             onClose={() => setSettingsOpen(false)}
             onShowChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }}
+            onShowOnboarding={() => { resetOnboarding(); setSettingsOpen(false); setOnboardingOpen(true); }}
             onReapplyImportedPrefs={(): void => {
               // 从 localStorage 重新读所有偏好（避免刷新页面）
               const v = localStorage.getItem("ch-theme");

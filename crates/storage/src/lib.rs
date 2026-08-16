@@ -21,4 +21,4 @@ pub use repository::{
     RedactionRuleRecord, Repository, TagCountDto, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };
-pub use search::{build_match_expr, SearchQuery, SearchResult};
+pub use search::{build_match_expr, PromptReuseHit, SearchQuery, SearchResult};

@@ -654,7 +654,9 @@ fn auto_sync_inner_with(
     let sync_ctx = import_ctx(state);
     let mut new_counts = serde_json::Map::new();
     let mut new_total: u64 = 0;
-    let lim = limit.unwrap_or(500);
+    // 默认 2000 覆盖多数用户；显式传 0 = 无限（用于全量重导）
+    // 真正的 `lim` 在下方"existing/istate 加载后"根据"是否全空库"再决定
+    let raw_lim = limit.unwrap_or(2000);
 
     let home = std::env::var("HOME").map_err(|_| "no HOME")?;
 
@@ -696,6 +698,17 @@ fn auto_sync_inner_with(
             Some(&obs) => src_ms > obs,
             None => true, // 无记录 = 从未导入过
         }
+    };
+
+    // 全空库（existing + istate 都空）→ 第一次同步，忽略 limit 一次到位
+    // 修 round 24 复盘事故：用户报告"按时间重置后 zcode 少了 142 条，重新点击导入才解决"
+    // 根因：autoSync limit=500 截断，zcode 642 个会话只导 500，剩下的永远进不了 import_state
+    // 下一轮又被算"未导入"重试，但仍被 limit 挡住——必须靠手动单条 import 才能补完
+    let lim = if existing.is_empty() && istate.is_empty() {
+        tracing::info!("全空库首次同步：取消 limit 限制，确保一次到位");
+        usize::MAX
+    } else {
+        raw_lim
     };
 
     // ── 统一同步循环（旧实现为 5 段结构相同的复制粘贴）───────────────────

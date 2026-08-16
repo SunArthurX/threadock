@@ -516,6 +516,38 @@ pub(crate) async fn search(
     }
 }
 
+/// Prompt 复用推荐（round 25）：用 FTS5 找相似历史 user 消息，
+/// 返回「你之前 N 个会话问过类似问题」+ 那次 cost / model。
+/// 空 query 返回空列表（防误传）。
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "debug")]
+pub(crate) async fn prompt_reuse_search(
+    state: tauri::State<'_, DaemonState>,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<ch_storage::PromptReuseHit>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.prompt_reuse_search(q, limit.unwrap_or(5))
+        .map_err(|e| storage_err(e))
+}
+
+/// 会话续做（round 25）：导出会话上下文为 markdown。
+/// 前端「续做」按钮调用 → 用户粘贴到新会话即可从断点继续。
+#[tauri::command]
+#[tracing::instrument(skip_all, level = "debug")]
+pub(crate) async fn export_conversation_context_md(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<String, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.export_conversation_context_md(&conversation_id)
+        .map_err(|e| storage_err(e))
+}
+
 /// 按 provider + source_conversation_id 精确查会话（审计命中跳转用，含子任务）。
 #[tauri::command]
 pub(crate) async fn get_conversation_by_source(

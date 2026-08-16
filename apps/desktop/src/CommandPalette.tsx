@@ -29,6 +29,19 @@ export interface CommandPaletteProps {
 export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }: CommandPaletteProps) {
   const [q, setQ] = useState("");
   const [convs, setConvs] = useState<Conversation[]>([]);
+  // Prompt 复用推荐：相似历史 user 消息 + 当时 cost
+  // round 25：用户开始输入 2+ 字符时实时拉取，「你之前 3 个会话问过类似问题」一键跳
+  const [promptReuse, setPromptReuse] = useState<{
+    message_id: string;
+    conversation_id: string;
+    title: string | null;
+    user_title: string | null;
+    model: string | null;
+    provider_name: string;
+    snippet: string;
+    body: string;
+    cost_usd: number;
+  }[]>([]);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -37,6 +50,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     if (!open) return;
     setQ("");
     setActive(0);
+    setPromptReuse([]);
     setTimeout(() => inputRef.current?.focus(), 30);
     (async () => {
       try {
@@ -57,6 +71,39 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  // Prompt 复用推荐：q 长度 ≥ 2 时 debounce 拉取（FTS5 + cost JOIN）
+  useEffect(() => {
+    const query = q.trim();
+    if (query.length < 2) {
+      setPromptReuse([]);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      (async () => {
+        try {
+          const hits = await invoke<
+            {
+              message_id: string;
+              conversation_id: string;
+              title: string | null;
+              user_title: string | null;
+              model: string | null;
+              provider_name: string;
+              snippet: string;
+              body: string;
+              cost_usd: number;
+            }[]
+          >("prompt_reuse_search", { query, limit: 5 });
+          setPromptReuse(hits);
+          setActive(0);
+        } catch {
+          setPromptReuse([]);
+        }
+      })();
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [q]);
 
   const items = useMemo(() => {
     const lower = q.trim().toLowerCase();
@@ -93,21 +140,35 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     return () => window.removeEventListener("keydown", onKey);
   }, [open, items, active, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Prompt 复用 item 在列表里按 (page, conv, reuse) 顺序排，索引分段计算
   const commitActive = () => {
-    const all = [...items.matchedPages, ...items.matchedConvs];
-    const pick = all[active];
-    if (!pick) return;
-    if (pick.kind === "page") {
+    const pageCount = items.matchedPages.length;
+    const convCount = items.matchedConvs.length;
+    if (active < pageCount) {
+      const pick = items.matchedPages[active];
       onJumpPage(pick.page.key);
       onClose();
-    } else if (pick.kind === "conv" && onJumpConversation) {
-      onJumpConversation(pick.conv.id);
-      onClose();
+    } else if (active < pageCount + convCount) {
+      const pick = items.matchedConvs[active - pageCount];
+      if (onJumpConversation) {
+        onJumpConversation(pick.conv.id);
+        onClose();
+      } else {
+        onJumpPage("chat");
+        onClose();
+      }
+    } else {
+      const idx = active - pageCount - convCount;
+      const pick = promptReuse[idx];
+      if (pick && onJumpConversation) {
+        onJumpConversation(pick.conversation_id);
+        onClose();
+      }
     }
   };
 
   if (!open) return null;
-  const all = [...items.matchedPages, ...items.matchedConvs];
+  const all = [...items.matchedPages, ...items.matchedConvs, ...promptReuse];
   return (
     <div className="cmd-overlay" onClick={onClose}>
       <div className="cmd-modal" onClick={(e) => e.stopPropagation()}>
@@ -118,7 +179,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
             className="cmd-input"
             value={q}
             onChange={(e) => { setQ(e.target.value); setActive(0); }}
-            placeholder="跳到页面 / 搜会话标题…  (↑↓ 选择 · Enter 跳转 · Esc 关闭)"
+            placeholder="跳到页面 / 搜会话标题 / 找历史相似 prompt…  (↑↓ 选择 · Enter 跳转 · Esc 关闭)"
           />
         </div>
         <ScrollArea className="cmd-list">
@@ -165,6 +226,34 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
                     </span>
                     <span className="cmd-row-hint">
                       {it.conv.provider}{formatTime(it.conv.started_at_ms ?? null)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {promptReuse.length > 0 && (
+            <div className="cmd-group">
+              <div className="cmd-group-title">💡 你之前问过类似问题（Prompt 复用）</div>
+              {promptReuse.map((h, i) => {
+                const idx = items.matchedPages.length + items.matchedConvs.length + i;
+                return (
+                  <div
+                    key={`r-${h.message_id}`}
+                    className={`cmd-row ${active === idx ? "active" : ""}`}
+                    onMouseEnter={() => setActive(idx)}
+                    onClick={() => {
+                      if (onJumpConversation) {
+                        onJumpConversation(h.conversation_id);
+                        onClose();
+                      }
+                    }}
+                    data-testid="cmd-prompt-reuse"
+                  >
+                    <span className="cmd-row-icon">🔁</span>
+                    <span className="cmd-row-label" dangerouslySetInnerHTML={{ __html: h.snippet }} />
+                    <span className="cmd-row-hint">
+                      {h.provider_name}{h.model ? ` · ${h.model}` : ""}{h.cost_usd > 0 ? ` · $${h.cost_usd.toFixed(2)}` : ""}
                     </span>
                   </div>
                 );

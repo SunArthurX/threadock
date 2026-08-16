@@ -719,6 +719,44 @@ mod reset_range_tests {
         );
     }
 
+    /// clear_all（DELETE 路径）也必须清 import_state（防御性；wipe_all 物理重建已自动清）。
+    /// 复盘：用户报告"全部重置后 zcode 少了 142 条，重新点导入才解决"——
+    /// 走的是 reset_all_data → wipe_all 物理重建路径，import_state 自动空。
+    /// 但若有人写脚本直接调 clear_all（DELETE 路径），同样需要清 import_state。
+    #[test]
+    fn clear_all_clears_import_state() {
+        let (_d, state) = make_state();
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let recent_ms = now_ms - 3 * 86_400_000;
+        let repo = state.repo.lock().expect("mutex poisoned");
+        // 写一些 import_state 记录（模拟历史导入状态）
+        repo.record_import_states(
+            Provider::Generic.as_str(),
+            &[
+                ("zcode-sess-1".into(), Some(recent_ms)),
+                ("zcode-sess-2".into(), Some(recent_ms)),
+                ("claude-sess-1".into(), Some(recent_ms)),
+            ],
+        )
+        .expect("record states");
+        let m = repo.import_state_map(Provider::Generic.as_str()).expect("state map");
+        assert_eq!(m.len(), 3, "前置条件：3 条 import_state 记录");
+        drop(repo);
+
+        // 调 clear_all（DELETE 路径）
+        state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .clear_all()
+            .expect("clear_all");
+
+        // 验证 import_state 已空
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let m = repo.import_state_map(Provider::Generic.as_str()).expect("state map");
+        assert!(m.is_empty(), "clear_all 必须清空 import_state，否则 autoSync 会跳过来源全 skip");
+    }
+
     #[test]
     #[ignore = "依赖本机真实 app 数据副本"]
     fn reset_range_keeps_old_data_on_real_copy() {
