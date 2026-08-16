@@ -43,46 +43,88 @@ export interface DonutSlice {
 /** 环形图（Agent 分布）：入场时各扇区从 0 度扫到目标 */
 export function DonutChart({ slices, size = 160 }: { slices: DonutSlice[]; size?: number }) {
   const mounted = useMounted();
+  const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const total = slices.reduce((s, x) => s + x.value, 0);
   if (total <= 0) return <div className="chart-empty">无数据</div>;
   const r = size / 2 - 14;
   const c = 2 * Math.PI * r;
   let acc = 0;
+  const onEnter = (i: number) => (e: React.MouseEvent<SVGCircleElement>) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover({ i, x: e.clientX - rect.left, y: e.clientY - rect.top });
+  };
+  const onMove = (e: React.MouseEvent<SVGCircleElement>) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setHover((h) => (h ? { ...h, x: e.clientX - rect.left, y: e.clientY - rect.top } : null));
+  };
+  const onLeave = () => setHover(null);
+  const hovered = hover ? slices[hover.i] : null;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-      <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {slices.map((s, i) => {
-          const frac = (s.value / total) * (mounted ? 1 : 0);
-          const dash = frac * c;
-          const offset = -acc * c;
-          acc += s.value / total;
-          return (
-            <circle
-              key={i}
-              cx={size / 2}
-              cy={size / 2}
-              r={r}
-              fill="none"
-              stroke={s.color}
-              strokeWidth={18}
-              strokeDasharray={`${dash} ${c - dash}`}
-              strokeDashoffset={offset}
-              style={{
-                transition: `stroke-dasharray 700ms cubic-bezier(.2,.8,.3,1) ${i * 90}ms`,
-              }}
-            >
-              <title>{`${s.label}: ${formatTokens(s.value)} (${((s.value / total) * 100).toFixed(1)}%)`}</title>
-            </circle>
-          );
-        })}
-      </g>
-      <text x="50%" y="47%" textAnchor="middle" className="donut-total">
-        {formatTokens(total)}
-      </text>
-      <text x="50%" y="58%" textAnchor="middle" className="donut-label">
-        tokens
-      </text>
-    </svg>
+    <div ref={containerRef} className="donut-wrap" style={{ position: "relative", width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
+          {slices.map((s, i) => {
+            const frac = (s.value / total) * (mounted ? 1 : 0);
+            const dash = frac * c;
+            const offset = -acc * c;
+            acc += s.value / total;
+            const isHover = hover?.i === i;
+            return (
+              <circle
+                key={i}
+                cx={size / 2}
+                cy={size / 2}
+                r={r}
+                fill="none"
+                stroke={s.color}
+                strokeWidth={isHover ? 22 : 18}
+                strokeDasharray={`${dash} ${c - dash}`}
+                strokeDashoffset={offset}
+                style={{
+                  transition: `stroke-dasharray 700ms cubic-bezier(.2,.8,.3,1) ${i * 90}ms, stroke-width 150ms`,
+                  cursor: "pointer",
+                  filter: isHover ? "brightness(1.2)" : undefined,
+                }}
+                onMouseEnter={onEnter(i)}
+                onMouseMove={onMove}
+                onMouseLeave={onLeave}
+              />
+            );
+          })}
+        </g>
+        <text x="50%" y="47%" textAnchor="middle" className="donut-total">
+          {formatTokens(total)}
+        </text>
+        <text x="50%" y="58%" textAnchor="middle" className="donut-label">
+          tokens
+        </text>
+      </svg>
+      {hovered && hover && (
+        <div
+          className="barchart-tooltip"
+          style={{
+            left: hover.x,
+            top: hover.y,
+            transform: "translate(12px, 12px)",
+          }}
+        >
+          <div className="tooltip-row">
+            <span className="tooltip-dot" style={{ background: hovered.color }} />
+            <span className="tooltip-title">{hovered.label}</span>
+          </div>
+          <div className="tooltip-row" style={{ marginTop: 3 }}>
+            <span style={{ color: "var(--accent, #4f8cff)", fontWeight: 600 }}>{formatTokens(hovered.value)}</span>
+            <span className="tooltip-sub">tokens</span>
+            <span className="tooltip-sub" style={{ marginLeft: "auto" }}>
+              {((hovered.value / total) * 100).toFixed(1)}%
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -127,7 +169,22 @@ export function BarChart({
   };
 
   const hovered = hover ? items[hover.i] : null;
-  const tooltip = hovered && renderTooltip ? renderTooltip(hovered, max) : null;
+  // 默认 tooltip：日期 · 数值 · 占比（按 max 算）；传了 renderTooltip 用自定义
+  const tooltip = hovered
+    ? (renderTooltip
+        ? renderTooltip(hovered, max)
+        : (
+          <>
+            <div className="tooltip-title">{hovered.label}</div>
+            <div className="tooltip-row">
+              <span style={{ color: "var(--accent, #4f8cff)", fontWeight: 600 }}>{formatTokens(hovered.value)}</span>
+              <span className="tooltip-sub" style={{ marginLeft: 4 }}>
+                {((hovered.value / max) * 100).toFixed(1)}%
+              </span>
+            </div>
+          </>
+        ))
+    : null;
 
   return (
     <div
