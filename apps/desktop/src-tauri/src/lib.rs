@@ -30,6 +30,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // 日志：导入失败等 warn 输出到 stderr（此前静默，事故排查困难）
             tracing_subscriber::fmt()
