@@ -3,6 +3,21 @@
    参考 Linear / Raycast / Arc 的设计语言：克制的深色、精致的细节
    ═══════════════════════════════════════════════════════════════════ */
 
+/* 全局滚动条：macOS 风格（窄 + 圆角 + 渐隐） */
+* { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.12) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
+/* 全局焦点环：键盘用户可见，鼠标点击隐藏 */
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--accent, #4f8cff); outline-offset: 2px; border-radius: 4px; }
+button:focus-visible, .nav-item:focus-visible, .scope-chip:focus-visible, .filter-chip:focus-visible {
+  outline-offset: -2px;
+}
+
 /* ── Design Tokens：深色（默认）────────────────────────────────── */
 :root {
   /* 背景层次 */
@@ -705,6 +720,9 @@ button {
 .detail {
   padding: 24px 32px 48px;
   max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .detail h2 {
@@ -1391,6 +1409,8 @@ button {
   overflow-y: auto;
   padding: 24px 32px 48px;
   max-width: 1080px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 /* 知识库 / 活动节律 / 项目中心：与 .ops-view 同款滚动容器
@@ -2442,6 +2462,35 @@ button {
   min-width: 0;
 }
 
+/* 可拖拽竖线（侧边栏 / 列表 / 详情 之间的分隔条） */
+.resizer {
+  width: 6px;
+  flex-shrink: 0;
+  background: transparent;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  transition: background 0.12s;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-subtle, rgba(255,255,255,0.06));
+  transform: translateX(-50%);
+  transition: background 0.12s, width 0.12s;
+}
+.resizer:hover::after { background: var(--accent, #4f8cff); width: 2px; }
+.resizer.active::after { background: var(--accent, #4f8cff); width: 2px; }
+.resizer:hover { background: rgba(79,140,255,0.05); }
+.resizer.active { background: rgba(79,140,255,0.08); }
+
+/* main 内部的 resizer 占据 grid 6px 中间列；不要 flex 行为 */
+.main .resizer { width: 6px; }
+
 /* ═══ 资产分组 + 类型颜色 + 自动化折叠 ═══ */
 .asset-group {
   margin-bottom: 14px;
@@ -3397,7 +3446,7 @@ button {
 
 /* 详情页（右侧 panel）自适应宽度：占满剩余空间 */
 .panel:last-child { display: flex; flex-direction: column; min-width: 0; }
-.conv-detail { flex: 1; min-width: 0; max-width: 100%; }
+.detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* Settings / Knowledge / Help / Onboarding / Changelog / Report modal 自适应视口 */
 .settings-modal { max-width: 92vw; max-height: 88vh; overflow: hidden; display: flex; flex-direction: column; }

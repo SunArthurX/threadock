@@ -24,6 +24,7 @@ import ErrorBoundary from "./ErrorBoundary";
 import { CommandPalette, type Page } from "./CommandPalette";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
+import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
@@ -107,6 +108,9 @@ export default function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingSeen());
   const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
+  // 侧边栏 / 会话列表 宽度（可拖拽，localStorage 持久化）
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadClampedNumber("ch-sidebar-width", 160, 48, 320));
+  const [listWidth, setListWidth] = useState(() => loadClampedNumber("ch-list-width", 340, 240, 540));
 
   // data
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -692,7 +696,7 @@ export default function App() {
   // ── render ──
   return (
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <nav className="sidebar">
+      <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : sidebarWidth }}>
         <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
           {sidebarCollapsed ? "»" : "«"}
         </button>
@@ -703,6 +707,13 @@ export default function App() {
           </button>
         ))}
       </nav>
+      {!sidebarCollapsed && (
+        <Resizer
+          className="sidebar-resizer"
+          onDrag={(dx) => setSidebarWidth((w) => { const n = Math.round(w + dx); const c = Math.max(120, Math.min(320, n)); saveNumber("ch-sidebar-width", c); return c; })}
+          title="拖拽调整侧边栏宽度"
+        />
+      )}
 
       <div className="app-body">
         {error && <div className="error-banner" onClick={() => setError(null)}>{error} (点击关闭)</div>}
@@ -763,27 +774,13 @@ export default function App() {
           )}
           {/* 数据新鲜度：5 分内绿 / 30 分内黄 / 超期橙（悬停看精确时间） */}
           <FreshnessBadge />
-          <button className="theme-toggle" onClick={() => changeTheme(theme === "dark" ? "light" : "dark")}>
-            {theme === "dark" ? "☀" : "☾"}
-          </button>
-          <button
-            className="settings-toggle"
-            title="备份 (加密导出全部数据到 .chbak 文件)"
-            onClick={() => setSettingsOpen(true)}
-            style={{ fontSize: 13 }}
-          >💾</button>
+          {/* 主题 / 备份 / 命令面板按钮已移至设置面板（避免顶栏拥挤，参考 macOS 设计） */}
           <button
             className="settings-toggle"
             title="快捷键速查 (⌘?)"
             onClick={() => setHelpOpen(true)}
             style={{ fontSize: 13 }}
           >?</button>
-          <button
-            className="settings-toggle"
-            title="命令面板 (⌘K)"
-            onClick={() => setCmdOpen(true)}
-            style={{ fontSize: 12 }}
-          >⌘K</button>
           <button className="settings-toggle" title="设置" onClick={() => setSettingsOpen(true)}>⚙</button>
         </div>
 
@@ -906,8 +903,8 @@ export default function App() {
         ) : view !== "chat" ? (
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
-          <div className="main">
-            <div className="panel">
+          <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
+            <div className="panel" style={{ width: listWidth }}>
               {searchResults
                 ? <SearchPanel results={searchResults} query={searchQuery} onJump={jumpToSearchResult} />
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
@@ -968,6 +965,10 @@ export default function App() {
                     }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </div>
+            <Resizer
+              onDrag={(dx) => setListWidth((w) => { const n = Math.round(w + dx); const c = Math.max(240, Math.min(540, n)); saveNumber("ch-list-width", c); return c; })}
+              title="拖拽调整会话列表宽度"
+            />
             <div className="panel" ref={detailPanelRef}>
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}

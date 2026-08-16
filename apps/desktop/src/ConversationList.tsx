@@ -60,6 +60,7 @@ function loadLS<T extends string>(key: string, valid: readonly T[], fallback: T)
 function Dropdown<T extends string>({
   label, value, options, onChange, align = "left",
 }: {
+  /** 在按钮左侧显示的小 label（如「视图：」「排序：」），让用户一眼明白这是干什么的。 */
   label?: string;
   value: T;
   options: { key: T; label: string; icon?: string }[];
@@ -79,6 +80,7 @@ function Dropdown<T extends string>({
   }, [open]);
   return (
     <div className={`list-dropdown ${open ? "open" : ""}`} ref={ref}>
+      {label && <span className="list-dropdown-label-text">{label}</span>}
       <button
         className={`list-dropdown-btn ${open ? "active" : ""}`}
         onClick={() => setOpen((o) => !o)}
@@ -417,16 +419,19 @@ export default function ConversationList({
         )}
         <div className="list-toolbar-row">
           <Dropdown
+            label="视图"
             value={scope}
             options={SCOPE_OPTIONS}
             onChange={onScopeChange}
           />
           <Dropdown
+            label="日期"
             value={dateFilter}
             options={DATE_FILTERS}
             onChange={setDateFilter}
           />
           <Dropdown
+            label="排序"
             value={sortBy}
             options={SORT_OPTIONS}
             onChange={setSortBy}
