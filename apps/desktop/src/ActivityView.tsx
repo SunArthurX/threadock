@@ -6,6 +6,7 @@ import { BarChart } from "./charts";
 import { showToast } from "./toast";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
+import HeatmapGitHub from "./HeatmapGitHub";
 
 interface Stats {
   heatmap: { day: string; calls: number; sessions: number }[];
@@ -480,44 +481,20 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         ) : (
           <div className="heatmap-wrap">
             <div className="heatmap-scroll">
-              {/* GitHub 标准布局：7 行（Mon→Sun）× N 列（周数），整体横躺 */}
-              {/* 月份 label 顶部（每列首月） */}
-              <div className="heat-months-row">
-                <div className="heat-dow-spacer" />
-                {grid.cols.map((_, ci) => (
-                  <div key={ci} className="heat-month-label-cell">
-                    {labelAt.get(ci) ?? ""}
-                  </div>
-                ))}
-              </div>
-              {/* 7 行 × N 列：每行 1 个星期（Mon-Sun） */}
-              <div className="heatmap-grid">
-                <div className="heat-dow-col">
-                  {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d, ri) => (
-                    <div key={ri} className="heat-dow-label">{d}</div>
-                  ))}
-                </div>
-                <div className="heatmap">
-                  {grid.cols.map((col, ci) => (
-                    <div key={ci} className="heatmap-col">
-                      {col.map((cell, ri) => {
-                        if (!cell) return <span key={ri} className="heat-cell empty" />;
-                        const isSelected = selectedDay === cell.day;
-                        const isToday = cell.day === todayKey;
-                        return (
-                          <div
-                            key={ri}
-                            className={`heat-cell ${isSelected ? "selected" : ""} ${isToday ? "today" : ""} ${cell.calls === 0 ? "empty" : ""}`}
-                            style={{ background: cell.calls > 0 ? heatColor(cell.calls, grid.max) : undefined }}
-                            title={`${cell.day} · ${cell.calls} 次调用 · ${cell.sessions} 活跃会话${isToday ? "（今天）" : ""}`}
-                            onClick={() => setSelectedDay(isSelected ? null : cell.day)}
-                          />
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              {/* 完全独立的 GitHub 风格热力图组件：inline style 强制 12×12 + aspect-ratio 兜底，
+                  避开 styles.css 中所有 .heat-cell 历史冲突。7 行（Mon→Sun）× N 列（周数） */}
+              <HeatmapGitHub
+                cols={grid.cols.map((col) => ({
+                  cells: col.map((c) =>
+                    c ? { day: c.day, calls: c.calls, sessions: c.sessions } : null,
+                  ),
+                }))}
+                max={grid.max}
+                monthLabels={labelAt}
+                selectedDay={selectedDay}
+                todayKey={todayKey}
+                onClickCell={(day) => setSelectedDay(selectedDay === day ? null : day)}
+              />
             </div>
             <div className="heat-legend">
               Less

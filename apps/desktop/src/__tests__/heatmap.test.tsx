@@ -32,16 +32,16 @@ describe("活动页热力图渲染", () => {
   it("真实形态数据下必须渲染出热力格（GitHub 7×N 布局：含月份标签 + day-of-week）", async () => {
     const { container, findByText } = render(<ActivityView />);
     expect(await findByText(/contributions in the last/)).toBeTruthy();
-    // 8月1日(周六)~5日(周三)：首列补 6 个 null + 数据天 + 尾列补齐 → 至少 14 格
-    const cells = container.querySelectorAll(".heat-cell");
+    // data-testid="heatmap-cell" + "heatmap-cell-empty"（GitHub 7×N 独立组件）
+    const cells = container.querySelectorAll('[data-testid="heatmap-cell"], [data-testid="heatmap-cell-empty"]');
     expect(cells.length).toBeGreaterThanOrEqual(14);
-    // 月份标签（顶部 .heat-month-label-cell 含 GitHub 风格英文 Aug）
-    const monthLabels = container.querySelectorAll(".heat-month-label-cell");
+    // 月份标签（顶部 data-testid="heatmap-month" 含 GitHub 风格英文 Aug）
+    const monthLabels = container.querySelectorAll('[data-testid="heatmap-month"]');
     expect(monthLabels.length).toBeGreaterThan(0);
     const monthTexts = [...monthLabels].map((m) => m.textContent ?? "");
     expect(monthTexts.some((t) => t === "Aug")).toBe(true);
-    // day-of-week 标签（左侧 .heat-dow-col 7 个：Mon-Sun）
-    const dowLabels = container.querySelectorAll(".heat-dow-label");
+    // day-of-week 标签（左侧 7 个：Mon-Sun）
+    const dowLabels = container.querySelectorAll('[data-testid="heatmap-dow"]');
     expect(dowLabels.length).toBe(7);
     const dowTexts = [...dowLabels].map((d) => d.textContent ?? "");
     expect(dowTexts).toEqual(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]);
@@ -50,8 +50,8 @@ describe("活动页热力图渲染", () => {
   it("点击格子后显示 day detail panel", async () => {
     const { container, findByText } = render(<ActivityView />);
     await findByText(/contributions in the last/);
-    // 找一个非空 cell 点一下（用 className 判断：非 .empty）
-    const dataCell = container.querySelector(".heat-cell:not(.empty)");
+    // 找一个非空 cell 点一下（HeatmapGitHub 用 data-testid="heatmap-cell"）
+    const dataCell = container.querySelector('[data-testid="heatmap-cell"]');
     expect(dataCell).toBeTruthy();
     fireEvent.click(dataCell!);
     // day detail 出现
@@ -107,7 +107,7 @@ describe("活动页热力图渲染", () => {
     const onJump = vi.fn();
     const { container, findByText } = render(<ActivityView onJumpToConversation={onJump} />);
     await findByText(/contributions in the last/);
-    const dataCell = container.querySelector(".heat-cell:not(.empty)");
+    const dataCell = container.querySelector('[data-testid="heatmap-cell"]');
     fireEvent.click(dataCell!);
     // 等 day detail 出现
     await waitFor(() => {

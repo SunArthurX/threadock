@@ -348,7 +348,7 @@ describe("ActivityView 工具维度筛选", () => {
   it("默认「全部工具」→ 热力图全量", async () => {
     const { container } = render(<ActivityView />);
     await waitFor(() => {
-      const cells = container.querySelectorAll(".heat-cell");
+      const cells = container.querySelectorAll('[data-testid="heatmap-cell"], [data-testid="heatmap-cell-empty"]');
       expect(cells.length).toBeGreaterThan(0);
     });
   });
