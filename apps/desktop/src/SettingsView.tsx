@@ -24,11 +24,26 @@ export const APP_VERSION = "0.1.0";
 /** 核心库版本（与 Cargo.toml workspace.package.version 对齐）。 */
 export const CORE_VERSION = "0.2.0";
 
-/** 可重置的最早日期（今天 - 31 天，一个月以上数据长存）。 */
-export function resetDateBounds(): { earliest: string; today: string } {
+/** UI 降级用的 earliest（库为空时 fallback 到今天）。 */
+export function resetDateBoundsSync(): { earliest: string; today: string } {
   const today = new Date().toISOString().slice(0, 10);
-  const earliest = new Date(Date.now() - 31 * 86400000).toISOString().slice(0, 10);
-  return { earliest, today };
+  return { earliest: today, today };
+}
+
+/** 拉取库中最早数据时间戳（毫秒）→ 格式化成 YYYY-MM-DD。
+ * 库为空时返回今天。失败时也降级到今天（让用户至少能操作）。 */
+export async function fetchResetDateBounds(): Promise<{ earliest: string; today: string }> {
+  try {
+    const r = await invoke<{ earliest_ms: number; latest_ms: number }>("reset_range_bounds", {});
+    const today = new Date(r.latest_ms).toISOString().slice(0, 10);
+    // earliest_ms=0 表示空库（命令层 unwrap_or(0) 兜底），fallback 到 today
+    const earliest = r.earliest_ms > 0
+      ? new Date(r.earliest_ms).toISOString().slice(0, 10)
+      : today;
+    return { earliest, today };
+  } catch {
+    return resetDateBoundsSync();
+  }
 }
 
 const INTERVAL_OPTIONS: [number, string][] = [
@@ -125,9 +140,9 @@ export default function SettingsView({
     return () => { un.then((f) => f()); };
   }, []);
   const [confirmText, setConfirmText] = useState("");
-  // 时间范围重置（一个月以上数据长存）；日期常量模块级一次计算（render 纯度）
+  // 时间范围重置：bounds 来自后端（库中最早数据时间戳），无 31 天硬限制
   const [resetDate, setResetDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const bounds = resetDateBounds();
+  const [bounds, setBounds] = useState<{ earliest: string; today: string }>(() => resetDateBoundsSync());
   const [rangePreview, setRangePreview] = useState<{ conversations: number; messages: number; usage_records: number } | null>(null);
   const loadRangePreview = async () => {
     if (!resetDate) return;
@@ -140,7 +155,7 @@ export default function SettingsView({
   const [opsSyncing, setOpsSyncing] = useState(false);
   const [opsMsg, setOpsMsg] = useState<string | null>(null);
 
-  // 打开时读取只读的同步时间戳 + 存储看板 + 治理流水 + 周报时间
+  // 打开时读取只读的同步时间戳 + 存储看板 + 治理流水 + 周报时间 + 重置 bounds
   useEffect(() => {
     (async () => {
       try {
@@ -155,6 +170,9 @@ export default function SettingsView({
       try {
         setGovLog(await invoke<{ id: string; action: string; created_at: number }[]>("governance_log_list", { limit: 8 }));
       } catch { /* 空表忽略 */ }
+      try {
+        setBounds(await fetchResetDateBounds());
+      } catch { /* fallback 用 sync 兜底（已是今天） */ }
     })();
   }, []);
 
@@ -177,7 +195,7 @@ export default function SettingsView({
       });
       setConfirmText("");
       setRangePreview(null);
-      showToast(`✓ 已重置 ${resetDate} 之后的数据（${r.conversations} 会话 / ${r.messages} 消息），正在后台刷新…`, "info", 8000);
+      showToast(`✓ 已重置 ${resetDate} 之后的数据（${r.conversations} 会话 / ${r.messages} 消息），正在从源重新刷入…`, "info", 8000);
     } catch (e) {
       showToast(`重置失败：${typeof e === "string" ? e : String(e)}`, "error");
     }
@@ -376,10 +394,11 @@ export default function SettingsView({
           </section>
 
           <section className="settings-section danger">
-            <h3>按时间重置</h3>
+            <h3>按时间重置（并重新刷入）</h3>
             <div className="settings-hint">
-              删除所选日期之后的所有会话、消息与指标。一个月以上的数据不可重置，将永久保留在库中
-              （不影响查询速度）。范围删除走时间索引 + 单事务，秒级完成。
+              删除所选日期之后的所有会话、消息与指标，并<strong>自动从源（Claude Code / Codex / ZCode / MiniMax / Cursor）重新刷入</strong>该时间范围之后的数据。
+              最早可选日期为库中现存最早数据（{bounds.earliest}），不再硬限一个月。
+              范围删除走时间索引 + 单事务，秒级完成；随后触发一轮全量同步。
             </div>
             <div className="settings-row">
               <span>开始日期（最早 {bounds.earliest}）</span>
@@ -414,7 +433,7 @@ export default function SettingsView({
                 onKeyDown={(e) => e.key === "Enter" && doReset()}
               />
               <button className="reset-confirm-btn" disabled={!canReset} onClick={doReset}>
-                {resetting ? "重置中…" : `重置 ${resetDate || ""} 之后的数据`}
+                {resetting ? "重置并重新刷入中…" : `重置并重新刷入 ${resetDate || ""} 之后的数据`}
               </button>
               <MiniProgress p={mini} />
             </div>

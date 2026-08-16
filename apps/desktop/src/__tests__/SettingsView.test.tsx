@@ -67,20 +67,20 @@ describe("SettingsView 外观与同步", () => {
 describe("SettingsView 重置确认（防误触）", () => {
   it("确认词不匹配时按钮禁用", () => {
     openSettings();
-    const btn = screen.getByText(/重置 .* 之后的数据/) as HTMLButtonElement;
+    const btn = screen.getByText(/重置.*之后的数据/) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     const input = screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`);
     fireEvent.change(input, { target: { value: "reset" } });
-    expect(screen.getByText(/重置 .* 之后的数据/)).toBeDisabled();
+    expect(screen.getByText(/重置.*之后的数据/)).toBeDisabled();
     fireEvent.change(input, { target: { value: "重 置" } });
-    expect(screen.getByText(/重置 .* 之后的数据/)).toBeDisabled();
+    expect(screen.getByText(/重置.*之后的数据/)).toBeDisabled();
   });
 
   it("输入「重置」后按钮可用，点击执行并清空输入", async () => {
     openSettings();
     const input = screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`);
     fireEvent.change(input, { target: { value: RESET_CONFIRM_TEXT } });
-    const btn = screen.getByText(/重置 .* 之后的数据/) as HTMLButtonElement;
+    const btn = screen.getByText(/重置.*之后的数据/) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     fireEvent.click(btn);
     await waitFor(() => expect(base.onReset).toHaveBeenCalledTimes(1));

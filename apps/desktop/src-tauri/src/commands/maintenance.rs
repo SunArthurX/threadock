@@ -264,9 +264,6 @@ fn rebuild_index_inner(
     Ok(n)
 }
 
-/// 时间范围重置下限：一个月（更早的数据不可重置，长存库中）。
-pub(crate) const RESET_MIN_START_MS: i64 = 31 * 24 * 3600 * 1000;
-
 /// 范围重置预览：[start, now] 内将删除的会话/消息/指标条数。
 #[tauri::command]
 pub(crate) async fn reset_range_preview(
@@ -284,8 +281,26 @@ pub(crate) async fn reset_range_preview(
     }))
 }
 
-/// 按时间范围重置：删除开始时间之后的数据；一个月以上数据不可重置（长存）。
-/// 会话删除同步清理搜索索引文档；全部动作记入治理流水。
+/// 范围重置边界：返回库中最早数据时间戳（用于 UI 限制 `min`）。
+/// 空库返回 0（前端 fallback 到今天）。
+#[tauri::command]
+pub(crate) async fn reset_range_bounds(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<serde_json::Value, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let earliest_ms = repo.reset_range_min_ts().map_err(|e| storage_err(e))?.unwrap_or(0);
+    let now_ms =
+        (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+    Ok(serde_json::json!({
+        "earliest_ms": earliest_ms,
+        "latest_ms": now_ms,
+    }))
+}
+
+/// 按时间范围重置：删除开始时间之后的数据。
+/// 不限制最早开始时间（库中有 1 年前数据也允许重置整段）。
+/// 会话删除同步清理搜索索引文档 + 清 import_state（让 autoSync 能重导入）；
+/// 全部动作记入治理流水。
 #[tauri::command]
 pub(crate) async fn reset_range(
     state: tauri::State<'_, DaemonState>,
@@ -294,11 +309,8 @@ pub(crate) async fn reset_range(
 ) -> Result<serde_json::Value, String> {
     let now_ms =
         (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
-    if now_ms - start_ms > RESET_MIN_START_MS {
-        return Err(format!(
-            "开始时间过早：一个月以上的数据不能重置（最早 {}）",
-            crate::commands::maintenance::earliest_reset_date_label(now_ms)
-        ));
+    if start_ms > now_ms {
+        return Err("开始时间晚于当前时间：参数错误".into());
     }
     let app2 = app.clone();
     let r = run_blocking(move || {
@@ -340,13 +352,6 @@ pub(crate) async fn reset_range(
         serde_json::json!({ "current": 1, "total": 1, "detail": "done", "finished": true }),
     );
     Ok(r)
-}
-
-/// 最早可重置日期（本地展示用，YYYY-MM-DD）。
-pub(crate) fn earliest_reset_date_label(now_ms: i64) -> String {
-    let t = time::OffsetDateTime::from_unix_timestamp((now_ms - RESET_MIN_START_MS) / 1000)
-        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-    format!("{:04}-{:02}-{:02}", t.year(), u8::from(t.month()), t.day())
 }
 
 #[cfg(test)]
@@ -576,6 +581,143 @@ mod reset_timing_tests {
 mod reset_range_tests {
     use super::*;
     use ch_daemon::{DaemonState, DaemonStateConfig};
+    use ch_domain::{Conversation, Provider, Timestamp, UsageRecord, UsageStatus};
+
+    fn make_state() -> (tempfile::TempDir, DaemonState) {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+        })
+        .expect("state open");
+        (dir, state)
+    }
+
+    fn ms_to_ts(ms: i64) -> Timestamp {
+        ch_storage::timestamp::from_millis(Some(ms)).expect("valid ms")
+    }
+
+    /// 库为空时 min_ts 返回 None（前端 fallback 到今天）。
+    #[test]
+    fn reset_range_min_ts_empty_db_returns_none() {
+        let (_d, state) = make_state();
+        let v = state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .reset_range_min_ts()
+            .expect("min_ts");
+        assert!(v.is_none(), "空库必须返回 None");
+    }
+
+    /// 库有数据时 min_ts 返回最早 ts（取三表最小）。
+    #[test]
+    fn reset_range_min_ts_returns_earliest_across_tables() {
+        let (_d, state) = make_state();
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let old_conv_ms = now_ms - 30 * 86_400_000;
+        let new_conv_ms = now_ms - 1 * 86_400_000;
+        let usage_ms = now_ms - 60 * 86_400_000; // 应是最小
+
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let mut c1 = Conversation::new(Provider::Generic, "src-old");
+        c1.started_at = Some(ms_to_ts(old_conv_ms));
+        c1.updated_at = Some(ms_to_ts(old_conv_ms));
+        repo.import_conversation_batch(&c1, &[], &[], None, Some(old_conv_ms))
+            .expect("import c1");
+        let mut c2 = Conversation::new(Provider::Generic, "src-new");
+        c2.started_at = Some(ms_to_ts(new_conv_ms));
+        c2.updated_at = Some(ms_to_ts(new_conv_ms));
+        repo.import_conversation_batch(&c2, &[], &[], None, Some(new_conv_ms))
+            .expect("import c2");
+
+        let u = UsageRecord {
+            id: "u1".into(),
+            provider: Provider::Generic,
+            source_session_id: "src-old".into(),
+            turn_id: None,
+            model: Some("gpt-4".into()),
+            ts: ms_to_ts(usage_ms),
+            input_tokens: 1,
+            output_tokens: 1,
+            reasoning_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: Some(0.01),
+            status: UsageStatus::Completed,
+            duration_ms: None,
+            retry_count: None,
+            source_dir: None,
+            context_exceeded: 0,
+        };
+        repo.upsert_usage_batch(&[u]).expect("upsert usage");
+        drop(repo);
+
+        let v = state
+            .repo
+            .lock()
+            .expect("mutex poisoned")
+            .reset_range_min_ts()
+            .expect("min_ts")
+            .expect("must be Some");
+        assert_eq!(v, usage_ms, "min_ts 必须取三表最小（usage.ts 60 天前最老）");
+    }
+
+    /// 移除 31 天限制：任意历史日期都可重置，不再被拒。
+    #[test]
+    fn reset_range_allows_any_past_start_no_31d_cap() {
+        let (_d, state) = make_state();
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let r = reset_range_inner(&state, now_ms - 365 * 86_400_000);
+        assert!(r.is_ok(), "1 年前的开始时间必须可重置（无 31 天下限）：{r:?}");
+    }
+
+    /// 未来时间必须被拒（防误传）。
+    #[test]
+    fn reset_range_rejects_future_start() {
+        let (_d, state) = make_state();
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let r = reset_range_inner(&state, now_ms + 86_400_000);
+        assert!(r.is_err(), "未来时间必须被拒");
+    }
+
+    /// 重置后 import_state 必须被同步清掉，否则 autoSync 增量会全 skip 导致"数据丢失"。
+    #[test]
+    fn reset_range_clears_import_state_for_deleted_source_ids() {
+        let (_d, state) = make_state();
+        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let recent_ms = now_ms - 3 * 86_400_000;
+        let recent_ts = ms_to_ts(recent_ms);
+
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let mut c = Conversation::new(Provider::Generic, "src-clear-me");
+        c.started_at = Some(recent_ts);
+        c.updated_at = Some(recent_ts);
+        repo.import_conversation_batch(&c, &[], &[], None, Some(recent_ms))
+            .expect("import");
+        // 写 import_state（模拟上次同步留下的记录）
+        let prov_id = Provider::Generic.as_str();
+        repo.record_import_states(prov_id, &[("src-clear-me".into(), Some(recent_ms))])
+            .expect("record state");
+        let m = repo
+            .import_state_map(prov_id)
+            .expect("state map");
+        assert!(m.contains_key("src-clear-me"), "import_state 必须有记录才能验证清理");
+        drop(repo);
+
+        // 重置 7 天前到现在：会命中该会话
+        let r = reset_range_inner(&state, now_ms - 7 * 86_400_000).expect("reset");
+        assert_eq!(r.0, 1, "应删 1 个会话");
+
+        // 验证 import_state 已被同步清掉
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let m = repo
+            .import_state_map(prov_id)
+            .expect("state map");
+        assert!(
+            !m.contains_key("src-clear-me"),
+            "重置后 import_state 必须清掉对应 source_id，否则 autoSync 增量会全 skip 导致数据丢失"
+        );
+    }
 
     #[test]
     #[ignore = "依赖本机真实 app 数据副本"]
@@ -601,12 +743,6 @@ mod reset_range_tests {
             .expect("mutex poisoned")
             .count_conversations()
             .expect("SQL execution failed");
-        // 31 天下限校验：更早的 start 被拒
-        let too_old = now_ms - RESET_MIN_START_MS - 86_400_000;
-        let rejected = reset_range_inner(&state, too_old);
-        assert!(rejected.is_err(), "一个月以上的开始时间必须被拒绝");
-
-        // 重置最近 7 天
         let r = reset_range_inner(&state, now_ms - 7 * 86_400_000).expect("range reset");
         let after = state
             .repo
@@ -618,7 +754,7 @@ mod reset_range_tests {
         assert!(after < before, "范围内会话必须被删除");
         assert!(
             after > 0,
-            "一个月以上的老数据必须保留（真实库 977 会话不可能全在 7 天内）"
+            "30+ 天前的老数据必须保留（真实库 >7 天会话不可能全删）"
         );
         assert_eq!(before - after, r.0 as i64, "删除数与返回一致");
     }

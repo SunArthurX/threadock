@@ -529,6 +529,28 @@ impl Repository {
         Ok(map)
     }
 
+    /// 时间范围重置：库中最早数据时间戳（用于 UI 限制 `min`）。
+    /// 取 usage_records / tool_call_records / conversations 三表最小 ts；
+    /// 空库返回 None（前端 fallback 到今天）。
+    pub fn reset_range_min_ts(&self) -> StorageResult<Option<i64>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        // 单条 SQL 同时查三表最小值；任一为空用 NULL 兜底，最终取整体 MIN
+        let v: Option<i64> = conn
+            .query_row(
+                "SELECT MIN(min_ts) FROM (
+                     SELECT MIN(ts) AS min_ts FROM usage_records
+                     UNION ALL
+                     SELECT MIN(ts) AS min_ts FROM tool_call_records
+                     UNION ALL
+                     SELECT MIN(updated_at) AS min_ts FROM conversations
+                 )",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(crate::StorageError::from)?;
+        Ok(v)
+    }
+
     /// 时间范围重置预览：统计 [start_ms, now] 内将被删除的数据量。
     pub fn reset_range_stats(&self, start_ms: i64) -> StorageResult<(i64, i64, i64)> {
         let conn = self.conn.lock().expect("mutex poisoned");
@@ -551,26 +573,36 @@ impl Repository {
         Ok((convs, msgs, usage))
     }
 
-    /// 时间范围重置下限：一个月（更早的数据不可重置，长存库中）。
-    pub const RESET_MIN_SPAN_MS: i64 = 31 * 24 * 3600 * 1000;
-
     /// 时间范围重置：删除 [start_ms, now] 内的会话及其级联数据 + 指标记录。
     /// 返回删除的会话数与消息 id 列表（供调用方同步删搜索索引）。
     ///
-    /// 硬性约束：开始时间不得早于 31 天前（一个月以上数据长存）。
-    /// 性能（真实库实测迭代）：FK CASCADE + FTS5 触发器单事务 686s →
-    /// 分批 228s → 禁触发器删除 + FTS 一次性 rebuild 秒级。
+    /// 约束：开始时间不得晚于当前时间（防误传未来时间），不限制最早日期——
+    /// 库中有 1 年前数据也允许重置整段。性能（真实库实测迭代）：
+    /// FK CASCADE + FTS5 触发器单事务 686s → 分批 228s → 禁触发器删除 +
+    /// FTS 一次性 rebuild 秒级。
     pub fn reset_range(&self, start_ms: i64) -> StorageResult<(i64, Vec<String>)> {
         let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
-        if now_ms - start_ms > Self::RESET_MIN_SPAN_MS {
+        if start_ms > now_ms {
             return Err(StorageError::NotFound {
                 entity: "reset_range",
-                id: "开始时间过早：一个月以上的数据不能重置".into(),
+                id: "开始时间晚于当前时间：参数错误".into(),
             });
         }
         let mut conn = self.conn.lock().expect("mutex poisoned");
+        // ① 收集被删 conversations 的本地 id + 源侧 source_conversation_id
+        // （后者用于清 import_state——否则重置后 autoSync 走增量会全 skip，导致"重置 = 数据丢失"）
         let conv_ids: Vec<String> = {
-            let mut stmt = conn.prepare("SELECT id FROM conversations WHERE updated_at >= ?1")?;
+            let mut stmt =
+                conn.prepare("SELECT id FROM conversations WHERE updated_at >= ?1")?;
+            let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
+            rows.collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let source_ids: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT source_conversation_id FROM conversations
+                 WHERE updated_at >= ?1 AND source_conversation_id IS NOT NULL
+                   AND source_conversation_id != ''",
+            )?;
             let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -578,7 +610,7 @@ impl Repository {
         if conv_ids.is_empty() {
             return Ok((0, Vec::new()));
         }
-        // ① 删除前收集消息 id（只读，供索引级联删除）
+        // ② 删除前收集消息 id（只读，供索引级联删除）
         let msg_ids: Vec<String> = {
             let mut stmt = conn.prepare(
                 "SELECT id FROM messages WHERE conversation_id IN (
@@ -587,12 +619,12 @@ impl Repository {
             let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
-        // ② 禁用 FTS 行触发器（删除走批量，索引删除改由 rebuild 承担）
+        // ③ 禁用 FTS 行触发器（删除走批量，索引删除改由 rebuild 承担）
         for trig in ["messages_ai_fts", "messages_ad_fts", "messages_au_fts"] {
             let _ = conn.execute(&format!("DROP TRIGGER IF EXISTS {trig}"), []);
         }
         let del_result: StorageResult<()> = (|| {
-            // ③ 分批删子表 + 主表（每批独立短事务）
+            // ④ 分批删子表 + 主表 + import_state（每批独立短事务）
             for chunk in conv_ids.chunks(200) {
                 let tx = conn.transaction()?;
                 let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
@@ -610,7 +642,18 @@ impl Repository {
                 tx.execute(&sql_del, rusqlite::params_from_iter(chunk.iter()))?;
                 drop(tx.commit());
             }
-            // 指标按时间分批
+            // ⑤ 同步清 import_state（用 source_conversation_id 匹配）—— 否则 autoSync 增量会全 skip
+            if !source_ids.is_empty() {
+                for chunk in source_ids.chunks(500) {
+                    let placeholders =
+                        chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let sql = format!(
+                        "DELETE FROM import_state WHERE source_id IN ({placeholders})"
+                    );
+                    conn.execute(&sql, rusqlite::params_from_iter(chunk.iter()))?;
+                }
+            }
+            // ⑥ 指标按时间分批
             for table in ["usage_records", "tool_call_records"] {
                 loop {
                     let deleted = conn.execute(
@@ -627,7 +670,7 @@ impl Repository {
             }
             Ok(())
         })();
-        // ④ 无论成败：恢复触发器 + 全文索引一次性重建（保持结构一致）
+        // ⑦ 无论成败：恢复触发器 + 全文索引一次性重建（保持结构一致）
         conn.execute_batch(crate::schema::SCHEMA_FTS_TRIGGERS)?;
         conn.execute(
             "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
