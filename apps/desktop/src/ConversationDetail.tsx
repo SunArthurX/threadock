@@ -17,7 +17,7 @@ interface Props {
   collapsedMsgs: Set<string>;
   tags: string[];
   /** 父级滚动容器的 ref（用于「滚到底部」按钮 + 滚动检测） */
-  scrollContainerRef?: React.RefObject<HTMLElement | null>;
+  scrollContainerRef?: React.RefObject<{ inner: HTMLElement | null } | HTMLElement | null>;
   onToggleTimeline: () => void;
   onExport: (format: "markdown" | "json") => void;
   onExtractKnowledge: () => void;
@@ -71,7 +71,7 @@ export default function ConversationDetail({
   // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
   const [showJumpBottom, setShowJumpBottom] = useState(false);
   useEffect(() => {
-    const el = scrollContainerRef?.current;
+    const el = (scrollContainerRef?.current as any)?.inner ?? scrollContainerRef?.current;
     if (!el) return;
     const onScroll = () => {
       const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
@@ -82,7 +82,7 @@ export default function ConversationDetail({
     return () => el.removeEventListener("scroll", onScroll);
   }, [scrollContainerRef, conv.id, timelineMode, messages.length]);
   const jumpToBottom = () => {
-    const el = scrollContainerRef?.current;
+    const el = (scrollContainerRef?.current as any)?.inner ?? scrollContainerRef?.current;
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };

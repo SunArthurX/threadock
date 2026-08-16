@@ -25,6 +25,7 @@ import { CommandPalette, type Page } from "./CommandPalette";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
+import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
@@ -190,7 +191,7 @@ export default function App() {
   const [batchProgress, setBatchProgress] = useState<{done:number;total:number}|null>(null);
 
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const detailPanelRef = useRef<HTMLDivElement>(null);
+  const detailPanelRef = useRef<ScrollAreaRef>(null);
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
@@ -893,7 +894,7 @@ export default function App() {
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
           <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
-            <div className="panel" style={{ width: listWidth }}>
+            <ScrollArea style={{ width: listWidth }}>
               {searchResults
                 ? <SearchPanel results={searchResults} query={searchQuery} onJump={jumpToSearchResult} />
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
@@ -953,12 +954,12 @@ export default function App() {
                       }
                     }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
-            </div>
+            </ScrollArea>
             <Resizer
               onDrag={(dx) => setListWidth((w) => { const n = Math.round(w + dx); const c = Math.max(240, Math.min(540, n)); saveNumber("ch-list-width", c); return c; })}
               title="拖拽调整会话列表宽度"
             />
-            <div className="panel" ref={detailPanelRef}>
+            <ScrollArea ref={detailPanelRef}>
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}
                     completenessLabel={completenessLabel}
@@ -1017,7 +1018,7 @@ export default function App() {
                       </>
                     )}
                   </div>}
-            </div>
+            </ScrollArea>
           </div>
         )}
         </ErrorBoundary>
