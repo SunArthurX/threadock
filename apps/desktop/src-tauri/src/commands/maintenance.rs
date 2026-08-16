@@ -297,6 +297,18 @@ pub(crate) async fn reset_range_bounds(
     }))
 }
 
+/// 写剪贴板（round 25c 兜底）：直接调 arboard crate，绕开 Tauri plugin 系统的复杂性。
+/// macOS WKWebView 拦截 navigator.clipboard.writeText + execCommand 时唯一稳妥路径。
+#[tauri::command]
+pub(crate) async fn write_clipboard(text: String) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("arboard init failed: {e}"))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("arboard set_text failed: {e}"))?;
+    Ok(())
+}
+
 /// 按时间范围重置：删除开始时间之后的数据。
 /// 不限制最早开始时间（库中有 1 年前数据也允许重置整段）。
 /// 会话删除同步清理搜索索引文档 + 清 import_state（让 autoSync 能重导入）；

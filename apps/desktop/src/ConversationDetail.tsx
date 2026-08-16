@@ -338,13 +338,12 @@ export default function ConversationDetail({
           onClick={async () => {
             try {
               const md = await invoke<string>("export_conversation_context_md", { conversationId: conv.id });
-              // macOS WKWebView 经常拦截 navigator.clipboard.writeText（NotAllowedError）；
-              // 用 execCommand('copy') + 临时 textarea 兜底，几乎不被拒
-              const ok = await copyToClipboard(md);
-              if (ok) {
+              const r = await copyToClipboard(md);
+              if (r.ok) {
                 showToast("✓ 会话上下文已复制到剪贴板——粘贴到新会话即可「续做」", "info", 5000);
               } else {
-                showToast("⚠ 复制失败：浏览器不允许访问剪贴板，请手动 Cmd+C", "error", 6000);
+                // 显示真实错误：可能是 Tauri 端没装好 / 权限不够
+                showToast(`⚠ 复制失败：${r.error ?? "unknown"}`, "error", 8000);
               }
             } catch (e) {
               showToast(`续做失败：${typeof e === "string" ? e : String(e)}`, "error");

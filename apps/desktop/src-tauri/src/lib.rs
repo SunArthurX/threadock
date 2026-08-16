@@ -153,6 +153,7 @@ pub fn run() {
             reset_range,
             reset_range_preview,
             reset_range_bounds,
+            write_clipboard,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

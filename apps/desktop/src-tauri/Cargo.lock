@@ -4843,6 +4843,7 @@ dependencies = [
 name = "threadock"
 version = "0.2.0"
 dependencies = [
+ "arboard",
  "ch-adapter-claude-code",
  "ch-adapter-codex",
  "ch-adapter-cursor",
