@@ -18,7 +18,10 @@ fn main() {
     let data_dir =
         std::env::var("CH_DATA_DIR").map_or_else(|_| PathBuf::from("./data"), PathBuf::from);
 
-    let state = match DaemonState::open(DaemonStateConfig { data_dir }) {
+    let state = match DaemonState::open(DaemonStateConfig {
+        data_dir,
+        ..Default::default()
+    }) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("fatal: open daemon state: {e}");

@@ -13,8 +13,21 @@ use ch_storage::Repository;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+/// 便于 `DaemonStateConfig { data_dir, ..Default::default() }` 写法。
+impl Default for DaemonStateConfig {
+    fn default() -> Self {
+        Self {
+            data_dir: std::path::PathBuf::new(),
+            db_path: None,
+        }
+    }
+}
+
 pub struct DaemonStateConfig {
     pub data_dir: PathBuf,
+    /// 显式数据库文件路径（CLI `--db` 透传用）。
+    /// None 时用 `<data_dir>/threadock.db`（GUI 默认布局）。
+    pub db_path: Option<PathBuf>,
 }
 
 /// Daemon 全局状态。双连接 + 搜索索引 + Raw Store。
@@ -32,7 +45,10 @@ impl DaemonState {
     /// 在 `data_dir` 下打开/创建双连接 + `SearchIndex` + `RawStore`。
     pub fn open(config: DaemonStateConfig) -> Result<Self, DaemonStateError> {
         std::fs::create_dir_all(&config.data_dir)?;
-        let db_path = config.data_dir.join("threadock.db");
+        let db_path = config
+            .db_path
+            .clone()
+            .unwrap_or_else(|| config.data_dir.join("threadock.db"));
         let repo = Repository::open(&db_path)?;
         // 第二个连接：同一 DB 文件，独立 Mutex（WAL 读写并发）
         let read_repo = Repository::open(&db_path)?;

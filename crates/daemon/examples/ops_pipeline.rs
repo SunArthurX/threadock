@@ -9,6 +9,7 @@ fn main() {
     let t0 = Instant::now();
     let st = DaemonState::open(DaemonStateConfig {
         data_dir: dir.into(),
+        ..Default::default()
     })
     .expect("write to String");
     println!("DaemonState::open: {:?}", t0.elapsed());

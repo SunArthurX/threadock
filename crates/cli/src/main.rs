@@ -247,6 +247,10 @@ fn run() -> Result<()> {
             // 在当前进程内启动 stdio JSON-RPC 服务（plan §8.2）
             let state = ch_daemon::DaemonState::open(ch_daemon::DaemonStateConfig {
                 data_dir: data_dir.clone(),
+                // --db 指定的文件名必须透传：否则 daemon 会打开
+                // <data_dir>/threadock.db 而不是用户指定的库（E2E 发现的真实 bug）
+                db_path: Some(db_path.clone()),
+                ..Default::default()
             })
             .context("open daemon state")?;
             eprintln!(
@@ -426,6 +430,10 @@ fn import_from_claude_code(
 fn list_zcode_sessions() -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
+    if !std::path::Path::new(&db_path).exists() {
+        println!("（未找到 ZCode 数据库：{db_path} 不存在）");
+        return Ok(());
+    }
     let sessions =
         ch_adapter_zcode::discover_sessions(&db_path).context("discover zcode sessions")?;
     if sessions.is_empty() {
@@ -452,6 +460,10 @@ fn import_from_zcode(
 ) -> Result<()> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
     let db_path = format!("{home}/.zcode/cli/db/db.sqlite");
+    anyhow::ensure!(
+        std::path::Path::new(&db_path).exists(),
+        "未找到 ZCode 数据库：{db_path} 不存在"
+    );
     let raw =
         ch_adapter_zcode::parse_session(&db_path, session_id).context("parse zcode session")?;
     let summary = import_raw(repo, search_index, raw_store, raw, None)?;

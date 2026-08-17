@@ -6,6 +6,7 @@ fn main() {
     let dir = format!("{home}/Library/Application Support/com.conversation-hub.desktop");
     let st = DaemonState::open(DaemonStateConfig {
         data_dir: dir.into(),
+        ..Default::default()
     })
     .expect("write to String");
     let repo = st.repo.lock().expect("write to String");
