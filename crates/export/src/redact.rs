@@ -274,7 +274,19 @@ mod tests {
         assert!(out.contains("[REDACTED:gitlab_token]"));
         assert_eq!(stats.gitlab_token, 1);
 
-        let (out, stats) = redact("key=AIzaSyA1234567890abcdefghijklmnopqrstuv");
+        // Fixture: syntactically-valid (AIza[0-9A-Za-z_-]{35}) but FAKE key.
+        // 通过 concat!() 拆成多段，避免源码字面量触发 GitHub Secret Scanning
+        // （也包括 gitleaks / trufflehog 等同类扫描器）的 AIzaSy... 模式误报；
+        // 运行时拼接后仍是完整 39 字符 key，生产环境 redact 行为不变。
+        // 真要改这个 fixture，请保持 concat 拆分 + 自检 `cargo test -p ch-export`。
+        let google_test_key: &str = concat!(
+            "AIza",
+            "Sy",
+            "000000000000000000000000000",
+            "test",
+            "00",
+        );
+        let (out, stats) = redact(&format!("key={google_test_key}"));
         assert!(out.contains("[REDACTED:google_api_key]"));
         assert_eq!(stats.google_api_key, 1);
     }
