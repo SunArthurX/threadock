@@ -28,6 +28,17 @@ pub struct Repository {
     conn: Mutex<Connection>,
 }
 
+/// 来源 workspace → 统一 workspace 的映射与置信度（plan §4.3，GUI 低置信度提醒用）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceWorkspaceLink {
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub provider_id: String,
+    pub raw_name: Option<String>,
+    pub match_method: Option<String>,
+    pub match_confidence: Option<f64>,
+}
+
 mod audit_repo;
 mod knowledge_repo;
 mod ops_queries;
@@ -43,7 +54,7 @@ pub use ops_queries::{
     MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
     WeeklySummary,
 };
-pub use settings::{NoteDto, RedactionRuleRecord, TagCountDto};
+pub use settings::{NoteDto, RedactionRuleRecord, SavedSearchRecord, TagCountDto};
 
 impl Repository {
     /// 打开文件库，应用 PRAGMA 并迁移到最新版本。
@@ -293,6 +304,167 @@ impl Repository {
              FROM workspaces ORDER BY updated_at DESC",
         )?;
         let rows = stmt.query_map([], row_to_workspace)?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    // ── Workspace 手动合并/拆分/重命名（plan §4.3 / P2-2，v1.0.0）──────
+
+    /// 手动合并：把 `source_id` 的全部会话与来源映射并入 `target_id`，
+    /// 然后删除 source workspace。返回迁移的会话数。
+    /// 合并是敏感治理动作，写 audit_logs（plan §12.1）。
+    pub fn merge_workspaces(&self, source_id: &str, target_id: &str) -> StorageResult<usize> {
+        if source_id == target_id {
+            return Err(StorageError::InvalidInput {
+                reason: "source and target workspace are identical".into(),
+            });
+        }
+        let conn = self.conn.lock().expect("mutex poisoned");
+        if conn.query_row(
+            "SELECT count(*) FROM workspaces WHERE id = ?1",
+            params![source_id],
+            |r| r.get::<_, i64>(0),
+        )? == 0
+        {
+            return Err(StorageError::NotFound {
+                entity: "workspace",
+                id: source_id.to_string(),
+            });
+        }
+        if conn.query_row(
+            "SELECT count(*) FROM workspaces WHERE id = ?1",
+            params![target_id],
+            |r| r.get::<_, i64>(0),
+        )? == 0
+        {
+            return Err(StorageError::NotFound {
+                entity: "workspace",
+                id: target_id.to_string(),
+            });
+        }
+        let moved = conn.execute(
+            "UPDATE conversations SET workspace_id = ?1 WHERE workspace_id = ?2",
+            params![target_id, source_id],
+        )?;
+        conn.execute(
+            "UPDATE source_workspaces SET workspace_id = ?1 WHERE workspace_id = ?2",
+            params![target_id, source_id],
+        )?;
+        // 并入后把映射标记为 Manual（用户显式决定，plan §4.3 最高优先级）
+        conn.execute(
+            "UPDATE source_workspaces SET match_method = 'manual', match_confidence = 1.0
+             WHERE workspace_id = ?1",
+            params![target_id],
+        )?;
+        conn.execute("DELETE FROM workspaces WHERE id = ?1", params![source_id])?;
+        drop(conn);
+        let _ = self.log_governance_action(
+            "workspace.merge",
+            Some("workspace"),
+            Some(target_id),
+            "ok",
+            Some(&format!(
+                "{{\"merged_from\":\"{source_id}\",\"moved_conversations\":{moved}}}"
+            )),
+        );
+        Ok(moved)
+    }
+
+    /// 手动拆分：新建 workspace 并把指定会话移过去。返回新 workspace id。
+    pub fn split_workspace(
+        &self,
+        conversation_ids: &[String],
+        new_display_name: &str,
+    ) -> StorageResult<String> {
+        if conversation_ids.is_empty() {
+            return Err(StorageError::InvalidInput {
+                reason: "split requires at least one conversation".into(),
+            });
+        }
+        if new_display_name.trim().is_empty() {
+            return Err(StorageError::InvalidInput {
+                reason: "split requires a non-empty name".into(),
+            });
+        }
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let id = ch_domain::new_id("ws");
+        let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
+        conn.execute(
+            "INSERT INTO workspaces (id, display_name, user_title, canonical_path, git_remote,
+                                     git_common_dir, status, created_at, updated_at)
+             VALUES (?1, ?2, NULL, NULL, NULL, NULL, 'active', ?3, ?3)",
+            params![id, new_display_name.trim(), now_ms],
+        )?;
+        let mut moved = 0usize;
+        for cid in conversation_ids {
+            moved += conn.execute(
+                "UPDATE conversations SET workspace_id = ?1 WHERE id = ?2",
+                params![id, cid],
+            )?;
+        }
+        drop(conn);
+        let _ = self.log_governance_action(
+            "workspace.split",
+            Some("workspace"),
+            Some(&id),
+            "ok",
+            Some(&format!(
+                "{{\"name\":\"{}\",\"moved_conversations\":{moved}}}",
+                new_display_name.trim()
+            )),
+        );
+        Ok(id)
+    }
+
+    /// 重命名 workspace（display_name）。空名拒绝。
+    pub fn rename_workspace(&self, id: &str, new_display_name: &str) -> StorageResult<()> {
+        if new_display_name.trim().is_empty() {
+            return Err(StorageError::InvalidInput {
+                reason: "workspace name cannot be empty".into(),
+            });
+        }
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let changed = conn.execute(
+            "UPDATE workspaces SET display_name = ?1, updated_at = ?2 WHERE id = ?3",
+            params![
+                new_display_name.trim(),
+                timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed"),
+                id
+            ],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::NotFound {
+                entity: "workspace",
+                id: id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// 来源 workspace → 统一 workspace 的映射与匹配置信度（plan §4.3）。
+    /// 用于 GUI 低置信度提醒（< 0.8 的映射建议用户人工确认/合并）。
+    pub fn list_source_workspace_links(&self) -> StorageResult<Vec<SourceWorkspaceLink>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT sw.workspace_id, w.display_name, sw.provider_id, sw.raw_name,
+                    sw.match_method, sw.match_confidence
+             FROM source_workspaces sw
+             JOIN workspaces w ON w.id = sw.workspace_id
+             ORDER BY sw.match_confidence ASC NULLS FIRST",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SourceWorkspaceLink {
+                workspace_id: r.get(0)?,
+                workspace_name: r.get(1)?,
+                provider_id: r.get(2)?,
+                raw_name: r.get(3)?,
+                match_method: r.get(4)?,
+                match_confidence: r.get(5)?,
+            })
+        })?;
         let mut v = Vec::new();
         for r in rows {
             v.push(r?);
@@ -2737,5 +2909,146 @@ mod tests {
         assert!(refs.contains(&"a".repeat(64)));
         let flags = r.conversation_flags_bulk().expect("SQL execution failed");
         assert!(flags.contains_key(&c.id));
+    }
+
+    // ── V14 保存搜索 + Workspace 合并/拆分/重命名（v1.0.0）───────────
+
+    #[test]
+    fn saved_search_crud_roundtrip() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        let id1 = r
+            .upsert_saved_search("rust 错误", "provider:codex thiserror")
+            .expect("SQL execution failed");
+        let id2 = r
+            .upsert_saved_search("后台任务", "tauri android")
+            .expect("SQL execution failed");
+        let list = r.list_saved_searches().expect("SQL execution failed");
+        assert_eq!(list.len(), 2);
+        assert!(list
+            .iter()
+            .any(|s| s.id == id1 && s.query_text.contains("thiserror")));
+        assert!(list
+            .iter()
+            .any(|s| s.id == id2 && s.query_text == "tauri android"));
+
+        // 同名覆盖：不新增记录，query 更新
+        let id1b = r
+            .upsert_saved_search("rust 错误", "provider:zcode anyhow")
+            .expect("SQL execution failed");
+        assert_eq!(id1b, id1, "same name must upsert in place");
+        let list = r.list_saved_searches().expect("SQL execution failed");
+        assert_eq!(list.len(), 2);
+
+        r.delete_saved_search(&id1).expect("SQL execution failed");
+        let list = r.list_saved_searches().expect("SQL execution failed");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, id2);
+    }
+
+    fn two_workspaces_with_convs() -> (Repository, String, String, String, String) {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let w1 = r
+            .upsert_workspace(&ch_domain::Workspace::new("project-a"))
+            .expect("upsert failed");
+        let w2 = r
+            .upsert_workspace(&ch_domain::Workspace::new("project-b"))
+            .expect("upsert failed");
+        let c1 = Conversation::new(Provider::Generic, "src-ws-1");
+        let c2 = Conversation::new(Provider::Generic, "src-ws-2");
+        let mut c1 = c1;
+        c1.workspace_id = Some(w1.clone());
+        let mut c2 = c2;
+        c2.workspace_id = Some(w2.clone());
+        let cid1 = r.upsert_conversation(&c1).expect("upsert failed");
+        let cid2 = r.upsert_conversation(&c2).expect("upsert failed");
+        (r, w1, w2, cid1, cid2)
+    }
+
+    #[test]
+    fn merge_workspaces_moves_conversations() {
+        let (r, w1, w2, cid1, _cid2) = two_workspaces_with_convs();
+        let moved = r.merge_workspaces(&w1, &w2).expect("SQL execution failed");
+        assert_eq!(moved, 1);
+        // 会话已归属 w2
+        let convs = r.list_conversations(None).expect("unexpected None");
+        let c = convs.iter().find(|c| c.id == cid1).expect("conv exists");
+        assert_eq!(c.workspace_id.as_deref(), Some(w2.as_str()));
+        // source workspace 已删
+        assert!(r.get_workspace(&w1).expect("unexpected None").is_none());
+        // 审计日志有记录
+        let logs = r.list_governance_log(10).expect("SQL execution failed");
+        assert!(logs.iter().any(|l| l.action == "workspace.merge"));
+    }
+
+    #[test]
+    fn merge_workspaces_rejects_same_id_and_missing() {
+        let (r, w1, _w2, _c1, _c2) = two_workspaces_with_convs();
+        assert!(r.merge_workspaces(&w1, &w1).is_err());
+        assert!(r.merge_workspaces("ws_nonexistent", &w1).is_err());
+    }
+
+    #[test]
+    fn split_workspace_moves_selected() {
+        let (r, w1, _w2, _cid1, _cid2) = two_workspaces_with_convs();
+        // 把 w1 下唯一一条会话拆出去
+        let convs: Vec<String> = r
+            .list_conversations(Some(&w1))
+            .expect("unexpected None")
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        let new_id = r
+            .split_workspace(&convs, "project-a-split")
+            .expect("SQL execution failed");
+        let convs = r
+            .list_conversations(Some(&new_id))
+            .expect("unexpected None");
+        assert_eq!(convs.len(), 1);
+        // 空列表/空名拒绝
+        assert!(r.split_workspace(&[], "x").is_err());
+        assert!(r.split_workspace(&["c_x".into()], "  ").is_err());
+    }
+
+    #[test]
+    fn rename_workspace_updates_display_name() {
+        let (r, w1, _w2, _c1, _c2) = two_workspaces_with_convs();
+        r.rename_workspace(&w1, "renamed-a")
+            .expect("SQL execution failed");
+        let ws = r
+            .get_workspace(&w1)
+            .expect("unexpected None")
+            .expect("ws exists");
+        assert_eq!(ws.display_name, "renamed-a");
+        assert!(r.rename_workspace(&w1, " ").is_err());
+        assert!(r.rename_workspace("ws_missing", "x").is_err());
+    }
+
+    #[test]
+    fn source_workspace_links_exposed() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let wid = r
+            .upsert_workspace(&ch_domain::Workspace::new("linked-ws"))
+            .expect("upsert failed");
+        // 直接插一条 source_workspaces 映射（含置信度）
+        {
+            let conn = r.conn.lock().expect("mutex poisoned");
+            conn.execute(
+                "INSERT INTO source_workspaces
+                 (provider_id, installation_id, source_workspace_id, workspace_id,
+                  raw_name, match_method, match_confidence)
+                 VALUES ('prov_generic', 'inst-1', 'sw-1', ?1, 'my-repo', 'name_similarity', 0.6)",
+                [&wid],
+            )
+            .expect("SQL execution failed");
+        }
+        let links = r
+            .list_source_workspace_links()
+            .expect("SQL execution failed");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].workspace_id, wid);
+        assert_eq!(links[0].match_confidence, Some(0.6));
+        assert_eq!(links[0].match_method.as_deref(), Some("name_similarity"));
     }
 }

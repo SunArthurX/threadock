@@ -128,7 +128,7 @@
 
 | 参数 | 返回 |
 |------|------|
-| days? | `{heatmap, hourly, tools_trend}` |
+| days? | `{heatmap, hourly, hourly_weekday, hourly_weekend, tools_trend, tool_daily}` |
 
 ### `projects_overview`
 
@@ -195,6 +195,18 @@
 | 参数 | 返回 |
 |------|------|
 | workspaceId?, provider? | `ConversationDto[]` |
+
+### `list_conversations_by_date`
+
+| 参数 | 返回 |
+|------|------|
+| fromMs?, toMs? | `ConversationDto[]` |
+
+### `list_conversations_by_dir`
+
+| 参数 | 返回 |
+|------|------|
+| dir | `ConversationDto[]` |
 
 ### `list_child_conversations`
 
@@ -405,4 +417,64 @@
 | 参数 | 返回 |
 |------|------|
 | path, content | `void` |
+
+### `saved_search_list`
+
+| 参数 | 返回 |
+|------|------|
+| - | `SavedSearchRecord[]` |
+
+### `saved_search_upsert`
+
+| 参数 | 返回 |
+|------|------|
+| name, query | `id` |
+
+### `saved_search_delete`
+
+| 参数 | 返回 |
+|------|------|
+| id | `void` |
+
+### `workspace_merge`
+
+| 参数 | 返回 |
+|------|------|
+| sourceId, targetId | `moved count` |
+
+### `workspace_split`
+
+| 参数 | 返回 |
+|------|------|
+| conversationIds, newName | `new workspace id` |
+
+### `workspace_rename`
+
+| 参数 | 返回 |
+|------|------|
+| id, newName | `void` |
+
+### `workspace_source_links`
+
+| 参数 | 返回 |
+|------|------|
+| - | `SourceWorkspaceLink[]` |
+
+### `conversation_raw`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `string?（原始归档）` |
+
+### `open_source_app`
+
+| 参数 | 返回 |
+|------|------|
+| provider | `说明文字` |
+
+### `resume_command`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `string?（CLI 来源恢复命令）` |
 

@@ -98,8 +98,10 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 唤起时聚焦 + 拉取最近 30 条会话
+  // （open 由父组件控制，无法在本地事件处理器里重置输入状态，只能在 effect 中同步）
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 打开时重置输入/选中状态（受控 open prop）
     setQ("");
     setActive(0);
     setPromptReuse([]);
@@ -125,12 +127,11 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
   }, [open, onClose]);
 
   // Prompt 复用推荐：q 长度 ≥ 2 时 debounce 拉取（FTS5 + cost JOIN）
+  // 短关键词不显示复用推荐：在渲染层推导（而非 effect 里 setState 清空），
+  // 顺带规避「在途请求返回后覆盖清空结果」的竞态。
   useEffect(() => {
     const query = q.trim();
-    if (query.length < 2) {
-      setPromptReuse([]);
-      return;
-    }
+    if (query.length < 2) return;
     const t = window.setTimeout(() => {
       (async () => {
         try {
@@ -161,6 +162,9 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
   const items = useMemo<Command[]>(() => {
     const lower = q.trim().toLowerCase();
     const ql = lower;
+    // 短关键词（<2 字符）时不展示复用推荐：渲染层推导（替代 effect 里 setState 清空），
+    // 顺带规避「在途请求返回后覆盖清空结果」的竞态。
+    const shownReuse = q.trim().length >= 2 ? promptReuse : [];
     const matchedPages: Command[] = PAGES.filter(
       (p) => !ql || p.label.toLowerCase().includes(ql) || p.hint.toLowerCase().includes(ql) || p.key.toLowerCase().includes(ql),
     ).map((p) => ({ kind: "page", page: p }));
@@ -176,28 +180,9 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
           (c.provider ?? "").toLowerCase().includes(ql),
         ).slice(0, 15).map((c) => ({ kind: "conv", conv: c }))
       : convs.slice(0, 8).map((c) => ({ kind: "conv", conv: c }));
-    const matchedReuse: Command[] = promptReuse.map((h) => ({ kind: "reuse", hit: h }));
+    const matchedReuse: Command[] = shownReuse.map((h) => ({ kind: "reuse", hit: h }));
     return [...matchedPages, ...matchedActions, ...matchedConvs, ...matchedReuse];
   }, [q, convs, promptReuse]);
-
-  // 键盘上下选择
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive((a) => Math.min(a + 1, items.length - 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive((a) => Math.max(0, a - 1));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        commitActive();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, items, active, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // commit 顺序：page → action → conv → reuse（与 items 顺序保持一致）
   const commitActive = () => {
@@ -231,6 +216,25 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
         return;
     }
   };
+
+  // 键盘上下选择
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActive((a) => Math.min(a + 1, items.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActive((a) => Math.max(0, a - 1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        commitActive();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, items, active, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!open) return null;
   return (

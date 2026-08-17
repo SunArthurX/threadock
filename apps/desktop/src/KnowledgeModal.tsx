@@ -117,8 +117,10 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
     const cmds = (knowledge.commands ?? []).map((c) => ({ text: c, kind: "command" as const }));
     return [...files, ...cmds].slice(0, 12); // 限 12 关键词避免请求爆
   }, [knowledge.files, knowledge.commands]);
+  // 跨会话引用数据加载：无会话/关键词时同步清空（effect 数据加载模式，有意保留）
   useEffect(() => {
     if (!conversationId || xrefKeywords.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 无关键字时清空跨会话引用
       setXref([]);
       return;
     }

@@ -21,6 +21,9 @@ pub enum StorageError {
     #[error("not found: {entity} {id}")]
     NotFound { entity: &'static str, id: String },
 
+    #[error("invalid input: {reason}")]
+    InvalidInput { reason: String },
+
     #[error("serialization error: {0}")]
     Serialize(#[from] serde_json::Error),
 }

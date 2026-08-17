@@ -3,7 +3,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (cmd: string, args?: any) => {
+  invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === "knowledge_xref") {
       const keywords = (args?.keywords ?? []) as { text: string; kind: string }[];
       return keywords

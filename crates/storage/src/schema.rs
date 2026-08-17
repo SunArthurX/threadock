@@ -449,3 +449,14 @@ CREATE TABLE IF NOT EXISTS audit_finding_states (
     created_at  INTEGER NOT NULL
 );
 ";
+
+/// V14：保存搜索条件（plan §13.2）。按 name 唯一，重复保存覆盖更新。
+pub const SCHEMA_V14: &str = r"
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    query_text  TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+";

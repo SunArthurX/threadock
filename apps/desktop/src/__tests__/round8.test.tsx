@@ -3,7 +3,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (cmd: string, args?: any) => {
+  invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === "get_conversation_note") return args?.id === "c-with-note" ? { note: "已存笔记", updated_at: Date.now() } : null;
     if (cmd === "set_conversation_note") return Date.now();
     return null;
@@ -49,7 +49,7 @@ describe("splitCodeBlocks 消息代码块切分", () => {
 
 describe("ConversationDetail 私人笔记", () => {
   const baseConv = {
-    id: "c-with-note", provider: "zcode" as any, source_conversation_id: "sc", title: "T", user_title: null,
+    id: "c-with-note", provider: "zcode", source_conversation_id: "sc", title: "T", user_title: null,
     status: null, model: null, completeness_score: null, workspace_id: null, source_parent_id: null,
     started_at_ms: null, updated_at_ms: null, child_count: 0, favorite: false, archived: false,
   };
@@ -127,7 +127,7 @@ describe("ConversationDetail 私人笔记", () => {
 
 describe("消息内代码块渲染", () => {
   const baseConv = {
-    id: "c1", provider: "zcode" as any, source_conversation_id: "sc", title: "T", user_title: null,
+    id: "c1", provider: "zcode", source_conversation_id: "sc", title: "T", user_title: null,
     status: null, model: null, completeness_score: null, workspace_id: null, source_parent_id: null,
     started_at_ms: null, updated_at_ms: null, child_count: 0, favorite: false, archived: false,
   };

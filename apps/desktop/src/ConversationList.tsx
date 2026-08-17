@@ -367,6 +367,9 @@ export default function ConversationList({
       setEnableVirtualization(true);
     }
   }, [sorted.length]);
+  // TanStack Virtual 的 useVirtualizer 返回不可安全 memo 化的函数句柄，
+  // 属第三方库 API 设计与 React Compiler 的兼容性限制，非本仓库代码问题。
+  // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: sorted.length,
     getScrollElement: () => (enableVirtualization ? parentRef.current : null),

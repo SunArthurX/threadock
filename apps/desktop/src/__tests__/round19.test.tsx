@@ -101,7 +101,7 @@ describe("ScrollArea thumb 位置同步", () => {
     // jsdom 没有真实 rAF，rAF callback 不会自动跑
     // 我们改测 React state：thumbHeight + 通过 thumbHeight + thumbTop 推导
     // 直接看 scrollTop 变化是否触发 setThumbTop（侧证：inner.scrollTop 正确）
-    expect((inner as any).scrollTop).toBe(450);
+    expect(inner.scrollTop).toBe(450);
   });
 });
 
@@ -128,7 +128,7 @@ describe("ScrollArea thumb 拖动", () => {
     });
     // dy = 30, startTop = 0, newTop = 0+30 = 30
     // scrollTop = 30 / 70 * 900 = 385.71
-    expect((inner as any).scrollTop).toBeCloseTo(385.71, -1);
+    expect(inner.scrollTop).toBeCloseTo(385.71, -1);
   });
 
   it("mousedown thumb → mouseup 解除拖动", () => {
@@ -148,14 +148,14 @@ describe("ScrollArea thumb 拖动", () => {
       fireEvent.mouseDown(thumb, { clientY: 10 });
       document.dispatchEvent(new MouseEvent("mousemove", { clientY: 50, bubbles: true }));
     });
-    const topAfterDown = (inner as any).scrollTop;
+    const topAfterDown = inner.scrollTop;
     expect(topAfterDown).toBeGreaterThan(0);
     // mouseup 后再 mousemove 不应该改变
     act(() => {
       document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       document.dispatchEvent(new MouseEvent("mousemove", { clientY: 999, bubbles: true }));
     });
-    expect((inner as any).scrollTop).toBe(topAfterDown);
+    expect(inner.scrollTop).toBe(topAfterDown);
   });
 });
 

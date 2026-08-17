@@ -136,6 +136,16 @@ fn main() {
             "ExportOutput",
         ),
         ("save_text_file", "path, content", "void"),
+        ("saved_search_list", "-", "SavedSearchRecord[]"),
+        ("saved_search_upsert", "name, query", "id"),
+        ("saved_search_delete", "id", "void"),
+        ("workspace_merge", "sourceId, targetId", "moved count"),
+        ("workspace_split", "conversationIds, newName", "new workspace id"),
+        ("workspace_rename", "id, newName", "void"),
+        ("workspace_source_links", "-", "SourceWorkspaceLink[]"),
+        ("conversation_raw", "conversationId", "string?（原始归档）"),
+        ("open_source_app", "provider", "说明文字"),
+        ("resume_command", "conversationId", "string?（CLI 来源恢复命令）"),
     ];
     let mut md =
         String::from("# Conversation Hub API\n\n> Auto-generated. Do not edit.\n\n## Commands\n\n");

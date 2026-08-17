@@ -19,12 +19,8 @@ describe("BarChart 默认 tooltip（不传 renderTooltip 也有）", () => {
     });
   });
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理
-    delete (HTMLElement.prototype as any).clientHeight;
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理
-    delete (HTMLElement.prototype as any).clientWidth;
+    delete (HTMLElement.prototype as unknown as { clientHeight?: number }).clientHeight;
+    delete (HTMLElement.prototype as unknown as { clientWidth?: number }).clientWidth;
   });
 
   it("hover bar 出现默认 tooltip，含 label + value + 占比%", () => {

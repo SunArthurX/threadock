@@ -12,6 +12,9 @@ vi.mock("@tauri-apps/api/core", () => ({
 // vi.mock 必须在 import 之前
 import { copyToClipboard } from "../clipboard";
 
+// 测试专用的窄化类型：window/navigator 上挂载/清理 mock 字段（避免 any）
+type TauriInternalsHost = { __TAURI_INTERNALS__?: { invoke: typeof invokeMock } };
+
 describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => {
   let originalExecCommand: typeof document.execCommand;
   let hasTauri: boolean;
@@ -21,17 +24,13 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
     originalExecCommand = document.execCommand;
     hasTauri = true; // 默认 Tauri 环境
     if (hasTauri) {
-      (window as any).__TAURI_INTERNALS__ = { invoke: invokeMock };
+      (window as unknown as TauriInternalsHost).__TAURI_INTERNALS__ = { invoke: invokeMock };
     }
   });
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理（clipboard 属性类型不允许 delete）
-    delete (navigator as any).clipboard;
+    delete (navigator as unknown as { clipboard?: unknown }).clipboard;
     document.execCommand = originalExecCommand;
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理（__TAURI_INTERNALS__ 是注入的临时字段）
-    delete (window as any).__TAURI_INTERNALS__;
+    delete (window as unknown as TauriInternalsHost).__TAURI_INTERNALS__;
   });
 
   it("Tauri invoke 成功：返回 ok=true，不调 navigator", async () => {
@@ -63,9 +62,7 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("非 Tauri 环境 + navigator.clipboard 成功", async () => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理
-    delete (window as any).__TAURI_INTERNALS__;
+    delete (window as unknown as TauriInternalsHost).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -77,9 +74,7 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("非 Tauri 环境 + navigator 失败 → 降级到 execCommand", async () => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理
-    delete (window as any).__TAURI_INTERNALS__;
+    delete (window as unknown as TauriInternalsHost).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockRejectedValue(new DOMException("NotAllowedError"));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -93,9 +88,7 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("全失败：返回 ok=false 带 error", async () => {
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore 测试用的 mock 清理
-    delete (window as any).__TAURI_INTERNALS__;
+    delete (window as unknown as TauriInternalsHost).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockRejectedValue(new DOMException("NotAllowedError"));
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,

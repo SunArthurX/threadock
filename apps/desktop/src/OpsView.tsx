@@ -117,7 +117,10 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
     try { setPolicies(await invoke<PolicyRule[]>("policy_list")); } catch { /* 失败静默：后台/可选操作 */ }
   };
 
+  // section 切换：立即加载该 section + 后台同步后再刷新（effect 数据加载模式，
+  // loadSection/loadBudget/loadPolicies 每次渲染重建，加入依赖会重复触发，有意省略）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadSection 内部同步 setLoading(true)
     const tasks: Promise<void>[] = [loadSection(section)];
     if (section === "cost") tasks.push(loadBudget());
     if (section === "security") tasks.push(loadPolicies());
@@ -135,12 +138,15 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
       loadSection(section);
       if (section === "cost") loadBudget();
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [section]);
 
   useEffect(() => {
     if (section === "assets") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- range 变化后重载当前 section
     loadSection(section);
     if (section === "cost") loadBudget();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range]);
 
   // ── actions ──

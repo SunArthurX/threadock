@@ -1,5 +1,5 @@
 // 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制）
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
@@ -68,12 +68,17 @@ export default function ConversationDetail({
     const filtered = list.filter((s) => !tagSet.has(s.tag) && (kw === "" || s.tag.toLowerCase().includes(kw)));
     return filtered.slice(0, 8);
   }, [allTags, tags, tagInput]);
-  useEffect(() => { setSugIdx(0); }, [tagInput]);
 
   // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
   const [showJumpBottom, setShowJumpBottom] = useState(false);
+  /** 解析父级滚动容器：ScrollArea 的 ref 可能是 { inner } 包装，也可能是原生 HTMLElement。 */
+  const scrollEl = useCallback((): HTMLElement | null => {
+    const cur = scrollContainerRef?.current ?? null;
+    if (!cur) return null;
+    return "inner" in cur ? cur.inner : cur;
+  }, [scrollContainerRef]);
   useEffect(() => {
-    const el = (scrollContainerRef?.current as any)?.inner ?? scrollContainerRef?.current;
+    const el = scrollEl();
     if (!el) return;
     const onScroll = () => {
       const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
@@ -82,9 +87,9 @@ export default function ConversationDetail({
     el.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
     return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollContainerRef, conv.id, timelineMode, messages.length]);
+  }, [scrollEl, scrollContainerRef, conv.id, timelineMode, messages.length]);
   const jumpToBottom = () => {
-    const el = (scrollContainerRef?.current as any)?.inner ?? scrollContainerRef?.current;
+    const el = scrollEl();
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
@@ -101,6 +106,7 @@ export default function ConversationDetail({
       } else if (e.key === "Escape" && searchOpen) {
         setSearchOpen(false);
         setSearch("");
+        setSearchIdx(0);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -139,8 +145,6 @@ export default function ConversationDetail({
       .map((m, i): Match | null => (m.content_text ?? "").toLowerCase().includes(lower) ? { kind: "msg", id: m.id, msgIdx: i } : null)
       .filter((m): m is Match => m !== null);
   }, [visibleMsgs, events, timelineItems, search, timelineMode, messages]);
-  // 切换 search / matches 时回正 idx
-  useEffect(() => { setSearchIdx(0); }, [search, matches.length]);
   const currentMatch = matches[searchIdx];
 
   const scrollToMessage = (match: typeof currentMatch) => {
@@ -327,7 +331,7 @@ export default function ConversationDetail({
             className="msg-search-input"
             value={search}
             placeholder="在消息中搜索关键词…"
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setSearchIdx(0); }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
@@ -341,7 +345,7 @@ export default function ConversationDetail({
           </span>
           <button className="msg-search-btn" onClick={prevMatch} disabled={matches.length === 0}>↑</button>
           <button className="msg-search-btn" onClick={nextMatch} disabled={matches.length === 0}>↓</button>
-          <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); }} title="关闭（Esc）">✕</button>
+          <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); setSearchIdx(0); }} title="关闭（Esc）">✕</button>
         </div>
       )}
       {/* 标签行始终显示（含输入框 + 自动补全） */}
@@ -357,9 +361,9 @@ export default function ConversationDetail({
               className="tag-input"
               value={tagInput}
               placeholder="+ 标签"
-              onChange={(e) => setTagInput(e.target.value)}
+              onChange={(e) => { setTagInput(e.target.value); setSugIdx(0); }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); setShowSuggest(false); }
+                if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); setSugIdx(0); setShowSuggest(false); }
                 if (e.key === "Escape") setShowSuggest(false);
                 if (e.key === "ArrowDown" && suggests.length > 0) { e.preventDefault(); setSugIdx((i) => Math.min(i + 1, suggests.length - 1)); }
                 if (e.key === "ArrowUp" && suggests.length > 0) { e.preventDefault(); setSugIdx((i) => Math.max(i - 1, 0)); }
@@ -368,12 +372,12 @@ export default function ConversationDetail({
               onBlur={() => window.setTimeout(() => setShowSuggest(false), 150)}
             />
             {showSuggest && suggests.length > 0 && (
-              <ScrollArea className="tag-suggest" onMouseDown={(e: any) => e.preventDefault()}>
+              <ScrollArea className="tag-suggest" onMouseDown={(e: React.MouseEvent<HTMLDivElement>) => e.preventDefault()}>
                 {suggests.map((s, i) => (
                   <button
                     key={s.tag}
                     className={`tag-suggest-item ${i === sugIdx ? "active" : ""}`}
-                    onClick={() => { onAddTag(s.tag); setTagInput(""); setShowSuggest(false); }}
+                    onClick={() => { onAddTag(s.tag); setTagInput(""); setSugIdx(0); setShowSuggest(false); }}
                   >
                     <span>#{s.tag}</span>
                     <span className="tag-suggest-count">{s.count}</span>

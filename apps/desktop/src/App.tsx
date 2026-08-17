@@ -201,129 +201,8 @@ export default function App() {
   }, []);
   const showError = (e: unknown) => setError(typeof e === "string" ? e : (e as {message?:string}).message ?? String(e));
 
-  // ── effects ──
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("ch-theme", theme); }, [theme]);
-  useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
-  useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
-  // Window title 反映当前页（OS 任务栏/活动指示友好）
-  useEffect(() => {
-    const sub = selectedConv ? ` · ${selectedConv.user_title ?? selectedConv.title ?? "未命名"}` : "";
-    document.title = `Threadock · ${VIEW_LABEL[view]}${sub}`;
-  }, [view, selectedConv]);
-
-  // 预算看门狗：预算/月用量/预测 → 全局预算条；超限且开启通知时弹一次（按月去重）
-  const refreshBudget = async () => {
-    try {
-      const [budget, proj] = await Promise.all([
-        invoke<{ monthly_token_limit: number | null; monthly_cost_limit: number | null; notify_on_exceed: boolean }>("budget_get"),
-        invoke<{ tokens_so_far: number; cost_so_far: number; projected_tokens: number; projected_cost: number }>("ops_month_projection"),
-      ]);
-      const info = {
-        costSoFar: proj.cost_so_far, tokensSoFar: proj.tokens_so_far,
-        projectedCost: proj.projected_cost, projectedTokens: proj.projected_tokens,
-        costLimit: budget.monthly_cost_limit ?? null, tokenLimit: budget.monthly_token_limit ?? null,
-        notify: budget.notify_on_exceed,
-      };
-      setBudgetInfo(info);
-      const over = (info.costLimit && info.costSoFar >= info.costLimit) || (info.tokenLimit && info.tokensSoFar >= info.tokenLimit);
-      if (over && info.notify) {
-        const key = `ch-budget-warned-${new Date().getFullYear()}-${new Date().getMonth()}`;
-        if (!localStorage.getItem(key)) {
-          localStorage.setItem(key, "1");
-          showToast(`⚠ 预算已超限：当月 $${info.costSoFar.toFixed(2)} / 预算 $${info.costLimit}`, "error", 10000);
-        }
-      }
-    } catch { /* 预算看门狗失败静默（空库等） */ }
-  };
-
-  useEffect(() => {
-    loadConversations();
-    const t = setTimeout(() => autoSync(), 600);
-    // 周报自动生成（>7 天落盘一份）+ 保留策略自动执行 + 预算刷新
-    const t2 = setTimeout(async () => {
-      refreshBudget();
-      refreshNewCount();
-      refreshProviders();
-      try {
-        const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
-        if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
-      } catch { /* 失败静默：后台/可选操作 */ }
-      try {
-        const days = Number(localStorage.getItem("ch-retention-days") ?? "0");
-        if (days > 0) {
-          const r = await invoke<{ archived: number }>("retention_apply", { days });
-          if (r.archived > 0) showToast(`🗄 保留策略：自动归档 ${r.archived} 条 ${days} 天前的会话`, "info");
-        }
-      } catch { /* 失败静默：后台/可选操作 */ }
-    }, 3000);
-    return () => { clearTimeout(t); clearTimeout(t2); };
-  }, []);
-
-  useEffect(() => {
-    if (syncIntervalMin === 0) return; // 设置为关闭
-    const interval = setInterval(() => {
-      autoSync(true);
-      invoke("ops_sync", {force:false}).then(() => { refreshBudget(); refreshNewCount(); }).catch(() => { /* 后台任务失败不打断 UI */ });
-    }, syncIntervalMin * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [syncIntervalMin]);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // ⌘K / Ctrl+K 唤起 Command Palette
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setCmdOpen((v) => !v);
-        return;
-      }
-      // ⌘? / Ctrl+? 唤起快捷键速查
-      if ((e.metaKey || e.ctrlKey) && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
-        e.preventDefault();
-        setHelpOpen((v) => !v);
-        return;
-      }
-      // ⌘F / Ctrl+F 焦点搜索框（preventDefault 屏蔽浏览器默认页内查找）
-      // 当前在「对话」详情页时让 ConversationDetail 自己处理（详情内搜索），
-      // 顶栏搜索框在该场景不存在（P1-C2 双抢焦点）。
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
-        if (view === "chat" && selectedConv) return; // 留给 ConversationDetail
-        e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
-        return;
-      }
-      // ⌘R / Ctrl+R 手动刷新（preventDefault 屏蔽浏览器刷新；走数据重载流程）
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
-        e.preventDefault();
-        runManualSync();
-        showToast("↻ 已触发数据刷新", "info", 2000);
-        return;
-      }
-      // ⌘1..8 直接跳页
-      if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
-        e.preventDefault();
-        const order: Page[] = ["chat", "overview", "cost", "security", "assets", "knowledge", "activity", "projects"];
-        const idx = Number(e.key) - 1;
-        if (order[idx]) {
-          setView(order[idx]);
-          localStorage.setItem("ch-view", order[idx]);
-        }
-        return;
-      }
-      if (e.key === "Escape") {
-        if (helpOpen) setHelpOpen(false);
-        else if (cmdOpen) setCmdOpen(false);
-        else if (sourcePanel) setSourcePanel(null);
-        else if (searchResults) { setSearchResults(null); setSearchQuery(""); }
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [sourcePanel, searchResults, helpOpen, cmdOpen, view, selectedConv]);
-
-  useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
-
   // ── data loading ──
+  // （声明需位于下方 effects 之前：避免 effect 引用「未提升的 const」触发 immutability 检查）
   const loadConversations = async () => {
     setConvsLoading(true);
     try {
@@ -378,6 +257,143 @@ export default function App() {
   const runManualSync = async () => {
     await autoSync();
   };
+
+  // ── effects ──
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("ch-theme", theme); }, [theme]);
+  useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
+  useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
+  // Window title 反映当前页（OS 任务栏/活动指示友好）
+  useEffect(() => {
+    const sub = selectedConv ? ` · ${selectedConv.user_title ?? selectedConv.title ?? "未命名"}` : "";
+    document.title = `Threadock · ${VIEW_LABEL[view]}${sub}`;
+  }, [view, selectedConv]);
+
+  // 预算看门狗：预算/月用量/预测 → 全局预算条；超限且开启通知时弹一次（按月去重）
+  const refreshBudget = async () => {
+    try {
+      const [budget, proj] = await Promise.all([
+        invoke<{ monthly_token_limit: number | null; monthly_cost_limit: number | null; notify_on_exceed: boolean }>("budget_get"),
+        invoke<{ tokens_so_far: number; cost_so_far: number; projected_tokens: number; projected_cost: number }>("ops_month_projection"),
+      ]);
+      const info = {
+        costSoFar: proj.cost_so_far, tokensSoFar: proj.tokens_so_far,
+        projectedCost: proj.projected_cost, projectedTokens: proj.projected_tokens,
+        costLimit: budget.monthly_cost_limit ?? null, tokenLimit: budget.monthly_token_limit ?? null,
+        notify: budget.notify_on_exceed,
+      };
+      setBudgetInfo(info);
+      const over = (info.costLimit && info.costSoFar >= info.costLimit) || (info.tokenLimit && info.tokensSoFar >= info.tokenLimit);
+      if (over && info.notify) {
+        const key = `ch-budget-warned-${new Date().getFullYear()}-${new Date().getMonth()}`;
+        if (!localStorage.getItem(key)) {
+          localStorage.setItem(key, "1");
+          showToast(`⚠ 预算已超限：当月 $${info.costSoFar.toFixed(2)} / 预算 $${info.costLimit}`, "error", 10000);
+        }
+      }
+    } catch { /* 预算看门狗失败静默（空库等） */ }
+  };
+
+  // 挂载时执行一次：全量加载 + 延迟自动同步/周报/保留策略
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loadConversations 内部同步 setConvsLoading(true)
+    loadConversations();
+    const t = setTimeout(() => autoSync(), 600);
+    // 周报自动生成（>7 天落盘一份）+ 保留策略自动执行 + 预算刷新
+    const t2 = setTimeout(async () => {
+      refreshBudget();
+      refreshNewCount();
+      refreshProviders();
+      try {
+        const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
+        if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
+      } catch { /* 失败静默：后台/可选操作 */ }
+      try {
+        const days = Number(localStorage.getItem("ch-retention-days") ?? "0");
+        if (days > 0) {
+          const r = await invoke<{ archived: number }>("retention_apply", { days });
+          if (r.archived > 0) showToast(`🗄 保留策略：自动归档 ${r.archived} 条 ${days} 天前的会话`, "info");
+        }
+      } catch { /* 失败静默：后台/可选操作 */ }
+    }, 3000);
+    return () => { clearTimeout(t); clearTimeout(t2); };
+    // 仅挂载时执行一次（初始加载 + 延迟自动同步/周报/保留策略）；
+    // 引用的函数每次渲染重建，加入依赖会导致重复触发，有意省略。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (syncIntervalMin === 0) return; // 设置为关闭
+    const interval = setInterval(() => {
+      autoSync(true);
+      invoke("ops_sync", {force:false}).then(() => { refreshBudget(); refreshNewCount(); }).catch(() => { /* 后台任务失败不打断 UI */ });
+    }, syncIntervalMin * 60 * 1000);
+    return () => clearInterval(interval);
+    // 定时器只需跟随 syncIntervalMin 重建；autoSync 每次渲染均为新引用，
+    // 加入依赖会让定时器被反复清除重建，有意省略。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncIntervalMin]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // ⌘K / Ctrl+K 唤起 Command Palette
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+        return;
+      }
+      // ⌘? / Ctrl+? 唤起快捷键速查
+      if ((e.metaKey || e.ctrlKey) && (e.key === "?" || (e.shiftKey && e.key === "/"))) {
+        e.preventDefault();
+        setHelpOpen((v) => !v);
+        return;
+      }
+      // ⌘F / Ctrl+F 焦点搜索框（preventDefault 屏蔽浏览器默认页内查找）
+      // 当前在「对话」详情页时让 ConversationDetail 自己处理（详情内搜索），
+      // 顶栏搜索框在该场景不存在（P1-C2 双抢焦点）。
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        if (view === "chat" && selectedConv) return; // 留给 ConversationDetail
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      // ⌘R / Ctrl+R 手动刷新（preventDefault 屏蔽浏览器刷新；走数据重载流程）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "r") {
+        e.preventDefault();
+        runManualSync();
+        showToast("↻ 已触发数据刷新", "info", 2000);
+        return;
+      }
+      // ⌘1..8 直接跳页
+      if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
+        e.preventDefault();
+        const order: Page[] = ["chat", "overview", "cost", "security", "assets", "knowledge", "activity", "projects"];
+        const idx = Number(e.key) - 1;
+        if (order[idx]) {
+          setView(order[idx]);
+          localStorage.setItem("ch-view", order[idx]);
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        if (helpOpen) setHelpOpen(false);
+        else if (cmdOpen) setCmdOpen(false);
+        else if (sourcePanel) setSourcePanel(null);
+        else if (searchResults) { setSearchResults(null); setSearchQuery(""); }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // runManualSync 每次渲染重建，加入依赖会让全局 keydown 监听器每渲染重挂一次；
+    // 处理器所需的状态已尽数列入，有意省略该函数依赖。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourcePanel, searchResults, helpOpen, cmdOpen, view, selectedConv]);
+
+  // 筛选/范围变化且不在搜索结果模式时重载列表；searchResults/loadConversations
+  // 加入依赖会导致每次渲染重载（loadConversations 每次渲染重建），有意省略；
+  // loadConversations 内部同步 setConvsLoading(true) 属 effect 数据加载模式，有意保留。
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+  useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
 
   const changeSyncInterval = (min: number) => {
     setSyncIntervalMin(min);

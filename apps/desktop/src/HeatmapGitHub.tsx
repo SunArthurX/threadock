@@ -100,7 +100,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
             data-testid="heatmap-month"
             style={{
               width: COL_W,
-              ['flexShrink' as any]: 0,
+              flexShrink: 0,
               fontSize: 10.5,
               opacity: 0.7,
               whiteSpace: "nowrap",
@@ -115,7 +115,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
       {/* 7 行 × N 列：左侧 weekday + 右侧 7×N 网格 */}
       <div style={{ display: "flex", gap: 6, alignItems: "flex-start", minWidth: "max-content" }}>
         {/* 左侧 weekday 列（7 行） */}
-        <div style={{ display: "flex", flexDirection: "column", gap: GAP, ['flexShrink' as any]: 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: GAP, flexShrink: 0 }}>
           {DOWS.map((d) => (
             <div
               key={d}
@@ -129,7 +129,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "flex-start",
-                ['flexShrink' as any]: 0,
+                flexShrink: 0,
               }}
             >
               {d}
@@ -141,7 +141,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
           {cols.map((col, ci) => (
             <div
               key={ci}
-              style={{ display: "flex", flexDirection: "column", gap: GAP, ['flexShrink' as any]: 0 }}
+              style={{ display: "flex", flexDirection: "column", gap: GAP, flexShrink: 0 }}
             >
               {col.cells.map((cell, ri) => {
                 if (!cell) {
@@ -160,7 +160,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
                         border: "1px solid rgba(255,255,255,0.06)",
                         borderRadius: 2,
                         background: "transparent",
-                        ['flexShrink' as any]: 0,
+                        flexShrink: 0,
                         boxSizing: "border-box",
                       }}
                     />
@@ -199,7 +199,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
                         background: "transparent",
                         cursor: "pointer",
                         transition: "transform 0.1s, box-shadow 0.1s",
-                        ['flexShrink' as any]: 0,
+                        flexShrink: 0,
                         boxSizing: "border-box",
                       }}
                     />
@@ -239,7 +239,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
                       background: bg,
                       cursor: "pointer",
                       transition: "transform 0.1s, box-shadow 0.1s",
-                      ['flexShrink' as any]: 0,
+                      flexShrink: 0,
                       boxSizing: "border-box",
                     }}
                   />

@@ -272,10 +272,13 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   }, [days]);
 
   // P1-C5: 年度选择 — 把 days 强制覆盖为「从今天到目标年 1/1」的天数，覆盖整年
+  // （year 与 days 是两个独立状态，选中年份时需要同步派生 days；重构为纯派生值
+  //  会牵动 90/180/365 按钮、CSV 导出等多处语义，此处保持 effect 同步并豁免检查）
   useEffect(() => {
     if (year === "all") return;
     const yearStart = new Date(`${year}-01-01T00:00:00`).getTime();
     const span = Math.max(1, Math.ceil((Date.now() - yearStart) / 86_400_000));
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- year→days 状态同步（P1-C5）
     setDays(span);
   }, [year]);
 
@@ -317,6 +320,8 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   const week7Stats = useMemo(() => dayWindowSum(heatmapCells, 7), [heatmapCells]);
   const month30Stats = useMemo(() => dayWindowSum(heatmapCells, 30), [heatmapCells]);
   // P1-C3: todayKey 变化时（跨午夜后）也重算 streak，否则「连续活跃」会卡在昨天的计数
+  // （todayKey 是有意的额外依赖：calcStreak 内部取当前日期，跨午夜需借 todayKey 触发重算）
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const streak = useMemo(() => calcStreak(heatmapCells), [heatmapCells, todayKey]);
 
   // 工具 Top 10 列表（带月份切分）
@@ -440,7 +445,10 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       setDayConvsLoading(false);
     }
   };
+  // 选中日点击「查看当日会话」→ 拉会话列表（典型的 effect 数据加载模式：
+  // 先清旧数据再异步拉取；selectedDay 驱动的加载无法移入事件处理器，有意保留）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 清旧数据后异步加载当日会话
     setDayConvs(null);
     if (selectedDay) loadDayConvs();
     // eslint-disable-next-line react-hooks/exhaustive-deps

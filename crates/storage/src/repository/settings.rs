@@ -29,6 +29,16 @@ pub struct RedactionRuleRecord {
     pub enabled: bool,
 }
 
+/// 保存搜索记录（plan §13.2，前后端契约）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SavedSearchRecord {
+    pub id: String,
+    pub name: String,
+    pub query_text: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 impl Repository {
     /// 读取通用设置（不存在返回 None）。
     pub fn get_setting(&self, key: &str) -> StorageResult<Option<String>> {
@@ -108,6 +118,57 @@ impl Repository {
     pub fn remove_redaction_rule(&self, name: &str) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         conn.execute("DELETE FROM redaction_rules WHERE name = ?1", params![name])?;
+        Ok(())
+    }
+
+    // ── 保存搜索条件（plan §13.2，V14）────────────────────────────
+
+    /// 新增/覆盖一条保存搜索（按 name 幂等）。返回记录 id。
+    pub fn upsert_saved_search(&self, name: &str, query_text: &str) -> StorageResult<String> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let id = ch_domain::new_id("ssearch");
+        let now = crate::timestamp::to_millis(Some(ch_domain::now_utc()))
+            .expect("timestamp conversion failed");
+        conn.execute(
+            "INSERT INTO saved_searches (id, name, query_text, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(name) DO UPDATE SET
+                query_text = ?3, updated_at = ?4",
+            params![id, name, query_text, now],
+        )?;
+        let actual: String = conn.query_row(
+            "SELECT id FROM saved_searches WHERE name = ?1",
+            params![name],
+            |r| r.get(0),
+        )?;
+        Ok(actual)
+    }
+
+    /// 列出全部保存搜索（按创建时间倒序）。
+    pub fn list_saved_searches(&self) -> StorageResult<Vec<SavedSearchRecord>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn
+            .prepare("SELECT id, name, query_text, created_at, updated_at FROM saved_searches ORDER BY created_at DESC")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(SavedSearchRecord {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                query_text: r.get(2)?,
+                created_at: r.get(3)?,
+                updated_at: r.get(4)?,
+            })
+        })?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
+    /// 按 id 删除保存搜索。
+    pub fn delete_saved_search(&self, id: &str) -> StorageResult<()> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        conn.execute("DELETE FROM saved_searches WHERE id = ?1", params![id])?;
         Ok(())
     }
 }

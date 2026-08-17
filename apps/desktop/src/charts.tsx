@@ -49,7 +49,14 @@ export function DonutChart({ slices, size = 160 }: { slices: DonutSlice[]; size?
   if (total <= 0) return <div className="chart-empty">无数据</div>;
   const r = size / 2 - 14;
   const c = 2 * Math.PI * r;
+  // 预计算每个扇区的 dashoffset（前序扇区累计占比 × 周长）；
+  // 用循环累计而非在渲染回调里闭包修改外层变量（immutability）。
+  const offsets: number[] = [];
   let acc = 0;
+  for (const s of slices) {
+    offsets.push(-acc * c);
+    acc += s.value / total;
+  }
   const onEnter = (i: number) => (e: React.MouseEvent<SVGCircleElement>) => {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
@@ -69,8 +76,7 @@ export function DonutChart({ slices, size = 160 }: { slices: DonutSlice[]; size?
           {slices.map((s, i) => {
             const frac = (s.value / total) * (mounted ? 1 : 0);
             const dash = frac * c;
-            const offset = -acc * c;
-            acc += s.value / total;
+            const offset = offsets[i];
             const isHover = hover?.i === i;
             return (
               <circle

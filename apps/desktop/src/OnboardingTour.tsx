@@ -147,6 +147,8 @@ export default function OnboardingTour({
 
   useEffect(() => { saveOnboardingStep(step); }, [step]);
 
+  const finish = () => { markOnboardingSeen(); onClose(); };
+
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -160,7 +162,6 @@ export default function OnboardingTour({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, steps.length]);
 
-  const finish = () => { markOnboardingSeen(); onClose(); };
   const cur = steps[step];
   const isLast = step === steps.length - 1;
 

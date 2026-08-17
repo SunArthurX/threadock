@@ -102,8 +102,7 @@ export default function ProjectsView({
   }, [projects, search, sortKey, sortDir]);
 
   const pager = usePager(processed, 20);
-  // 搜索/排序变化时回到首页
-  useEffect(() => { pager.reset(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [search, sortKey, sortDir]);
+  // 搜索/排序变化时回到首页：在事件处理器中重置（替代 effect 内 setState）
 
   const totals = useMemo(() => {
     const all = projects ?? [];
@@ -117,10 +116,11 @@ export default function ProjectsView({
   const maxCost = Math.max(...(projects ?? []).map((p) => p.cost_usd), 0.0001);
   const isEmpty = projects !== null && projects.length === 0;
 
-  /** 排序键：点击同一键切换升降序。 */
+  /** 排序键：点击同一键切换升降序（同时回到第 1 页）。 */
   const clickSort = (k: SortKey) => {
     if (sortKey === k) setSortDir(sortDir === "desc" ? "asc" : "desc");
     else { setSortKey(k); setSortDir("desc"); }
+    pager.reset();
   };
 
   /** 导出当前过滤后的列表为 CSV。 */
@@ -184,7 +184,7 @@ export default function ProjectsView({
             style={{ marginLeft: "auto", width: 180, fontSize: 12 }}
             placeholder="🔍 搜索项目 / Agent…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); pager.reset(); }}
           />
         </div>
         {isEmpty && (

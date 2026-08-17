@@ -67,7 +67,9 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
     return arr;
   }, [history, keyword, showFavOnly, favs]);
 
+  // 挂载时渲染当前周报 + 拉历史列表 + Esc 关闭（数据加载 effect，函数每次渲染重建，有意省略依赖）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- renderCurrent 内部同步 setLoading(true)
     renderCurrent();
     loadHistory();
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };

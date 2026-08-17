@@ -153,6 +153,16 @@ pub fn run() {
             reset_range_preview,
             reset_range_bounds,
             write_clipboard,
+            saved_search_list,
+            saved_search_upsert,
+            saved_search_delete,
+            workspace_merge,
+            workspace_split,
+            workspace_rename,
+            workspace_source_links,
+            conversation_raw,
+            open_source_app,
+            resume_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

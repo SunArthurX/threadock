@@ -175,6 +175,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
       setPrompts((await invoke<{ prompts: PromptRow[] }>("recent_user_prompts", { limit: 100 })).prompts);
     } catch { /* 空库静默 */ }
   };
+  // 挂载时拉取知识库数据（effect 数据加载模式：load 内含 setState，有意保留）
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load(); }, []);
 
   const runExtract = async (force = false) => {

@@ -11,7 +11,12 @@ export interface PrivateNoteSectionProps {
 export default function PrivateNoteSection({ note, onChange }: PrivateNoteSectionProps) {
   const [text, setText] = useState(note);
   // 受控但允许本地编辑（保存前不写回父级，autosave 触发）
-  useEffect(() => { setText(note); }, [note]);
+  // note prop 变化（保存回写/父级刷新）时同步到本地编辑态；父级已用 key={conv.id}
+  // 处理会话切换，此处仅同步同一会话内的 prop 更新，effect 同步是有意的。
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- note prop 变化时同步本地编辑态
+    setText(note);
+  }, [note]);
   const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
 
   const save = async (next: string) => {
