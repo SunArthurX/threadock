@@ -7,7 +7,7 @@
 // - ref 转发暴露 inner div（保留原生 scrollTop / scrollTo API）
 // - 第 23 轮改造：用 display:contents + position:fixed thumb 浮层
 //   关键：滚轮事件直接打到滚动容器（之前外层 overflow:hidden 会截断 nested wheel）
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it } from "vitest";
 import { fireEvent, render, act } from "@testing-library/react";
 import { useRef } from "react";
 import ScrollArea, { type ScrollAreaRef } from "../ScrollArea";

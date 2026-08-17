@@ -51,6 +51,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # ch-adapter-host/tests/process_isolation.rs 通过 spawn 子进程跑 markdown adapter
+      # 二进制做集成测试；cargo test --workspace 不会编译 [[bin]]，必须先 cargo build。
+      # 旧版 CI 没这步，导致 3 个 test 在 win+ubuntu 一致挂 (NotFound)。
+      - name: Build adapter binaries
+        run: cargo build --bin ch-adapter-markdown
       - name: Test (workspace)
         run: cargo test --workspace
 
