@@ -65,6 +65,10 @@ function FreshnessBadge() {
   if (ms == null || ms === 0) {
     return <span className="freshness-badge freshness-missing" title="尚无同步记录（点击导入会话）">⚪ 未同步</span>;
   }
+  // Date.now() 是有意的：本组件每 30s 通过父级 setInterval 重渲染，
+  // 每次 render 取最新时间戳显示「X 分钟前」。React 19 的 react-hooks/purity
+  // 默认禁止 render 里的 impure 调用，但对「当前时间显示」类组件是误报。
+  // eslint-disable-next-line react-hooks/purity
   const ageMs = Date.now() - ms;
   const min = Math.floor(ageMs / 60_000);
   const fmt = (n: number) => n < 60 ? `${n} 分钟前` : n < 1440 ? `${Math.floor(n / 60)} 小时前` : `${Math.floor(n / 1440)} 天前`;
@@ -929,13 +933,21 @@ export default function App() {
                     onBulkFavorite={async (ids, favorite) => {
                       // 单次逐条 set_favorite：未来如需可换 batch 接口
                       for (const id of ids) {
-                        try { await invoke("set_favorite", { id, favorite }); } catch {}
+                        try {
+                          await invoke("set_favorite", { id, favorite });
+                        } catch {
+                          /* 单条失败不影响批量提交 */
+                        }
                       }
                       await loadConversations();
                     }}
                     onBulkArchive={async (ids, archived) => {
                       for (const id of ids) {
-                        try { await invoke("set_archived", { id, archived }); } catch {}
+                        try {
+                          await invoke("set_archived", { id, archived });
+                        } catch {
+                          /* 单条失败不影响批量提交 */
+                        }
                       }
                       await loadConversations();
                     }}

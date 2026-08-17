@@ -38,6 +38,8 @@ export default function SecuritySection(p: Props) {
     if (input == null) return "—";
     const ts = typeof input === "number" ? input : Date.parse(input);
     if (!Number.isFinite(ts)) return "—";
+    // 相对时间显示：每次 render 都取最新时间，父级会驱动重渲染。
+    // eslint-disable-next-line react-hooks/purity
     const ageMs = Date.now() - ts;
     if (ageMs < 0) return "刚刚";
     const min = Math.floor(ageMs / 60_000);

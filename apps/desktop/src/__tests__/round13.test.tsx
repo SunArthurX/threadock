@@ -1,5 +1,8 @@
 // 第 13 轮测试：热力图 GitHub 风格改造（12×12 圆角 + 5 档绿色 + 英文月份/星期 + Less/More legend）
 import { describe, expect, it, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { buildHeatGrid, heatColor, heatLevel, HEAT_LEVELS } from "../ActivityView";
 
 describe("heatColor GitHub 5 档绿色梯度", () => {
@@ -73,11 +76,8 @@ describe("buildHeatGrid 月份 label 改英文（GitHub 风格）", () => {
 describe("CSS：GitHub 风格 cell 12×12 + 圆角 2px", () => {
   let css = "";
   beforeAll(() => {
-    const fs = require("node:fs");
-    const path = require("node:path");
-    const { fileURLToPath } = require("node:url");
-    const HERE = path.dirname(fileURLToPath(import.meta.url));
-    css = fs.readFileSync(path.resolve(HERE, "../styles.css"), "utf-8");
+    const HERE = dirname(fileURLToPath(import.meta.url));
+    css = readFileSync(resolve(HERE, "../styles.css"), "utf-8");
   });
 
   it(".heat-cell width: 12px", () => {

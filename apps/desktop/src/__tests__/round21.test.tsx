@@ -19,9 +19,11 @@ describe("BarChart 默认 tooltip（不传 renderTooltip 也有）", () => {
     });
   });
   afterEach(() => {
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理
     delete (HTMLElement.prototype as any).clientHeight;
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理
     delete (HTMLElement.prototype as any).clientWidth;
   });
 

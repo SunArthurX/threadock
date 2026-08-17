@@ -13,7 +13,6 @@ vi.mock("@tauri-apps/api/core", () => ({
 import { copyToClipboard } from "../clipboard";
 
 describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => {
-  let originalClipboard: PropertyDescriptor | undefined;
   let originalExecCommand: typeof document.execCommand;
   let hasTauri: boolean;
 
@@ -26,14 +25,12 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
     }
   });
   afterEach(() => {
-    if (originalClipboard) {
-      Object.defineProperty(navigator, "clipboard", originalClipboard);
-    } else {
-      // @ts-ignore
-      delete (navigator as any).clipboard;
-    }
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理（clipboard 属性类型不允许 delete）
+    delete (navigator as any).clipboard;
     document.execCommand = originalExecCommand;
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理（__TAURI_INTERNALS__ 是注入的临时字段）
     delete (window as any).__TAURI_INTERNALS__;
   });
 
@@ -66,7 +63,8 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("非 Tauri 环境 + navigator.clipboard 成功", async () => {
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理
     delete (window as any).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
@@ -79,7 +77,8 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("非 Tauri 环境 + navigator 失败 → 降级到 execCommand", async () => {
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理
     delete (window as any).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockRejectedValue(new DOMException("NotAllowedError"));
     Object.defineProperty(navigator, "clipboard", {
@@ -94,7 +93,8 @@ describe("copyToClipboard：Tauri IPC 优先 + 失败暴露真实错误", () => 
   });
 
   it("全失败：返回 ok=false 带 error", async () => {
-    // @ts-ignore
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore 测试用的 mock 清理
     delete (window as any).__TAURI_INTERNALS__;
     const webWrite = vi.fn().mockRejectedValue(new DOMException("NotAllowedError"));
     Object.defineProperty(navigator, "clipboard", {

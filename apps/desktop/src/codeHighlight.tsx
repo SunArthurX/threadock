@@ -147,7 +147,6 @@ function highlightLine(line: string, lang: Lang, blockRanges: Array<[number, num
       continue;
     }
     if (blockIdx < blockRanges.length && i >= blockRanges[blockIdx][1]) blockIdx++;
-    let matched = false;
     // 优先：注释（行尾 # 或 //）
     if (line[i] === "#" || (line[i] === "/" && line[i + 1] === "/")) {
       out.push({ kind: "comment", text: line.slice(i) });
@@ -165,7 +164,6 @@ function highlightLine(line: string, lang: Lang, blockRanges: Array<[number, num
       const end = j < line.length ? j + 1 : j;
       out.push({ kind: "string", text: line.slice(i, end) });
       i = end;
-      matched = true;
       continue;
     }
     // 数字
@@ -173,7 +171,6 @@ function highlightLine(line: string, lang: Lang, blockRanges: Array<[number, num
     if (numMatch) {
       out.push({ kind: "number", text: numMatch[0] });
       i += numMatch[0].length;
-      matched = true;
       continue;
     }
     // 关键字
@@ -182,11 +179,9 @@ function highlightLine(line: string, lang: Lang, blockRanges: Array<[number, num
       if (km && km.index === 0) {
         out.push({ kind: "keyword", text: km[0] });
         i += km[0].length;
-        matched = true;
         continue;
       }
     }
-    if (matched) continue;
     // 标识符
     const idMatch = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(i));
     if (idMatch) {

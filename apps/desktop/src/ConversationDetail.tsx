@@ -329,7 +329,11 @@ export default function ConversationDetail({
             placeholder="在消息中搜索关键词…"
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); e.shiftKey ? prevMatch() : nextMatch(); }
+              if (e.key === "Enter") {
+                e.preventDefault();
+                if (e.shiftKey) prevMatch();
+                else nextMatch();
+              }
             }}
           />
           <span className="msg-search-count">

@@ -120,7 +120,9 @@ describe("provider chips 显隐", () => {
   it("默认 scope dropdown 显示「全部会话」（第 11 轮：4 行 filter → dropdown）", () => {
     render(<ConversationList {...listProps} />);
     // scope dropdown 第一个，默认 label 是"全部会话"
-    const scopeBtn = screen.getAllByText("全部会话")[0]?.closest(".list-dropdown-btn")!;
+    const allScopes = screen.getAllByText("全部会话");
+    expect(allScopes.length).toBeGreaterThan(0);
+    const scopeBtn = allScopes[0].closest(".list-dropdown-btn");
     expect(scopeBtn).toBeTruthy();
   });
 

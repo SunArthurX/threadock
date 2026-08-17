@@ -200,6 +200,8 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
           </button>
           {/* P1-B2: 数据新鲜度指示 — 超过 1 小时变 stale（黄） */}
           {lastSyncedAt != null && (() => {
+            // 取最新时间显示「同步于 X 分钟前」，父级 setSyncing 触发重渲染。
+            // eslint-disable-next-line react-hooks/purity
             const ageMs = Date.now() - lastSyncedAt;
             const stale = ageMs > 60 * 60_000;
             const min = Math.floor(ageMs / 60_000);
