@@ -132,6 +132,15 @@ pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> R
     let mut best: Option<Match> = None;
     // 记录是否出现过名称相似度候选（用于 NeedsConfirmation）
     let mut name_candidate: Option<Match> = None;
+    // 名称候选对应的已知 key 是否带结构化标识（路径/remote/fsid…）。
+    // 双方都有结构化标识却在 L2-L6 全未命中 = 证据冲突，
+    // 此时即使名称完全相同也不允许静默自动合并（防「同名不同项目」误并）。
+    let mut name_candidate_structural = false;
+    let candidate_structural = candidate.manifest_id.is_some()
+        || candidate.git_remote.is_some()
+        || candidate.git_common_dir.is_some()
+        || candidate.canonical_path.is_some()
+        || candidate.filesystem_id.is_some();
 
     for key in known {
         // Level 2: ManifestId（1.0）—— 最高非手动级，命中即返回
@@ -211,6 +220,16 @@ pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> R
                 method: MatchMethod::NameSimilarity,
                 confidence: sim,
             };
+            let key_structural = key.manifest_id.is_some()
+                || key.git_remote.is_some()
+                || key.git_common_dir.is_some()
+                || key.canonical_path.is_some()
+                || key.filesystem_id.is_some();
+            let stronger =
+                pick_stronger(name_candidate.clone(), m.clone()).workspace_id == m.workspace_id;
+            if stronger {
+                name_candidate_structural = key_structural;
+            }
             name_candidate = Some(pick_stronger(name_candidate, m));
         }
     }
@@ -229,9 +248,15 @@ pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> R
         }
         // 无高优先级命中，但有名称候选
         None => match name_candidate {
-            // 名称完全相同（confidence 1.0）→ 允许自动归并
-            Some(m) if m.confidence >= AUTO_CONFIRM_THRESHOLD => Resolution::AutoMerge(m),
-            // 名称相似但未达阈值 → 需用户确认
+            // 名称完全相同（confidence 1.0）→ 允许自动归并，
+            // 除非双方都带结构化标识却全未命中（同名不同项目的冲突证据）
+            Some(m)
+                if m.confidence >= AUTO_CONFIRM_THRESHOLD
+                    && !(candidate_structural && name_candidate_structural) =>
+            {
+                Resolution::AutoMerge(m)
+            }
+            // 名称相似但未达阈值 / 结构化证据冲突 → 需用户确认
             Some(m) => {
                 let confidence = m.confidence;
                 Resolution::NeedsConfirmation {
