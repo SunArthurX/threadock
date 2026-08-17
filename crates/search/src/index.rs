@@ -3,6 +3,8 @@
 use crate::error::{SearchError, SearchResult as LibResult};
 use ch_domain::{Provider, Role};
 use std::path::Path;
+// Provider::from_str 需要trait 在作用域内（语法 provider: 前缀解析）
+use std::str::FromStr as _;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::query::{BooleanQuery, Occur, TermQuery};
@@ -28,11 +30,17 @@ pub struct SearchHit {
 }
 
 /// 查询条件（与 `storage::search::SearchQuery` 对齐）。
+///
+/// `query` 支持查询语法（plan §13.2）：`provider:` `workspace:` `type:` `role:`
+/// 前缀在索引内生效；`status:` `file:` `model:` `after:` `before:` 由调用方
+/// 拿 `ParsedQuery` 走 SQLite 后过滤（见 `Repository::search_filter_conversation_ids`）。
 #[derive(Debug, Clone, Default)]
 pub struct SearchQuery {
     pub query: String,
     pub provider: Option<Provider>,
     pub workspace_id: Option<String>,
+    /// workspace 名字解析出的多个候选 id（语法 `workspace:` 由调用方解析）。
+    pub workspace_ids: Vec<String>,
     /// 角色过滤（如 "user" = 仅用户提问）。
     pub role: Option<String>,
     pub limit: usize,
@@ -44,6 +52,7 @@ impl SearchQuery {
             query: query.into(),
             provider: None,
             workspace_id: None,
+            workspace_ids: Vec::new(),
             role: None,
             limit: 50,
         }
@@ -56,6 +65,12 @@ impl SearchQuery {
     #[must_use]
     pub fn with_workspace(mut self, id: impl Into<String>) -> Self {
         self.workspace_id = Some(id.into());
+        self
+    }
+    /// 多候选 workspace（名字解析出多个 id 时 OR 匹配）。
+    #[must_use]
+    pub fn with_workspace_ids(mut self, ids: Vec<String>) -> Self {
+        self.workspace_ids = ids;
         self
     }
     /// 角色过滤（"user" = 仅我的提问）。
@@ -246,26 +261,47 @@ impl SearchIndex {
 
     /// 执行查询。
     pub fn search(&self, q: &SearchQuery) -> LibResult<Vec<SearchHit>> {
+        let parsed = ch_domain::query_syntax::parse(&q.query);
         let searcher = self.reader.searcher();
         let f = &self.fields;
 
         // 构造查询：title OR body 上做全文，再用 provider/workspace 过滤
         let query_parser = QueryParser::for_index(&self.index, vec![f.title, f.body]);
         // 让用户的裸关键词被当成词组查（更符合直觉）
-        let escaped = escape_query(&q.query);
-        let text_query = if escaped.is_empty() {
-            return Ok(Vec::new());
+        let escaped = escape_query(&parsed.text);
+
+        let provider = q.provider.or_else(|| {
+            parsed
+                .provider
+                .as_deref()
+                .and_then(|s| Provider::from_str(s).ok())
+        });
+        let role = q.role.clone().or_else(|| parsed.role.clone());
+        let has_filter = provider.is_some()
+            || q.workspace_id.is_some()
+            || !q.workspace_ids.is_empty()
+            || role.is_some();
+
+        let text_query: Box<dyn tantivy::query::Query> = if escaped.is_empty() {
+            if has_filter {
+                // 纯过滤查询：全量扫描后按过滤条件收窄
+                Box::new(tantivy::query::AllQuery)
+            } else {
+                return Ok(Vec::new());
+            }
         } else {
-            query_parser
-                .parse_query(&escaped)
-                .map_err(|e| SearchError::InvalidQuery(e.to_string()))?
+            Box::new(
+                query_parser
+                    .parse_query(&escaped)
+                    .map_err(|e| SearchError::InvalidQuery(e.to_string()))?,
+            )
         };
 
         // 用 BooleanQuery 叠加过滤条件
         let mut clauses: Vec<(Occur, Box<dyn tantivy::query::Query>)> =
-            vec![(Occur::Must, Box::new(text_query))];
+            vec![(Occur::Must, text_query)];
 
-        if let Some(p) = q.provider {
+        if let Some(p) = provider {
             let term = tantivy::Term::from_field_text(f.provider, p.as_str());
             clauses.push((
                 Occur::Must,
@@ -279,7 +315,26 @@ impl SearchIndex {
                 Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
             ));
         }
-        if let Some(role) = &q.role {
+        if !q.workspace_ids.is_empty() {
+            // 多候选 id：OR 组合后再 Must
+            let should: Vec<(Occur, Box<dyn tantivy::query::Query>)> = q
+                .workspace_ids
+                .iter()
+                .map(|ws| {
+                    let term = tantivy::Term::from_field_text(f.workspace_id, ws);
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(term, IndexRecordOption::Basic))
+                            as Box<dyn tantivy::query::Query>,
+                    )
+                })
+                .collect();
+            clauses.push((
+                Occur::Must,
+                Box::new(BooleanQuery::new(should)) as Box<dyn tantivy::query::Query>,
+            ));
+        }
+        if let Some(role) = &role {
             let term = tantivy::Term::from_field_text(f.role, role);
             clauses.push((
                 Occur::Must,
@@ -306,9 +361,9 @@ impl SearchIndex {
             };
             let provider_str = get(f.provider).unwrap_or_default();
             let role_str = get(f.role).unwrap_or_default();
-            // 高亮命中片段：取 body 的前若干字符，标记查询词
+            // 高亮命中片段：取 body 的前若干字符，标记查询词（仅自由文本部分）
             let body = get(f.body).unwrap_or_default();
-            let snippet = make_snippet(&body, &q.query);
+            let snippet = make_snippet(&body, &parsed.text);
 
             results.push(SearchHit {
                 message_id: get(f.message_id).unwrap_or_default(),
@@ -718,5 +773,98 @@ mod tests {
             .expect("unexpected None");
         assert!(!hits.is_empty());
         assert!(hits.iter().all(|h| h.role == Role::User));
+    }
+
+    // ── 查询语法测试（plan §13.2，索引内生效的 provider/type）─────────
+
+    #[test]
+    fn syntax_provider_prefix_in_index() {
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        let mut m1 = msg("m1", "c1", "t", "keyword here");
+        m1.provider = Provider::Codex;
+        let mut m2 = msg("m2", "c2", "t", "keyword here");
+        m2.provider = Provider::Cursor;
+        idx.index_message(&mut writer, &m1)
+            .expect("file I/O failed");
+        idx.index_message(&mut writer, &m2)
+            .expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(&SearchQuery::new("provider:codex keyword"))
+            .expect("unexpected None");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].provider, Provider::Codex);
+    }
+
+    #[test]
+    fn syntax_type_role_prefix_in_index() {
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        index_samples(
+            &idx,
+            &[
+                msg("m1", "c1", "t", "user asks feature"),
+                IndexableMessage {
+                    message_id: "m2".into(),
+                    conversation_id: "c1".into(),
+                    provider: Provider::Generic,
+                    workspace_id: None,
+                    role: Role::Assistant,
+                    title: Some("t".into()),
+                    body: Some("assistant answers feature".into()),
+                },
+            ],
+        );
+        let hits = idx
+            .search(&SearchQuery::new("type:assistant feature"))
+            .expect("unexpected None");
+        assert!(!hits.is_empty());
+        assert!(hits.iter().all(|h| h.role == Role::Assistant));
+    }
+
+    #[test]
+    fn syntax_pure_filter_matches_all_scope() {
+        // 纯过滤（无关键词）：provider 过滤下全量扫描该 provider 的消息
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        let mut m1 = msg("m1", "c1", "t", "anything one");
+        m1.provider = Provider::Codex;
+        let mut m2 = msg("m2", "c2", "t", "anything two");
+        m2.provider = Provider::Cursor;
+        idx.index_message(&mut writer, &m1)
+            .expect("file I/O failed");
+        idx.index_message(&mut writer, &m2)
+            .expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(&SearchQuery::new("provider:codex"))
+            .expect("unexpected None");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].message_id, "m1");
+    }
+
+    #[test]
+    fn workspace_ids_multi_or() {
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        let mut m1 = msg("m1", "c1", "t", "findme");
+        m1.workspace_id = Some("ws1".into());
+        let mut m2 = msg("m2", "c2", "t", "findme");
+        m2.workspace_id = Some("ws2".into());
+        let mut m3 = msg("m3", "c3", "t", "findme");
+        m3.workspace_id = Some("ws3".into());
+        for m in [&m1, &m2, &m3] {
+            idx.index_message(&mut writer, m).expect("file I/O failed");
+        }
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(
+                &SearchQuery::new("findme").with_workspace_ids(vec!["ws1".into(), "ws2".into()]),
+            )
+            .expect("unexpected None");
+        assert_eq!(hits.len(), 2);
     }
 }

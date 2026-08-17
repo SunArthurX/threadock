@@ -452,12 +452,41 @@ fn handle_search(
 ) -> Result<serde_json::Value, String> {
     let p: SearchParams = serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
 
+    // 查询语法（plan §13.2）：workspace 名字解析 + DB 级后过滤集合
+    let parsed = ch_domain::query_syntax::parse(&p.query);
+    let (ws_ids, db_filter) = {
+        let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+        let ws_ids = match &parsed.workspace {
+            Some(w) => repo
+                .workspace_ids_by_name_or_id(w)
+                .map_err(|e| e.to_string())?,
+            None => Vec::new(),
+        };
+        let db_filter = repo
+            .search_filter_conversation_ids(&parsed)
+            .map_err(|e| e.to_string())?;
+        (ws_ids, db_filter)
+    };
+    if parsed.workspace.is_some() && ws_ids.is_empty() {
+        return Ok(serde_json::json!([]));
+    }
+
     let engine = p.engine.as_deref().unwrap_or("tantivy");
     match engine {
         "tantivy" => {
             let idx = state.search_index.lock().map_err(|e| e.to_string())?;
-            let q = ch_search::SearchQuery::new(&p.query);
+            let mut q = ch_search::SearchQuery::new(&p.query).with_workspace_ids(ws_ids);
+            if db_filter.is_some() {
+                q = q.with_limit(200);
+            }
             let hits = idx.search(&q).map_err(|e| e.to_string())?;
+            let hits = match &db_filter {
+                Some(set) => hits
+                    .into_iter()
+                    .filter(|h| set.contains(&h.conversation_id))
+                    .collect(),
+                None => hits,
+            };
             Ok(serde_json::to_value(&hits).map_err(|e| e.to_string())?)
         }
         "fts5" => {

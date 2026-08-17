@@ -91,6 +91,34 @@ impl Repository {
         search::search(&conn, q)
     }
 
+    /// Tantivy 路径的 DB 后过滤（plan §13.2）：返回允许通过的 conversation id
+    /// 集合；`None` = 无 DB 级过滤（跳过），`Some(空)` = 全部过滤掉。
+    pub fn search_filter_conversation_ids(
+        &self,
+        p: &ch_domain::query_syntax::ParsedQuery,
+    ) -> StorageResult<Option<std::collections::HashSet<String>>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        search::filter_conversation_ids(&conn, p)
+    }
+
+    /// 把查询语法 `workspace:` 的值（id 或 display_name）解析为候选 id 列表。
+    /// 名字大小写不敏感；找不到时返回空列表（调用方据此得到空结果）。
+    pub fn workspace_ids_by_name_or_id(&self, value: &str) -> StorageResult<Vec<String>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT id FROM workspaces WHERE id = ?1 OR display_name = ?1 COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([value], |r| {
+            let id: String = r.get(0)?;
+            Ok(id)
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
     /// Prompt 复用推荐（round 25）：用 FTS5 找相似历史 user 消息，
     /// JOIN usage_records 拿当时的 cost / model / provider，让用户看到
     /// 「你之前 3 个会话问过类似问题 + 那次花了多少钱」。

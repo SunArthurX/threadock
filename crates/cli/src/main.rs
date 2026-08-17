@@ -98,7 +98,7 @@ fn run() -> Result<()> {
             run_search(&repo, args)?;
         }
         ["search-tantivy", args @ ..] => {
-            run_tantivy_search(&search_index, args)?;
+            run_tantivy_search(&repo, &search_index, args)?;
         }
         ["export", "markdown", id, out] => {
             export_cmd::export_conversation(&repo, id, out, ExportFormat::Markdown)?;
@@ -548,7 +548,11 @@ fn index_imported(
 }
 
 /// 用 Tantivy 执行搜索（plan §13 增强检索）。
-fn run_tantivy_search(index: &ch_search::SearchIndex, args: &[&str]) -> Result<()> {
+fn run_tantivy_search(
+    repo: &ch_storage::Repository,
+    index: &ch_search::SearchIndex,
+    args: &[&str],
+) -> Result<()> {
     let mut keywords: Vec<String> = Vec::new();
     let mut provider: Option<ch_domain::Provider> = None;
     let mut workspace_id: Option<String> = None;
@@ -578,15 +582,37 @@ fn run_tantivy_search(index: &ch_search::SearchIndex, args: &[&str]) -> Result<(
     }
     let query_str = keywords.join(" ");
 
-    let mut q = ch_search::SearchQuery::new(&query_str);
+    // 查询语法（plan §13.2）：workspace: 名字解析 + DB 级后过滤
+    let parsed = ch_domain::query_syntax::parse(&query_str);
+    let ws_ids = match &parsed.workspace {
+        Some(w) => repo.workspace_ids_by_name_or_id(w)?,
+        None => Vec::new(),
+    };
+    let db_filter = repo.search_filter_conversation_ids(&parsed)?;
+    if parsed.workspace.is_some() && ws_ids.is_empty() {
+        println!("(no workspace matches '{}')", parsed.workspace.unwrap());
+        return Ok(());
+    }
+
+    let mut q = ch_search::SearchQuery::new(&query_str).with_workspace_ids(ws_ids);
     if let Some(p) = provider {
         q = q.with_provider(p);
     }
     if let Some(w) = workspace_id {
         q = q.with_workspace(w);
     }
+    if db_filter.is_some() {
+        q = q.with_limit(200);
+    }
 
     let hits = index.search(&q).context("tantivy search")?;
+    let hits = match &db_filter {
+        Some(set) => hits
+            .into_iter()
+            .filter(|h| set.contains(&h.conversation_id))
+            .collect::<Vec<_>>(),
+        None => hits,
+    };
     if hits.is_empty() {
         println!("(no matches via Tantivy)");
         return Ok(());

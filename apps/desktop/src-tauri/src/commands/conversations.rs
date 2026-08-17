@@ -483,9 +483,31 @@ pub(crate) async fn search(
     query: String,
     role: Option<String>,
 ) -> Result<Vec<SearchResultDto>, String> {
+    // ── 查询语法（plan §13.2）：workspace 名字解析 + DB 级后过滤集合 ──
+    // provider/type 前缀在 Tantivy/FTS5 索引内生效；status/file/model/after/before
+    // 需查 SQLite，这里预先取出允许通过的 conversation id 集合。
+    let parsed = ch_domain::query_syntax::parse(&query);
+    let (ws_ids, db_filter) = {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        let ws_ids = match &parsed.workspace {
+            Some(w) => repo
+                .workspace_ids_by_name_or_id(w)
+                .map_err(|e| storage_err(e))?,
+            None => Vec::new(),
+        };
+        let db_filter = repo
+            .search_filter_conversation_ids(&parsed)
+            .map_err(|e| storage_err(e))?;
+        (ws_ids, db_filter)
+    };
+    // workspace: 名字解析不出任何候选 → 语义上就是无命中，短路返回
+    if parsed.workspace.is_some() && ws_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
     // 空关键词 + 角色筛选 = 全量该角色（如「所有我的提问」）：直接走 FTS5
     // （Tantivy 空 query 无意义；FTS5 空 MATCH 退化为按过滤条件全量）
-    if query.trim().is_empty() {
+    if parsed.text.is_empty() && !parsed.needs_db_filter() && parsed.workspace.is_none() {
         let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
         let mut q = ch_storage::SearchQuery::new("").with_limit(200);
         if let Some(r) = &role {
@@ -496,23 +518,48 @@ pub(crate) async fn search(
     }
     // 优先走 Tantivy（plan §9.5 主检索），降级 FTS5
     let idx = state.search_index.lock().map_err(|e| search_err(e))?;
-    let mut q = ch_search::SearchQuery::new(&query);
+    let mut q = ch_search::SearchQuery::new(&query).with_workspace_ids(ws_ids);
     if let Some(r) = &role {
         q = q.with_role(r.clone());
     }
+    // 有 DB 后过滤时超量拉取，避免过滤后不足一页
+    if db_filter.is_some() {
+        q = q.with_limit(200);
+    }
     match idx.search(&q) {
-        Ok(hits) if !hits.is_empty() => Ok(hits
-            .into_iter()
-            .map(|h| SearchResultDto {
-                message_id: h.message_id,
-                conversation_id: h.conversation_id,
-                provider: h.provider.to_string(),
-                role: h.role.to_string(),
-                title: h.title,
-                snippet: h.snippet,
-            })
-            .collect()),
-        _ => {
+        Ok(hits) => {
+            let filtered: Vec<_> = match &db_filter {
+                Some(set) => hits
+                    .into_iter()
+                    .filter(|h| set.contains(&h.conversation_id))
+                    .collect(),
+                None => hits,
+            };
+            // 有 DB 过滤时结果以过滤后为准（降级 FTS5 不会更优）；否则空结果降级 FTS5
+            if !filtered.is_empty() || db_filter.is_some() {
+                return Ok(filtered
+                    .into_iter()
+                    .map(|h| SearchResultDto {
+                        message_id: h.message_id,
+                        conversation_id: h.conversation_id,
+                        provider: h.provider.to_string(),
+                        role: h.role.to_string(),
+                        title: h.title,
+                        snippet: h.snippet,
+                    })
+                    .collect());
+            }
+            // 降级 FTS5
+            drop(idx);
+            let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+            let mut q = ch_storage::SearchQuery::new(&query);
+            if let Some(r) = &role {
+                q = q.with_role(r.clone());
+            }
+            let results = repo.search(&q).map_err(|e| storage_err(e))?;
+            Ok(results.into_iter().map(search_result_dto).collect())
+        }
+        Err(_) => {
             // 降级 FTS5
             drop(idx);
             let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;

@@ -5,6 +5,7 @@
 
 pub mod app_error;
 pub mod config;
+pub mod query_syntax;
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
