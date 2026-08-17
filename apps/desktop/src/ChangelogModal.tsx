@@ -13,6 +13,19 @@ interface ChangelogEntry {
 
 const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.0.0",
+    date: "2026-08-17",
+    highlights: [
+      "🔍 搜索查询语法：provider:/workspace:/type:/status:/file:/model:/after:/before: 前缀",
+      "☆ 保存搜索：跨会话持久，搜索框一键执行",
+      "🗂 Workspace 管理：手动合并/拆分/重命名 + 低置信度警示（设置页新区）",
+      "🗂 原始视图：会话详情一键查看未标准化原始归档",
+      "↗ 来源应用 / ⏯ 恢复命令：一键打开 GUI 来源；claude/codex 复制 resume 命令",
+      "🧠 jieba 可插拔中文分词（构建特性，默认 N-gram）",
+      "🛡 治理闭环、性能与稳定性全面加固（详见 CHANGELOG 1.0.0）",
+    ],
+  },
+  {
     version: "0.1.0",
     date: "2026-08-16",
     highlights: [

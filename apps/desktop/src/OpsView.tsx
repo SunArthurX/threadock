@@ -72,31 +72,31 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
     const p = (pr: Promise<unknown>, tag: string) => reqs.push([pr, tag]);
     if (sec === "overview") {
       p(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
-      p(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then(setByProvider), "prov");
-      p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then(setByModel), "model");
-      p(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then(setTimeseries), "ts");
-      p(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then(setTopTools), "tools");
-      p(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then(setCacheStats), "cache");
+      p(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then((v) => setByProvider(v ?? [])), "prov");
+      p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then((v) => setByModel(v ?? [])), "model");
+      p(invoke<DailyUsage[]>("ops_timeseries", { days: range }).then((v) => setTimeseries(v ?? [])), "ts");
+      p(invoke<ToolUsageRow[]>("ops_tool_toplist", { days: range, n: 10 }).then((v) => setTopTools(v ?? [])), "tools");
+      p(invoke<CacheStat[]>("ops_cache_stats", { days: range }).then((v) => setCacheStats(v ?? [])), "cache");
       p(invoke<import("./CostSection").UsageSummary>("ops_usage_summary", {}).then(setUsageSummary), "summary");
-      p(invoke<{ day: string; total_input: number; cache_read: number }[]>("ops_cache_trend", { days: range }).then(setCacheTrend), "cacheTrend");
-      p(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then(setHealth), "health");
-      p(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then(setLatency), "latency");
-      p(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then(setWaste), "waste");
-      p(invoke<AgentBenchmark[]>("ops_agent_benchmark", { days: range }).then(setBenchmark), "bench");
+      p(invoke<{ day: string; total_input: number; cache_read: number }[]>("ops_cache_trend", { days: range }).then((v) => setCacheTrend(v ?? [])), "cacheTrend");
+      p(invoke<AgentHealth[]>("ops_agent_health", { days: range }).then((v) => setHealth(v ?? [])), "health");
+      p(invoke<LatencyStat[]>("ops_latency_stats", { days: range }).then((v) => setLatency(v ?? [])), "latency");
+      p(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then((v) => setWaste(v ?? [])), "waste");
+      p(invoke<AgentBenchmark[]>("ops_agent_benchmark", { days: range }).then((v) => setBenchmark(v ?? [])), "bench");
     } else if (sec === "cost") {
       // P1-B1: 之前 byProvider 永远不会在 cost 分支加载，导致按 Agent 成本分布柱状图空。
-      p(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then(setByProvider), "prov");
-      p(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
-      p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then(setByModel), "model");
+      p(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then((v) => setByProvider(v ?? [])), "prov");
+      p(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then((v) => setDirCosts(v ?? [])), "dirCost");
+      p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then((v) => setByModel(v ?? [])), "model");
       // P1-B4: 之前写死 14 天；当 range=7 时后续周对比数据被截断。
       // 改为 max(range, 14) 保证周对比可用；range 越大越完整（不受 14 限制）。
-      p(invoke<DailyUsage[]>("ops_timeseries", { days: Math.max(range ?? 90, 14) }).then(setTimeseries), "ts");
+      p(invoke<DailyUsage[]>("ops_timeseries", { days: Math.max(range ?? 90, 14) }).then((v) => setTimeseries(v ?? [])), "ts");
     } else if (sec === "security") {
-      p(invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }).then(setRisky), "risky");
-      p(invoke<AnomalyRow[]>("ops_anomalies", { days: range }).then(setAnomalies), "anomaly");
+      p(invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }).then((v) => setRisky(v ?? [])), "risky");
+      p(invoke<AnomalyRow[]>("ops_anomalies", { days: range }).then((v) => setAnomalies(v ?? [])), "anomaly");
     } else {
-      p(invoke<AssetRow[]>("assets_list").then(setAssets), "assets");
-      p(invoke<AutomationRow[]>("automations_list").then(setAutomations), "auto");
+      p(invoke<AssetRow[]>("assets_list").then((v) => setAssets(v ?? [])), "assets");
+      p(invoke<AutomationRow[]>("automations_list").then((v) => setAutomations(v ?? [])), "auto");
     }
     await Promise.allSettled(reqs.map(([pr]) => pr));
     setLoading(false);

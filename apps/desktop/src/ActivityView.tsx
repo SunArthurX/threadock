@@ -332,7 +332,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
     items: { tool: string; calls: number; cur: number; prev: number; delta: number; barWidth: number }[];
   }>(() => {
     if (!stats) return { curMonth: "", prevMonth: "", items: [] };
-    const safe = stats.tools_trend.filter((t) => typeof t.month === "string" && /^\d{4}-\d{2}$/.test(t.month));
+    const safe = (stats.tools_trend ?? []).filter((t) => typeof t.month === "string" && /^\d{4}-\d{2}$/.test(t.month));
     const months = [...new Set(safe.map((t) => t.month))].sort();
     const curMonth = months[months.length - 1] ?? "";
     const prevMonth = months[months.length - 2] ?? "";
@@ -372,7 +372,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   })();
   const partsMax = Math.max(...parts.values(), 1);
 
-  const isEmpty = !stats || (stats.heatmap.length === 0 && stats.hourly.length === 0 && stats.tools_trend.length === 0);
+  const isEmpty = !stats || ((stats.heatmap ?? []).length === 0 && (stats.hourly ?? []).length === 0 && (stats.tools_trend ?? []).length === 0);
   // 24h BarChart 数据 + peak 高亮
   const hourlyChart = (stats?.hourly ?? []).map((h) => ({
     label: `${h.hour}`,
@@ -394,7 +394,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         .map((t) => ({ ...t, share: total > 0 ? (t.calls / total) * 100 : 0 }));
     }
     const month = selectedDay.slice(0, 7);
-    const safeMonth = stats.tools_trend.filter((t) => t.month === month);
+    const safeMonth = (stats.tools_trend ?? []).filter((t) => t.month === month);
     const total = safeMonth.reduce((s, t) => s + t.calls, 0);
     return safeMonth
       .sort((a, b) => b.calls - a.calls)

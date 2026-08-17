@@ -250,7 +250,6 @@ fn run() -> Result<()> {
                 // --db 指定的文件名必须透传：否则 daemon 会打开
                 // <data_dir>/threadock.db 而不是用户指定的库（E2E 发现的真实 bug）
                 db_path: Some(db_path.clone()),
-                ..Default::default()
             })
             .context("open daemon state")?;
             eprintln!(

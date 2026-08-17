@@ -148,9 +148,15 @@ describe("HelpShortcuts 组件", () => {
 });
 
 describe("SettingsView About 元数据", () => {
-  it("APP_VERSION 与 CORE_VERSION 来自正确来源", () => {
-    expect(APP_VERSION).toBe("0.1.0");
-    expect(CORE_VERSION).toBe("0.2.0");
+  it("APP_VERSION 与 CORE_VERSION 来自正确来源", async () => {
+    // 契约：构建期从 package.json / workspace Cargo.toml 派生，永不手工同步
+    const pkg = (await import("../../package.json")).default;
+    expect(APP_VERSION).toBe(pkg.version);
+    const cargo = (await import("../../../../Cargo.toml?raw")).default;
+    const m = cargo.match(/^version\s*=\s*"([^"]+)"/m);
+    expect(CORE_VERSION).toBe(m?.[1]);
+    // 回归：GUI 真人测试发现的版本漂移（曾硬编码 0.1.0/0.2.0 忘更新）
+    expect(CORE_VERSION).toBe(APP_VERSION);
   });
 });
 

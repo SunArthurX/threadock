@@ -1,6 +1,7 @@
 // 第 6 轮大改版测试：KnowledgeModal tabs/导出、ActivityView 工具维度、CostSection 周对比 +
 // per-model、prefs 货币/数字/日期、App 快捷键、ConversationList Pin/排序、ChangelogModal
 import { fireEvent, render, waitFor } from "@testing-library/react";
+import { APP_VERSION } from "../SettingsView";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -310,19 +311,19 @@ describe("ChangelogModal 启动检测", () => {
   });
 
   it("标记已读后 → false", () => {
-    markVersionSeen("0.1.0");
+    markVersionSeen(APP_VERSION);
     expect(shouldShowChangelog()).toBe(false);
   });
 
   it("getLastSeenVersion 反映标记", () => {
     expect(getLastSeenVersion()).toBeNull();
-    markVersionSeen("0.1.0");
-    expect(getLastSeenVersion()).toBe("0.1.0");
+    markVersionSeen(APP_VERSION);
+    expect(getLastSeenVersion()).toBe(APP_VERSION);
   });
 
   it("ChangelogModal 渲染版本号 + highlights", () => {
     const { container } = render(<ChangelogModal onClose={() => {}} />);
-    expect(container.textContent).toContain("v0.1.0");
+    expect(container.textContent).toContain(`v${APP_VERSION}`);
     expect(container.querySelectorAll(".changelog-list li").length).toBeGreaterThan(5);
   });
 
@@ -332,7 +333,7 @@ describe("ChangelogModal 启动检测", () => {
     const closeBtn = container.querySelector(".settings-close") as HTMLButtonElement;
     fireEvent.click(closeBtn);
     expect(onClose).toHaveBeenCalled();
-    expect(getLastSeenVersion()).toBe("0.1.0");
+    expect(getLastSeenVersion()).toBe(APP_VERSION);
   });
 });
 

@@ -171,8 +171,12 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
 
   const load = async () => {
     try {
-      setKb(await invoke<KnowledgeBase>("knowledge_base_list", {}));
-      setPrompts((await invoke<{ prompts: PromptRow[] }>("recent_user_prompts", { limit: 100 })).prompts);
+      // null（IPC 异常/空库）归一为空 KB：避免页面永远停在「加载中」
+      setKb((await invoke<KnowledgeBase | null>("knowledge_base_list", {})) ?? {
+        extracted: 0, total_conversations: 0, last_extract_ms: 0,
+        todos: [], decisions: [], errors: [], summaries: [], top_commands: [], top_files: [],
+      });
+      setPrompts(((await invoke<{ prompts: PromptRow[] }>("recent_user_prompts", { limit: 100 })) ?? { prompts: [] }).prompts ?? []);
     } catch { /* 空库静默 */ }
   };
   // 挂载时拉取知识库数据（effect 数据加载模式：load 内含 setState，有意保留）

@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.1] - 2026-08-17
+
+v1.0.0 后的全功能测试轮（CLI 真人 E2E 59 项 + Tauri 命令层 3 旅程 + 浏览器 GUI 真人模拟）发现并修复：
+
+### Fixed
+- **daemon 忽略 `--db` 文件名**：`ch --db hub.db daemon` 实际打开的是 `<dir>/threadock.db`
+  （空库）——CLI E2E 发现；`DaemonStateConfig` 新增 `db_path` 透传，默认行为不变
+- **`import-from zcode` 在 `~/.zcode` 缺失时**报 sqlite 原始错误：list/import 加存在性
+  守卫，对齐 claude-code 的友好提示行为
+- **前端对后端 null 返回零容错**：`ops_by_provider` 等返回 null 时概览/成本页直接崩
+  （ErrorBoundary 兜底但视图报废）——OpsView 18 处 + ActivityView 3 处 + KnowledgeView
+  2 处归一化 `?? []`；恶劣后端（全部命令返回 null）下 8 视图全部正常渲染空态
+- **GUI 版本号漂移**：前端 `APP_VERSION="0.1.0"` / `CORE_VERSION="0.2.0"` 硬编码从未
+  随版本更新（更新日志弹窗显示 v0.1.0）——改为构建期从 `package.json` /
+  workspace `Cargo.toml` 派生，新增 round5 契约测试锁定「三者一致」；补 1.0.0 更新
+  日志条目
+- **知识库页在 IPC 异常时永远「加载中」**：null 归一为空 KB 走空态
+
+### Tests
+- 新增 `scripts/e2e_cli.sh`：13 组场景 × 59 断言（真实二进制 + 临时库；导入幂等/
+  双引擎搜索语法/知识/脱敏/导出/备份恢复/硬删级联/daemon 14 方法含错误路径）
+- 新增 Tauri 命令层 E2E（`src/e2e_journeys.rs`）：mock app + 真实后端 3 条用户旅程
+  （会话生命周期/Workspace 治理/保存搜索），直接调 GUI 实际 invoke 的命令函数
+- 浏览器 GUI 真人模拟：IPC mock 注入驱动真实前端——8 视图巡检、搜索语法、保存搜索
+  下拉、原始视图切换、恢复命令复制、Workspace 重命名/置信度徽标、恶劣后端压力
+
 ## [1.0.0] - 2026-08-17
 
 首个正式版本。以执行计划 Phase 2（MVP，Gate 1）为验收基线，P0 发布工程 +

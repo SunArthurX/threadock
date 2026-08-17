@@ -21,9 +21,14 @@ import WorkspaceSection from "./WorkspaceSection";
 export const RESET_CONFIRM_TEXT = "重置";
 
 /** 桌面端版本（与 package.json 对齐）。 */
-export const APP_VERSION = "0.1.0";
-/** 核心库版本（与 Cargo.toml workspace.package.version 对齐）。 */
-export const CORE_VERSION = "0.2.0";
+import pkg from "../package.json";
+import cargoTomlRaw from "../../../Cargo.toml?raw";
+
+/** 应用版本：构建期从 package.json 派生（此前硬编码 0.1.0 忘更新，GUI 真人测试发现）。 */
+export const APP_VERSION: string = pkg.version;
+/** 核心库版本：构建期从 workspace Cargo.toml 派生，与 Rust 侧永远一致。 */
+export const CORE_VERSION: string =
+  cargoTomlRaw.match(/^version\s*=\s*"([^"]+)"/m)?.[1] ?? "unknown";
 
 /** UI 降级用的 earliest（库为空时 fallback 到今天）。 */
 export function resetDateBoundsSync(): { earliest: string; today: string } {
