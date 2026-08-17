@@ -253,9 +253,9 @@ threadock/
 | 10 | 一键打开来源应用 / 恢复原会话 | P2-3 | 1 天 |
 | 11 | 原始视图 ↔ 统一视图切换（Raw 已存，UI 无入口） | P2-3 | 1–2 天 |
 | 12 | 中文分词器可插拔（jieba） | §13.1 | 1–2 天 |
-| 13 | Daemon UDS/Named Pipe IPC + 本地认证 Token（当前仅 stdio） | P1-2 | 2–3 天 |
-| 14 | Adapter Host 配额：内存/CPU 限制、文件白名单、禁网 | P1-4 | 2–3 天 |
-| 15 | OpenCode Adapter（第 6 来源，可裁剪出 1.0） | P3-1 | 2–3 天 |
+| 13 | Daemon UDS/Named Pipe IPC + 本地认证 Token（当前仅 stdio） | P1-2 | **移出 1.0**（GUI 内嵌场景非必需，1.1 做） |
+| 14 | Adapter Host 配额：内存/CPU 限制、文件白名单、禁网 | P1-4 | **移出 1.0**（IDE Adapter 为只读直读，1.1 做） |
+| 15 | OpenCode Adapter（第 6 来源） | P3-1 | **移出 1.0**（1.1 做） |
 
 ### P2 验收证据（Gate 1 非功能项）
 
@@ -266,7 +266,7 @@ threadock/
 | 18 | 真实脱敏 Fixture 集（Golden Fixture Kit） | 无 |
 | 19 | ESLint 57 个 warning 清零 | 0 error，57 warning |
 
-合计：P0 约 3–5 天 + P1 约 15–22 天 + P2 约 2–3 天 ≈ **4–6 周**（单人、不含证书采购与等待公证的时间）。裁剪建议：若把 #15 OpenCode、#13/#14（IPC 与配额，GUI 内嵌场景非必需）移出 1.0，可压缩到 **3–4 周**。
+合计（已裁剪 #13/#14/#15 至 1.1）：P0 约 3–5 天 + P1 约 8–13 天 + P2 约 2–3 天 ≈ **3–4 周**（单人、不含证书采购与等待公证的时间）。
 
 明确不算 v1.0.0 缺口（plan 本就排在 Phase 4/5）：真实 LLM 提取、Android 端、SSO/RBAC/KMS/加密同步、语义向量检索 Hybrid。
 

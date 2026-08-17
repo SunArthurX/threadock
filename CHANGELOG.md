@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.4.0] - 2026-08-17
+
+> 版本治理：此前 workspace（0.2.0）/ Tauri（0.1.0）/ CHANGELOG（0.3.0）三处版本不一致，自本版起统一。
+
+### Added（0.3.0 后 26 轮产品迭代补记）
+- **Command Palette**：全局命令面板 + 快捷键
+- **首次启动引导**（OnboardingTour）+ 启动更新日志（ChangelogModal）
+- **活动页大改版**：GitHub 风格热力图（7×N 布局 + hover tooltip + 自适应）、4 张统计卡、工具 Top 10、24h 时间分布
+- **会话详情增强**：页内搜索、多选批量操作、新鲜度标识、Toast undo、右键菜单、代码块语法高亮
+- **知识库增强**：跨会话知识引用、知识筛选导出、周对比视图
+- **私人笔记**：会话级 user-only markdown 笔记（V13 conversation_notes 表，不参与搜索/导出/统计）
+- **配置导入导出** + 批量加标签 + 自定义标题（空 = 恢复原始）
+- **Prompt 复用 / 会话续做**：write_clipboard 自定义 Tauri command（绕开 macOS WKWebView 剪贴板限制）
+- **UI 体系**：自定义 ScrollArea 组件（WKWebView 滚动条兼容）、可拖拽 resizer、暗色/亮色主题协调、全页 max-width 布局
+- **底部状态栏** + 排序置顶 + 用户偏好持久化
+
+### Fixed
+- 项目页「查看会话」SQL JOIN 列名错（sqlite no such column）
+- 重置时间范围改为用户自选 + 修 import_state 残留导致「重置 = 数据丢失」
+- ScrollArea 滚轮失灵、热力图 cell 变形/黑屏回归、activity_stats tuple 序列化
+- 第 26 轮 4 区并发体检：32 findings → 0
+
+### Engineering
+- CI：修复三类历史失败 + clippy 1.97+ 新增 lint + rustfmt 版本要求
+- 安全：启用 Dependabot + CodeQL；修 supply-chain advisory 3 个（2 完成 + 1 个上游 blocked：RUSTSEC-2026-0253 lru，等 tantivy 升级，CI 已容忍）
+- 测试增长：workspace 379 + Tauri 13 + 前端 344（全绿）；ESLint 0 error
 
 ## [0.3.0] - 2026-08-15
 
