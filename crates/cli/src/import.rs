@@ -467,7 +467,7 @@ mod tests {
             res.is_ok(),
             "conversations_by_source_dir must not fail: {res:?}"
         );
-        let list = res.unwrap();
+        let list = res.expect("conversations_by_source_dir must not fail");
         assert_eq!(list.len(), 1, "应找到 1 条 source_dir=project-x 的会话，conv.id={:?} conv.source_conversation_id={:?} usage.source_session_id={:?}", conv.id, conv.source_conversation_id, source_session_id);
         assert_eq!(list[0].id, conv.id);
 
@@ -479,6 +479,9 @@ mod tests {
     /// Round 25：Prompt 复用推荐 — FTS5 找相似 user 消息 + cost JOIN。
     /// 验证：相同关键词匹配多个 user 消息时按 rank 排序；cost 正确聚合。
     #[test]
+    // 集成测试：3 个会话 × 消息 + 2 个边界用例，单测里展开清晰；
+    // 拆函数会让构造代码重复，得不偿失。豁免 too_many_lines。
+    #[allow(clippy::too_many_lines)]
     fn prompt_reuse_search_finds_similar_user_messages_with_cost() {
         use ch_domain::{Conversation, UsageRecord, UsageStatus};
         let repo = Repository::open_in_memory().expect("unexpected None");
@@ -560,7 +563,7 @@ mod tests {
         repo.upsert_message(&m2).expect("upsert m2");
 
         // 会话 3：无关内容（"煮意大利面"）—— 不应出现在命中
-        let mut c3 = Conversation::new(Provider::Generic, "src-cook");
+        let c3 = Conversation::new(Provider::Generic, "src-cook");
         repo.import_conversation_batch(&c3, &[], &[], None, None)
             .expect("import c3");
         let conv_id_3 = c3.id.clone();
@@ -604,7 +607,7 @@ mod tests {
         let _ = first_cost; // suppress unused
         let costs: Vec<f64> = hits.iter().map(|h| h.cost_usd).collect();
         let has_cost = costs.iter().any(|c| (*c - 0.10).abs() < 1e-6);
-        let has_zero = costs.iter().any(|c| *c == 0.0);
+        let has_zero = costs.contains(&0.0);
         assert!(
             has_cost && has_zero,
             "cost 聚合：必须既出现 0.10（usage_records 已写入）也出现 0.0（无 usage 记录）；got {costs:?}"

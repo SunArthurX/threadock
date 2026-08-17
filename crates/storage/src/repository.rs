@@ -1345,7 +1345,7 @@ impl Repository {
     ) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         // 空串视为清除
-        let normalized = user_title.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let normalized = user_title.map(str::trim).filter(|s| !s.is_empty());
         let changed = conn.execute(
             "UPDATE conversations SET user_title = ?1 WHERE id = ?2",
             params![normalized, conversation_id],
@@ -1376,11 +1376,12 @@ impl Repository {
     /// 设置会话的私有笔记（覆盖或删除）。
     /// - note 为 None 或空串 → 删除该会话的笔记行
     /// - 非空 → UPSERT (note, updated_at)
+    ///
     /// 返回笔记 updated_at 毫秒时间戳（0 = 已删除）
     pub fn set_note(&self, conversation_id: &str, note: Option<&str>) -> StorageResult<i64> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
-        let trimmed = note.map(|s| s.trim()).filter(|s| !s.is_empty());
+        let trimmed = note.map(str::trim).filter(|s| !s.is_empty());
         if trimmed.is_none() {
             conn.execute(
                 "DELETE FROM conversation_notes WHERE conversation_id = ?1",
@@ -1388,7 +1389,7 @@ impl Repository {
             )?;
             return Ok(0);
         }
-        let text = trimmed.unwrap();
+        let text = trimmed.expect("trimmed is Some (checked above)");
         // UPSERT: 插入或更新
         conn.execute(
             "INSERT INTO conversation_notes (conversation_id, note, updated_at) VALUES (?1, ?2, ?3)

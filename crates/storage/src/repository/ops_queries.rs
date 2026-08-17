@@ -1347,120 +1347,16 @@ impl Repository {
     /// 前端当对象读全是 `undefined`，导致统计 NaN 且 `month.slice(2)` 抛错。
     pub fn activity_stats(&self, days: i64) -> StorageResult<ActivityStats> {
         let conn = self.conn.lock().expect("mutex poisoned");
-        let cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days * 86_400_000;
+        let now_ms = timestamp::to_millis(Some(now_utc())).unwrap_or(0);
+        let cutoff = now_ms - days * 86_400_000;
+        // 日级工具分布额外限到最近 90 天（与原逻辑一致），避免数据爆炸
+        let day_cutoff = now_ms - days.min(90) * 86_400_000;
 
-        let mut heatmap = Vec::new();
-        {
-            let mut stmt = conn.prepare(
-                "SELECT date(t.ts/1000,'unixepoch','localtime') AS d,
-                        COUNT(*),
-                        COUNT(DISTINCT t.source_session_id)
-                 FROM tool_call_records t
-                 WHERE t.ts >= ?1 AND t.ts IS NOT NULL
-                 GROUP BY d ORDER BY d",
-            )?;
-            let rows = stmt.query_map(params![cutoff], |r| {
-                Ok(HeatCell {
-                    day: r.get(0)?,
-                    calls: r.get(1)?,
-                    sessions: r.get(2)?,
-                })
-            })?;
-            for row in rows {
-                heatmap.push(row?);
-            }
-        }
+        let heatmap = build_heatmap(&conn, cutoff)?;
+        let (hourly, hourly_weekday, hourly_weekend) = build_hourly_buckets(&conn, cutoff)?;
+        let tools_trend = build_tools_trend(&conn, cutoff)?;
+        let tool_daily = build_tool_daily(&conn, day_cutoff)?;
 
-        let mut hourly = Vec::new();
-        let mut hourly_weekday = Vec::new();
-        let mut hourly_weekend = Vec::new();
-        {
-            let mut stmt = conn.prepare(
-                "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h,
-                        CAST(strftime('%w', ts/1000,'unixepoch','localtime') AS INTEGER) AS dow,
-                        COUNT(*)
-                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
-                 GROUP BY h, dow ORDER BY h",
-            )?;
-            // 用 24 槽累积 weekday/weekend
-            let mut wd = vec![0i64; 24];
-            let mut we = vec![0i64; 24];
-            let mut total = vec![0i64; 24];
-            let rows = stmt.query_map(params![cutoff], |r| {
-                Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
-                    r.get::<_, i64>(2)?,
-                ))
-            })?;
-            for row in rows {
-                let (h, dow, c) = row?;
-                if (0..24).contains(&h) {
-                    total[h as usize] += c;
-                    if dow == 0 || dow == 6 {
-                        we[h as usize] += c;
-                    } else {
-                        wd[h as usize] += c;
-                    }
-                }
-            }
-            for h in 0..24 {
-                hourly.push(HourBucket {
-                    hour: h as i64,
-                    calls: total[h],
-                });
-                hourly_weekday.push(HourBucket {
-                    hour: h as i64,
-                    calls: wd[h],
-                });
-                hourly_weekend.push(HourBucket {
-                    hour: h as i64,
-                    calls: we[h],
-                });
-            }
-        }
-
-        let mut tools_trend = Vec::new();
-        {
-            let mut stmt = conn.prepare(
-                "SELECT strftime('%Y-%m', ts/1000,'unixepoch','localtime') AS m,
-                        tool_name, COUNT(*)
-                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
-                 GROUP BY m, tool_name ORDER BY m, 3 DESC",
-            )?;
-            let rows = stmt.query_map(params![cutoff], |r| {
-                Ok(ToolTrend {
-                    month: r.get(0)?,
-                    tool: r.get(1)?,
-                    calls: r.get(2)?,
-                })
-            })?;
-            for row in rows {
-                tools_trend.push(row?);
-            }
-        }
-
-        // 日级工具分布：按天 + 工具聚合（仅最近 90 天避免数据爆炸）
-        let mut tool_daily: Vec<DailyTool> = Vec::new();
-        {
-            let day_cutoff =
-                timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days.min(90) * 86_400_000;
-            let mut stmt = conn.prepare(
-                "SELECT date(ts/1000,'unixepoch','localtime') AS d, tool_name, COUNT(*)
-                 FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
-                 GROUP BY d, tool_name ORDER BY d, 3 DESC",
-            )?;
-            let rows = stmt.query_map(params![day_cutoff], |r| {
-                Ok(DailyTool {
-                    day: r.get(0)?,
-                    tool: r.get(1)?,
-                    calls: r.get(2)?,
-                })
-            })?;
-            for row in rows {
-                tool_daily.push(row?);
-            }
-        }
         Ok(ActivityStats {
             heatmap,
             hourly,
@@ -1568,4 +1464,133 @@ impl Repository {
         }
         Ok(out)
     }
+}
+
+// ── activity_stats 拆分出的 4 个 helper（按职责分离，每个 < 30 行）────────────
+
+/// 按天聚合：每天的 calls + sessions 计数。
+fn build_heatmap(conn: &rusqlite::Connection, cutoff_ms: i64) -> StorageResult<Vec<HeatCell>> {
+    let mut stmt = conn.prepare(
+        "SELECT date(t.ts/1000,'unixepoch','localtime') AS d,
+                COUNT(*),
+                COUNT(DISTINCT t.source_session_id)
+         FROM tool_call_records t
+         WHERE t.ts >= ?1 AND t.ts IS NOT NULL
+         GROUP BY d ORDER BY d",
+    )?;
+    let rows = stmt.query_map(params![cutoff_ms], |r| {
+        Ok(HeatCell {
+            day: r.get(0)?,
+            calls: r.get(1)?,
+            sessions: r.get(2)?,
+        })
+    })?;
+    let mut heatmap = Vec::new();
+    for row in rows {
+        heatmap.push(row?);
+    }
+    Ok(heatmap)
+}
+
+/// 24 小时分布：返回 (全天, 工作日, 周末) 三个 24 槽序列。
+fn build_hourly_buckets(
+    conn: &rusqlite::Connection,
+    cutoff_ms: i64,
+) -> StorageResult<(Vec<HourBucket>, Vec<HourBucket>, Vec<HourBucket>)> {
+    let mut stmt = conn.prepare(
+        "SELECT CAST(strftime('%H', ts/1000,'unixepoch','localtime') AS INTEGER) AS h,
+                CAST(strftime('%w', ts/1000,'unixepoch','localtime') AS INTEGER) AS dow,
+                COUNT(*)
+         FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+         GROUP BY h, dow ORDER BY h",
+    )?;
+    // 固定 24 槽数组（栈分配，无堆分配），用索引累加
+    let mut wd = [0i64; 24];
+    let mut we = [0i64; 24];
+    let mut total = [0i64; 24];
+    let rows = stmt.query_map(params![cutoff_ms], |r| {
+        Ok((
+            r.get::<_, i64>(0)?,
+            r.get::<_, i64>(1)?,
+            r.get::<_, i64>(2)?,
+        ))
+    })?;
+    for row in rows {
+        let (h, dow, c) = row?;
+        if (0..24).contains(&h) {
+            total[h as usize] += c;
+            if dow == 0 || dow == 6 {
+                we[h as usize] += c;
+            } else {
+                wd[h as usize] += c;
+            }
+        }
+    }
+    let mut hourly = Vec::with_capacity(24);
+    let mut hourly_weekday = Vec::with_capacity(24);
+    let mut hourly_weekend = Vec::with_capacity(24);
+    for h in 0..24 {
+        hourly.push(HourBucket {
+            hour: h as i64,
+            calls: total[h],
+        });
+        hourly_weekday.push(HourBucket {
+            hour: h as i64,
+            calls: wd[h],
+        });
+        hourly_weekend.push(HourBucket {
+            hour: h as i64,
+            calls: we[h],
+        });
+    }
+    Ok((hourly, hourly_weekday, hourly_weekend))
+}
+
+/// 按月聚合：每月 × 工具的 calls 计数（用于月度趋势图）。
+fn build_tools_trend(
+    conn: &rusqlite::Connection,
+    cutoff_ms: i64,
+) -> StorageResult<Vec<ToolTrend>> {
+    let mut stmt = conn.prepare(
+        "SELECT strftime('%Y-%m', ts/1000,'unixepoch','localtime') AS m,
+                tool_name, COUNT(*)
+         FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+         GROUP BY m, tool_name ORDER BY m, 3 DESC",
+    )?;
+    let rows = stmt.query_map(params![cutoff_ms], |r| {
+        Ok(ToolTrend {
+            month: r.get(0)?,
+            tool: r.get(1)?,
+            calls: r.get(2)?,
+        })
+    })?;
+    let mut tools_trend = Vec::new();
+    for row in rows {
+        tools_trend.push(row?);
+    }
+    Ok(tools_trend)
+}
+
+/// 按天 + 工具聚合：日级工具分布（caller 自己决定 cutoff，避免数据爆炸）。
+fn build_tool_daily(
+    conn: &rusqlite::Connection,
+    cutoff_ms: i64,
+) -> StorageResult<Vec<DailyTool>> {
+    let mut stmt = conn.prepare(
+        "SELECT date(ts/1000,'unixepoch','localtime') AS d, tool_name, COUNT(*)
+         FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
+         GROUP BY d, tool_name ORDER BY d, 3 DESC",
+    )?;
+    let rows = stmt.query_map(params![cutoff_ms], |r| {
+        Ok(DailyTool {
+            day: r.get(0)?,
+            tool: r.get(1)?,
+            calls: r.get(2)?,
+        })
+    })?;
+    let mut tool_daily = Vec::new();
+    for row in rows {
+        tool_daily.push(row?);
+    }
+    Ok(tool_daily)
 }
