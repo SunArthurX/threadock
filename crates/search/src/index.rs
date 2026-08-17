@@ -872,7 +872,7 @@ mod tests {
     #[test]
     fn tokenizer_choice_names() {
         assert_eq!(ChineseTokenizer::NGram.registry_name(), "ngram");
-        assert!(ChineseTokenizer::default() == ChineseTokenizer::NGram);
+        assert_eq!(ChineseTokenizer::default(), ChineseTokenizer::NGram);
     }
 
     // jieba 分词器端到端（cargo test -p ch-search --features jieba）
