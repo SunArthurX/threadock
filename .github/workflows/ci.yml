@@ -72,13 +72,22 @@ jobs:
   audit:
     name: Supply-chain audit
     runs-on: ubuntu-latest
-    # 报告新 advisory 而不冻结 PR（修复窗口策略可后续收紧）
-    continue-on-error: true
+    # 当前状态：升 tantivy 0.22→0.26 后，3 个 advisory 修掉 2 个：
+    #   ✅ RUSTSEC-2024-0384 (instant unmaintained)  — measure_time 0.9 移除 instant
+    #   ✅ RUSTSEC-2026-0002 (lru stacked-borrows)    — tantivy 0.26 → lru 0.16.4 ≥ 0.16.3
+    #   ⚠️ RUSTSEC-2026-0253 (lru use-after-free)    — 上游 blocked：
+    #      tantivy 0.26 锁 lru ^0.16.3；修这个 bug 要 lru ≥ 0.18.2。
+    #      等 tantivy 升 lru 0.18+ 后移除 --ignore。
+    # 之前用 rustsec/audit-check@v2 + 默认 GITHUB_TOKEN，因为 check-run 权限不足
+    # 报 "Resource not accessible by integration" 致 job 标 failure。
+    # 改用 cargo-audit 直接跑，exit 0 即 success。
     steps:
       - uses: actions/checkout@v4
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Run cargo-audit
+        run: cargo audit --ignore RUSTSEC-2026-0253
 
   frontend:
     name: Frontend Build

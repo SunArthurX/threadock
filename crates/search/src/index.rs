@@ -288,7 +288,9 @@ impl SearchIndex {
         }
 
         let bool_query = BooleanQuery::new(clauses);
-        let top = TopDocs::with_limit(q.limit);
+        // tantivy 0.26: TopDocs 现在是 builder，with_limit 返 TopDocs（不 impl Collector），
+        // 必须链 .order_by_score() 才能拿到 impl Collector<Fruit = Vec<(Score, DocAddress)>>
+        let top = TopDocs::with_limit(q.limit).order_by_score();
         let hits = searcher
             .search(&bool_query, &top)
             .map_err(|e| SearchError::Tantivy(e.to_string()))?;
