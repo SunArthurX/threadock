@@ -167,3 +167,55 @@ fn bench_smoke() {
     let p = percentile(&[1.0, 2.0, 3.0, 4.0, 5.0], 50.0);
     assert!((p - 3.0).abs() < 0.01);
 }
+
+/// Gate 1 红线（plan §1.4/Phase 2 验收）：**10 万会话**规模下搜索 P95 < 300ms。
+/// 与上面的小规模用例分开：seed 100k 会话耗时数分钟，仅在发布前跑。
+/// 运行：`cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --nocapture`
+#[test]
+#[ignore = "10 万会话 seed 需数分钟，仅发布前验证"]
+fn large_scale_search_gate1() {
+    let dir = TempDir::new().expect("tempdir creation failed");
+    let repo = Repository::open(dir.path().join("bench-large.db")).expect("unexpected None");
+
+    // 20000 会话 × 5 消息 = 10 万消息；会话数按 Gate 1 的 100k 会话口径再乘 5 批
+    // （用 20k×5 批循环写满 100k 会话，避免单次内存峰值）
+    let start = std::time::Instant::now();
+    let mut total_msgs = 0usize;
+    const BATCHES: usize = 5;
+    for _ in 0..BATCHES {
+        let (_ms, msgs, _n) = seed_conversations(&repo, 20_000, 5);
+        total_msgs += msgs;
+    }
+    let seed_secs = start.elapsed().as_secs_f64();
+    let n_conv = repo
+        .list_conversations(None)
+        .expect("unexpected None")
+        .len();
+
+    let queries = [
+        "tauri",
+        "android",
+        "WorkManager",
+        "cargo build",
+        "错误处理",
+        "zzznomatch",
+    ];
+    let (p95, count) = bench_fts5_search(&repo, &queries, 10);
+
+    println!("┌──────────────────────────────────────────────────┐");
+    println!("│ Gate 1 大规模基准：100k 会话 FTS5 P95 < 300ms     │");
+    println!("├──────────────────────────────────────────────────┤");
+    println!("│ 会话数:   {n_conv:>10}                              ");
+    println!("│ 消息数:   {total_msgs:>10}                              ");
+    println!("│ seed 耗时: {seed_secs:>8.1} s                        ");
+    println!("│ 查询次数: {count:>10}                                ");
+    println!("│ P95 延迟: {p95:>10.1} ms                             ");
+    println!(
+        "│ 结果:     {}",
+        if p95 < 300.0 { "✓ PASS" } else { "✗ FAIL" }
+    );
+    println!("└──────────────────────────────────────────────────┘");
+
+    assert_eq!(n_conv, 100_000, "必须真达到 10 万会话规模");
+    assert!(p95 < 300.0, "Gate 1：P95 {p95:.1}ms 超过 300ms");
+}
