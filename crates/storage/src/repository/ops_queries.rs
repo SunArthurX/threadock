@@ -1547,10 +1547,7 @@ fn build_hourly_buckets(
 }
 
 /// 按月聚合：每月 × 工具的 calls 计数（用于月度趋势图）。
-fn build_tools_trend(
-    conn: &rusqlite::Connection,
-    cutoff_ms: i64,
-) -> StorageResult<Vec<ToolTrend>> {
+fn build_tools_trend(conn: &rusqlite::Connection, cutoff_ms: i64) -> StorageResult<Vec<ToolTrend>> {
     let mut stmt = conn.prepare(
         "SELECT strftime('%Y-%m', ts/1000,'unixepoch','localtime') AS m,
                 tool_name, COUNT(*)
@@ -1572,10 +1569,7 @@ fn build_tools_trend(
 }
 
 /// 按天 + 工具聚合：日级工具分布（caller 自己决定 cutoff，避免数据爆炸）。
-fn build_tool_daily(
-    conn: &rusqlite::Connection,
-    cutoff_ms: i64,
-) -> StorageResult<Vec<DailyTool>> {
+fn build_tool_daily(conn: &rusqlite::Connection, cutoff_ms: i64) -> StorageResult<Vec<DailyTool>> {
     let mut stmt = conn.prepare(
         "SELECT date(ts/1000,'unixepoch','localtime') AS d, tool_name, COUNT(*)
          FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
