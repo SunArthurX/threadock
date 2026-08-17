@@ -86,10 +86,7 @@ fn cases() -> Vec<Case> {
         c.filesystem_id = Some("inode=99123,dev=17".to_string());
         c
     };
-    let epsilon_case_variant = {
-        let mut c = SourceWorkspaceCandidate::new("epsilon app");
-        c
-    };
+    let epsilon_case_variant = SourceWorkspaceCandidate::new("epsilon app");
     let new_project_plain = SourceWorkspaceCandidate::new("brand-new-project");
     let similar_name_different_project = SourceWorkspaceCandidate::new("alpha-prime");
     let same_remote_family_different_repo = {

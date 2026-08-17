@@ -589,9 +589,11 @@ fn run_tantivy_search(
         None => Vec::new(),
     };
     let db_filter = repo.search_filter_conversation_ids(&parsed)?;
-    if parsed.workspace.is_some() && ws_ids.is_empty() {
-        println!("(no workspace matches '{}')", parsed.workspace.unwrap());
-        return Ok(());
+    if let Some(ws) = &parsed.workspace {
+        if ws_ids.is_empty() {
+            println!("(no workspace matches '{ws}')");
+            return Ok(());
+        }
     }
 
     let mut q = ch_search::SearchQuery::new(&query_str).with_workspace_ids(ws_ids);

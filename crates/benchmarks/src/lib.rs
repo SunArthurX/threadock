@@ -124,7 +124,7 @@ pub fn seed_bulk_fast(
         .expect("upsert failed");
     drop(repo);
 
-    let mut conn = rusqlite::Connection::open(db_path).expect("unexpected None");
+    let conn = rusqlite::Connection::open(db_path).expect("unexpected None");
     conn.pragma_update(None, "journal_mode", "WAL")
         .expect("pragma");
     conn.pragma_update(None, "synchronous", "NORMAL")

@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.0.0] - 2026-08-17
+
+首个正式版本。以执行计划 Phase 2（MVP，Gate 1）为验收基线，P0 发布工程 +
+P1 MVP 功能缺口 + P2 验收证据全部闭环。
+
+### Added
+- **搜索查询语法**（plan §13.2）：`provider:` `workspace:` `type:` `role:` `status:`
+  `file:` `model:` `after:` `before:` 前缀，FTS5 全量 SQL 过滤 + Tantivy 索引内过滤
+  （含纯过滤 AllQuery、多 workspace OR），双引擎三集成层（GUI/daemon/CLI）一致生效
+- **保存搜索**：V14 `saved_searches` 表，搜索框 ☆ 保存 → 下拉一键执行/删除
+- **Workspace 治理**（plan §4.3/P2-2）：手动合并（并入 + 治理审计 + 映射升 manual/1.0）、
+  拆分（会话多选 → 移到新 Workspace）、重命名、来源映射置信度列表；
+  设置页新增「Workspace 管理」分区（<0.8 低置信度警示徽标）
+- **原始视图 ↔ 统一视图**（plan P2-3）：会话详情一键查看 Raw Store 未标准化归档
+- **一键打开来源应用 / 恢复命令**（plan P2-3）：GUI 来源拉起应用；
+  claude-code / codex 生成 `claude --resume` / `codex resume` 命令并复制
+- **jieba 可插拔中文分词器**（plan §13.1）：`--features jieba` 启用（自实现
+  tantivy TokenStream 适配，词典全局单例），默认 N-gram 兜底；CI 独立 job 验证
+- **Release 流水线**：推 v* tag → 三平台 Tauri 安装包 + CLI 四平台二进制 + SHA256SUMS
+- **用户文档**：`docs/user-guide.md`（11 章用户指南）+ `docs/privacy.md`（隐私声明）
+- **Golden Fixture Kit**（plan §20.2）：`fixtures/` 脱敏样本集 + adapter golden tests
+- **Gate 1 大规模基准**：10 万会话 / 50 万消息 FTS5 P95 = **50.9ms**（红线 300ms），
+  报告留档 `docs/benchmark-report-v1.0.0.md`
+
+### Fixed
+- **resolver 误并缺陷**：候选与已知项都带结构化标识（remote/path/fsid）却全未命中时，
+  纯名称相同不再静默 AutoMerge，降级 NeedsConfirmation（合并准确率基准化时发现）
+- 版本三处不一致（workspace/Tauri/CHANGELOG）自 0.4.0 起统一
+
+### Tests
+- workspace 421（+42：query_syntax 18 / 语法集成 8 / saved-search 与 workspace 治理 6 /
+  golden 4 / 大规模基准 1 / jieba 1 等）+ Tauri 13 + 前端 344，全绿
+- ESLint 0 error / 0 warning（57 个历史 warning 清零：40+ 真修复 + 10 处带理由豁免）
+- 合并准确率：11 例标注样本 100%（错误 AutoMerge = 0）
+
+### 已知限制（发布说明）
+- 安装包**未签名**（macOS 右键打开 / Windows SmartScreen「仍要运行」；SHA256 校验）
+- 自动更新（Tauri Updater）未配置，规划 1.1
+- OpenCode Adapter、Daemon UDS IPC、Adapter 进程配额移至 1.1（v1.0 范围裁剪决策）
+
 ## [0.4.0] - 2026-08-17
 
 > 版本治理：此前 workspace（0.2.0）/ Tauri（0.1.0）/ CHANGELOG（0.3.0）三处版本不一致，自本版起统一。
