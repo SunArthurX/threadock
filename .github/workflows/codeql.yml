@@ -1,0 +1,53 @@
+# CodeQL 静态分析：每周一跑 + push/PR 触发
+# 配合 repo security tab 的 "Code scanning alerts" 面板查看结果。
+#
+# 启用：repo 是 public 时 CodeQL 免费；private repo 需要 GitHub Advanced Security。
+# 自动创建 alerts：默认 yes（在 security_and_analysis.code_scanning 里）。
+#
+# 调优：
+# - matrix language = [rust, javascript]：threadock 后端 Rust + 前端 TypeScript
+# - 不打 fail-build：只发 alerts，不卡 PR（fail-fast 下容易误伤）
+# - autobuild 让 CodeQL 自己 build 整个 workspace，不需要手写 build 命令
+
+name: CodeQL
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # 每周一 UTC 06:17（约北京时间 14:17）跑一次，避免和 CI/Dependabot 抢资源
+    - cron: '17 6 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['rust', 'javascript-typescript']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # rust 用 queries: security-and-quality（包含 unsafe 检查、SQL 注入等）
+          # js/ts 用默认 queries 即可
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

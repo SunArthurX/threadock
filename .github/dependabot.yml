@@ -1,0 +1,50 @@
+# Dependabot 配置：每周扫 Cargo / npm / GitHub Actions 依赖
+# 配合 repo setting `security_and_analysis.dependabot_security_updates=enabled`
+# 安全 CVE 也会自动开 PR（Dependabot security updates）。
+#
+# 调整项：
+# - group：把所有 patch/minor 升级合一个 PR，减少噪音（需要先在 GitHub UI 启用 group 功能）
+# - ignore: 不自动升 major（API breaking 风险）
+# - open-pull-requests-limit: 限制同时打开的 PR 数量
+
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Shanghai"
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 10
+    # 只升 patch/minor，major 等人工评估
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "npm"
+    directory: "/apps/desktop"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Shanghai"
+    commit-message:
+      prefix: "deps"
+    open-pull-requests-limit: 10
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Shanghai"
+    commit-message:
+      prefix: "ci"
+    open-pull-requests-limit: 5
