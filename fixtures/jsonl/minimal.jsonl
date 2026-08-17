@@ -1,0 +1,2 @@
+{"type":"message","role":"user","text":"ping"}
+{"type":"message","role":"assistant","text":"pong"}
