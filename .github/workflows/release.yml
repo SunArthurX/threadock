@@ -109,18 +109,19 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+      # 注：ch-adapter-jsonl 是纯库 crate（无独立二进制），不打进 CLI 包
       - name: Build CLI workspace binaries
-        run: cargo build --release --target ${{ matrix.target }} -p ch-cli -p ch-daemon -p ch-adapter-markdown -p ch-adapter-jsonl
+        run: cargo build --release --target ${{ matrix.target }} -p ch-cli -p ch-daemon -p ch-adapter-markdown
 
       - name: Archive (unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.archive }} ch ch-daemon ch-adapter-markdown ch-adapter-jsonl
+          tar czf ../../../${{ matrix.archive }} ch ch-daemon ch-adapter-markdown
       - name: Archive (windows)
         if: runner.os == 'Windows'
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/ch.exe, target/${{ matrix.target }}/release/ch-daemon.exe, target/${{ matrix.target }}/release/ch-adapter-markdown.exe, target/${{ matrix.target }}/release/ch-adapter-jsonl.exe -DestinationPath ${{ matrix.archive }}
+          Compress-Archive -Path target/${{ matrix.target }}/release/ch.exe, target/${{ matrix.target }}/release/ch-daemon.exe, target/${{ matrix.target }}/release/ch-adapter-markdown.exe -DestinationPath ${{ matrix.archive }}
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
