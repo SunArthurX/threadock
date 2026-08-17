@@ -110,12 +110,14 @@ pub fn percentile(data: &[f64], p: f64) -> f64 {
 /// 只用于把库灌到目标规模后测「搜索延迟」；导入吞吐请看 [`seed_conversations`]。
 ///
 /// `返回（seed` 秒数, 消息总数）。
+#[must_use]
 pub fn seed_bulk_fast(
     db_path: &std::path::Path,
     n_conversations: usize,
     messages_per_conv: usize,
 ) -> (f64, usize) {
-    // 先用 Repository 走 migration + 基础行（provider/workspace）
+    const CHUNK: usize = 5_000; // 每个事务的会话数
+                                // 先用 Repository 走 migration + 基础行（provider/workspace）
     let repo = ch_storage::Repository::open(db_path).expect("unexpected None");
     repo.upsert_provider(Provider::Generic)
         .expect("upsert failed");
@@ -133,10 +135,8 @@ pub fn seed_bulk_fast(
     let start = std::time::Instant::now();
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_millis() as i64);
     let mut total_msgs = 0usize;
-    const CHUNK: usize = 5_000; // 每个事务的会话数
 
     conn.execute("BEGIN", []).expect("tx");
     for i in 0..n_conversations {

@@ -53,6 +53,8 @@ fn key(id: &str) -> IdentityKey {
     k
 }
 
+/// 标注样本表（数据驱动，行数即样本数，不做人为拆分）
+#[allow(clippy::too_many_lines)]
 fn cases() -> Vec<Case> {
     let alpha_remote_ssh = {
         let mut c = SourceWorkspaceCandidate::new("alpha");
@@ -202,13 +204,11 @@ fn merge_accuracy_at_least_95_percent() {
         // - 期望新建而 NeedsConfirmation/CreateNew = 正确（不误并）
         let pass = match (&r, c.expect_merge_into) {
             (Resolution::AutoMerge(m), Some(expect)) => m.workspace_id == expect,
-            (Resolution::AutoMerge(_), None) => false,
+            (Resolution::AutoMerge(_), None) | (Resolution::CreateNew, Some(_)) => false,
             (Resolution::NeedsConfirmation { candidate, .. }, Some(expect)) => {
                 candidate.as_ref().is_some_and(|m| m.workspace_id == expect)
             }
-            (Resolution::NeedsConfirmation { .. }, None) => true,
-            (Resolution::CreateNew, None) => true,
-            (Resolution::CreateNew, Some(_)) => false,
+            (Resolution::NeedsConfirmation { .. } | Resolution::CreateNew, None) => true,
         };
         if let Resolution::AutoMerge(m) = &r {
             auto_merges += 1;
@@ -226,7 +226,7 @@ fn merge_accuracy_at_least_95_percent() {
         }
     }
     let accuracy = correct as f64 / total as f64;
-    println!("── Workspace 合并准确率（{} 例）─────────────────", total);
+    println!("── Workspace 合并准确率（{total} 例）─────────────────");
     println!(
         "  判定正确 {correct}/{total} = {:.1}% · AutoMerge {auto_merges} 次（其中错误 {wrong_auto_merges} 次）",
         accuracy * 100.0

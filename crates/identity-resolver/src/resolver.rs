@@ -234,6 +234,19 @@ pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> R
         }
     }
 
+    choose_resolution(
+        best,
+        name_candidate,
+        candidate_structural && name_candidate_structural,
+    )
+}
+
+/// 终局决策：结构化命中优先；否则看名称候选；冲突证据时禁止静默自动合并。
+fn choose_resolution(
+    best: Option<Match>,
+    name_candidate: Option<Match>,
+    structural_conflict: bool,
+) -> Resolution {
     match best {
         // 有高优先级命中（confidence >= 阈值）→ 自动归并
         Some(m) if m.confidence >= AUTO_CONFIRM_THRESHOLD => Resolution::AutoMerge(m),
@@ -250,10 +263,7 @@ pub fn resolve(candidate: &SourceWorkspaceCandidate, known: &[IdentityKey]) -> R
         None => match name_candidate {
             // 名称完全相同（confidence 1.0）→ 允许自动归并，
             // 除非双方都带结构化标识却全未命中（同名不同项目的冲突证据）
-            Some(m)
-                if m.confidence >= AUTO_CONFIRM_THRESHOLD
-                    && !(candidate_structural && name_candidate_structural) =>
-            {
+            Some(m) if m.confidence >= AUTO_CONFIRM_THRESHOLD && !structural_conflict => {
                 Resolution::AutoMerge(m)
             }
             // 名称相似但未达阈值 / 结构化证据冲突 → 需用户确认

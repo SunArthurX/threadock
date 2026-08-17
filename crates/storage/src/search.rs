@@ -157,52 +157,7 @@ pub(super) fn search(
         where_clauses.push("role = ?".to_string());
         args.push(role.into());
     }
-    // ── 以下过滤在 conversations / events 上做子查询（plan §13.2 全量语法）──
-    if let Some(after) = parsed.after_ms {
-        where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE updated_at >= ?)".to_string(),
-        );
-        args.push(after.into());
-    }
-    if let Some(before) = parsed.before_ms {
-        where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE updated_at <= ?)".to_string(),
-        );
-        args.push(before.into());
-    }
-    if let Some(model) = &parsed.model {
-        where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE model LIKE ?)".to_string(),
-        );
-        args.push(format!("%{model}%").into());
-    }
-    if let Some(file) = &parsed.file {
-        where_clauses.push(
-            "conversation_id IN (SELECT conversation_id FROM events \
-             WHERE summary LIKE ? OR payload_json LIKE ?)"
-                .to_string(),
-        );
-        args.push(format!("%{file}%").into());
-        args.push(format!("%{file}%").into());
-    }
-    match parsed.status.as_deref() {
-        Some("favorite") => where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE favorite = 1)".to_string(),
-        ),
-        Some("archived") => where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE is_archived = 1)".to_string(),
-        ),
-        Some("deleted") => where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations WHERE source_status = 'deleted')"
-                .to_string(),
-        ),
-        Some("active") => where_clauses.push(
-            "conversation_id IN (SELECT id FROM conversations \
-             WHERE source_status != 'deleted' AND is_archived = 0)"
-                .to_string(),
-        ),
-        _ => {}
-    }
+    push_conversation_level_filters(&parsed, &mut where_clauses, &mut args);
 
     let where_sql = if where_clauses.is_empty() {
         String::new()
@@ -262,6 +217,60 @@ pub(super) fn search(
 
 // 让 domain 的 FromStr 在本模块可见
 use std::str::FromStr as _;
+
+/// 语法过滤中需要查 conversations / events 的条件（plan §13.2 全量语法），
+/// 以子查询形式叠加到 WHERE。从 [`search`] 拆出以控制主函数行数。
+fn push_conversation_level_filters(
+    parsed: &ch_domain::query_syntax::ParsedQuery,
+    where_clauses: &mut Vec<String>,
+    args: &mut Vec<rusqlite::types::Value>,
+) {
+    if let Some(after) = parsed.after_ms {
+        where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE updated_at >= ?)".to_string(),
+        );
+        args.push(after.into());
+    }
+    if let Some(before) = parsed.before_ms {
+        where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE updated_at <= ?)".to_string(),
+        );
+        args.push(before.into());
+    }
+    if let Some(model) = &parsed.model {
+        where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE model LIKE ?)".to_string(),
+        );
+        args.push(format!("%{model}%").into());
+    }
+    if let Some(file) = &parsed.file {
+        where_clauses.push(
+            "conversation_id IN (SELECT conversation_id FROM events \
+             WHERE summary LIKE ? OR payload_json LIKE ?)"
+                .to_string(),
+        );
+        args.push(format!("%{file}%").into());
+        args.push(format!("%{file}%").into());
+    }
+    match parsed.status.as_deref() {
+        Some("favorite") => where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE favorite = 1)".to_string(),
+        ),
+        Some("archived") => where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE is_archived = 1)".to_string(),
+        ),
+        Some("deleted") => where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations WHERE source_status = 'deleted')"
+                .to_string(),
+        ),
+        Some("active") => where_clauses.push(
+            "conversation_id IN (SELECT id FROM conversations \
+             WHERE source_status != 'deleted' AND is_archived = 0)"
+                .to_string(),
+        ),
+        _ => {}
+    }
+}
 
 /// Tantivy 路径的数据库后过滤（plan §13.2 全量语法）。
 ///
