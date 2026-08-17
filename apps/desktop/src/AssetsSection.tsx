@@ -1,6 +1,6 @@
 // 资产 Section：资产清单（按 agent 分组+类型颜色）+ 自动化任务（完成折叠）
 // 增强：点击资产弹详情（路径/版本/说明）+ 风险资产标红 + 复制资产 ID
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { AssetRow, AutomationRow } from "./ops-types";
 import { usePager } from "./usePager";
 import { meta } from "./ops-types";
@@ -36,6 +36,7 @@ export function toggleAutomationWatch(key: string): Set<string> {
 export default function AssetsSection({ assets, automations, loading }: Props) {
   const [watch, setWatch] = useState<Set<string>>(loadAutomationWatch);
   const [detail, setDetail] = useState<AssetRow | null>(null);
+  const [assetQuery, setAssetQuery] = useState("");
   const isDone = (s: string | null) => s?.includes("completed") || s?.includes("finished") || s?.includes("idle");
   const activeAll = [...automations.filter((a) => !isDone(a.status))].sort(
     (a, b) => Number(watch.has(`${b.provider}:${b.name}`)) - Number(watch.has(`${a.provider}:${a.name}`)),
@@ -71,18 +72,38 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
     );
   };
 
+  const filteredAssets = useMemo(() => {
+    const q = assetQuery.trim().toLowerCase();
+    if (!q) return assets;
+    return assets.filter(
+      (a) =>
+        a.name.toLowerCase().includes(q) ||
+        (a.path?.toLowerCase().includes(q) ?? false) ||
+        (a.description?.toLowerCase().includes(q) ?? false),
+    );
+  }, [assets, assetQuery]);
+
   return (
     <>
       <div className="ops-card">
         <div className="ops-card-title">
-          🧩 资产清单（{assets.length}）
+          🧩 资产清单（{filteredAssets.length}{filteredAssets.length !== assets.length ? `/${assets.length}` : ""}）
           <span className="ops-card-sub">skills / plugins / 内置技能</span>
+          <input
+            className="settings-confirm-input"
+            style={{ marginLeft: "auto", width: 200, fontSize: 12 }}
+            placeholder="🔍 搜索资产名 / 路径 / 说明…"
+            value={assetQuery}
+            onChange={(e) => setAssetQuery(e.target.value)}
+          />
         </div>
-        {assets.length === 0 ? (
-          loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">后台同步中…</div>
+        {filteredAssets.length === 0 ? (
+          assets.length === 0
+            ? (loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">后台同步中…</div>)
+            : <div className="ops-table-empty">🔍 无匹配资产</div>
         ) : (
           Object.entries(
-            assets.reduce<Record<string, AssetRow[]>>((g, a) => {
+            filteredAssets.reduce<Record<string, AssetRow[]>>((g, a) => {
               (g[a.provider] = g[a.provider] || []).push(a);
               return g;
             }, {})
@@ -174,6 +195,15 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
                   <button className="kb-copy" onClick={() => copyAssetField("路径", detail.path ?? "")}>📋</button>
                 </div>
               )}
+              <div className="asset-detail-row">
+                <span className="asset-detail-label">说明</span>
+                <span style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
+                  {detail.description ?? "（无）"}
+                </span>
+                {detail.description && (
+                  <button className="kb-copy" onClick={() => copyAssetField("说明", detail.description ?? "")}>📋</button>
+                )}
+              </div>
               <div className="asset-detail-row">
                 <span className="asset-detail-label">Provider</span>
                 <span className={`badge source ${detail.provider}`}>{meta(detail.provider).label}</span>

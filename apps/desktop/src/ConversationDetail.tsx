@@ -1,12 +1,11 @@
 // 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制）
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { Message, EventDto, Conversation, COLLAPSE_THRESHOLD, sourceLabel, formatTime, eventTypeLabel } from "./types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
-import { splitCodeBlocks } from "./messageRender";
-import { highlightCode } from "./codeHighlight.tsx";
 import ScrollArea from "./ScrollArea";
 import { copyToClipboard } from "./clipboard";
+import MessageBlock from "./MessageBlock";
+import PrivateNoteSection from "./PrivateNoteSection";
 
 interface Props {
   conv: Conversation;
@@ -110,19 +109,46 @@ export default function ConversationDetail({
 
   // 计算匹配：返回在 messages 中（按 onlyUser 过滤后）的索引列表
   const visibleMsgs = onlyUser ? messages.filter((m) => m.role === "user") : messages;
-  const matches = useMemo(() => {
-    if (!search.trim()) return [] as number[];
+  // 时间线合并数组（消息 + 事件，按时间排序，截断 2000）—— 用于时间线模式搜索
+  const timelineItems = useMemo<Array<{ kind: "msg" | "event"; id: string; ts: number }>>(() => {
+    return [
+      ...visibleMsgs.map((m) => ({ kind: "msg" as const, id: m.id, ts: m.created_at_ms ?? 0 })),
+      ...events.map((e) => ({ kind: "event" as const, id: e.id, ts: e.created_at_ms ?? 0 })),
+    ].sort((a, b) => a.ts - b.ts).slice(0, 2000);
+  }, [visibleMsgs, events]);
+  // 匹配描述：消息模式下用 msgId；时间线模式下用 (kind,id) 二元组
+  type Match = { kind: "msg" | "event"; id: string; msgIdx?: number; tlIdx?: number };
+  const matches = useMemo<Match[]>(() => {
+    if (!search.trim()) return [];
     const lower = search.toLowerCase();
+    if (timelineMode) {
+      return timelineItems
+        .map((it, i): Match | null => {
+          if (it.kind === "msg") {
+            const m = messages.find((mm) => mm.id === it.id);
+            const text = m?.content_text ?? "";
+            return text.toLowerCase().includes(lower) ? { kind: "msg", id: it.id, tlIdx: i } : null;
+          }
+          const e = events.find((ee) => ee.id === it.id);
+          const text = e?.summary ?? "";
+          return text.toLowerCase().includes(lower) ? { kind: "event", id: it.id, tlIdx: i } : null;
+        })
+        .filter((m): m is Match => m !== null);
+    }
     return visibleMsgs
-      .map((m, i) => (m.content_text ?? "").toLowerCase().includes(lower) ? i : -1)
-      .filter((i) => i >= 0);
-  }, [visibleMsgs, search]);
+      .map((m, i): Match | null => (m.content_text ?? "").toLowerCase().includes(lower) ? { kind: "msg", id: m.id, msgIdx: i } : null)
+      .filter((m): m is Match => m !== null);
+  }, [visibleMsgs, events, timelineItems, search, timelineMode, messages]);
   // 切换 search / matches 时回正 idx
   useEffect(() => { setSearchIdx(0); }, [search, matches.length]);
-  const currentMatch = matches[searchIdx] ?? -1;
+  const currentMatch = matches[searchIdx];
 
-  const scrollToMessage = (idx: number) => {
-    const el = document.getElementById(`msg-${visibleMsgs[idx]?.id}`);
+  const scrollToMessage = (match: typeof currentMatch) => {
+    if (!match) return;
+    const sel = timelineMode
+      ? (match.kind === "msg" ? `#tl-msg-${match.id}` : `#tl-event-${match.id}`)
+      : `#msg-${match.id}`;
+    const el = document.querySelector(sel);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   };
   const nextMatch = () => {
@@ -164,101 +190,48 @@ export default function ConversationDetail({
   };
   /** 切分消息文本为「代码块 + 普通文本」段 —— 委托给 messageRender.splitCodeBlocks（独立可测）。 */
 
-/** 渲染消息内容：高亮搜索关键词 + 复制按钮 + 长消息折叠 + ```代码块``` 渲染。 */
-  const renderContent = (m: Message, idx: number) => {
-    const text = m.content_text ?? "(空)";
-    const isCollapsed = collapsedMsgs.has(m.id);
-    const isLong = text.length > COLLAPSE_THRESHOLD;
-    const isCurrentMatch = currentMatch === idx && search.trim();
-    // 高亮匹配片段（不区分大小写，保留原大小写）
-    const lower = search.trim().toLowerCase();
-    const highlight = (s: string, keyPrefix: string): ReactNode => {
-      if (!lower) return s;
-      const out: ReactNode[] = [];
-      const lowerS = s.toLowerCase();
-      let i = 0;
-      while (i < s.length) {
-        const hit = lowerS.indexOf(lower, i);
-        if (hit < 0) { out.push(s.slice(i)); break; }
-        if (hit > i) out.push(s.slice(i, hit));
-        out.push(<mark key={`${keyPrefix}-${hit}`} className="msg-search-hit">{s.slice(hit, hit + lower.length)}</mark>);
-        i = hit + lower.length;
-      }
-      return out.length === 1 && typeof out[0] === "string" ? out[0] : <>{out}</>;
-    };
-    const segs = splitCodeBlocks(text);
-    return (
-      <>
-        <div className="content">
-          {segs.map((seg, si) =>
-            seg.kind === "code" ? (
-              <div key={`cb-${si}`} className="msg-code-block">
-                <div className="msg-code-head">
-                  <span className="msg-code-lang">{seg.lang || "text"}</span>
-                  <button
-                    className="msg-action-btn"
-                    onClick={() => copyMessage(seg.content)}
-                    title="复制代码块"
-                  >📋</button>
-                </div>
-                <pre className="msg-code-pre"><code>{highlightCode(seg.content, seg.lang)}</code></pre>
-              </div>
-            ) : (
-              <span key={`tx-${si}`}>{highlight(seg.content, `tx-${si}`)}</span>
-            ),
-          )}
-        </div>
-        <div className="msg-actions">
-          {isLong && (
-            <button className="msg-action-btn" onClick={() => onToggleCollapse(m.id)}>
-              {isCollapsed ? `展开剩余 ${text.length - COLLAPSE_THRESHOLD} 字 ▾` : "收起 ▴"}
-            </button>
-          )}
-          <button className="msg-action-btn" onClick={() => copyMessage(text)} title="复制本条消息">📋</button>
-          <button className="msg-action-btn" onClick={() => copyMsgId(m.id)} title="复制 message_id（排错）">🆔</button>
-        </div>
-        {isCurrentMatch && <div className="msg-match-marker" aria-hidden>🎯</div>}
-      </>
-    );
-  };
 
   const renderTimeline = () => (
     <div className="conversation-timeline">
-      {(() => {
-        interface TI { kind: "msg" | "event"; ts: number; data: unknown }
-        // 按时间归并排序（旧实现直接拼接不排序、事件无时间、截断 100）
-        const visibleMsgs = onlyUser ? messages.filter((m) => m.role === "user") : messages;
-        const items: TI[] = [
-          ...visibleMsgs.map((m) => ({ kind: "msg" as const, ts: m.created_at_ms ?? 0, data: m })),
-          ...events.map((e) => ({ kind: "event" as const, ts: e.created_at_ms ?? 0, data: e })),
-        ].sort((a, b) => a.ts - b.ts);
-        return items.slice(0, 2000).map((item, i) => {
-          if (item.kind === "msg") {
-            const m = item.data as Message;
-            return (
-              <div key={i} className={`tl-item tl-${m.role}`}>
-                <div className="tl-dot" />
-                <div className="tl-time">{m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
-                <div className="tl-content">
-                  <div className="tl-role">{m.role === "user" ? "👤 用户" : m.role === "assistant" ? "🤖 助手" : m.role}</div>
-                  <div className="tl-text">{(m.content_text ?? "").slice(0, 200)}</div>
-                </div>
-              </div>
-            );
-          }
-          const e = item.data as EventDto;
+      {timelineItems.map((item) => {
+        const isCurrent = !!search.trim() && currentMatch?.kind === item.kind && currentMatch?.id === item.id;
+        if (item.kind === "msg") {
+          const m = messages.find((mm) => mm.id === item.id);
+          if (!m) return null;
           return (
-            <div key={i} className="tl-item tl-event">
-              <div className="tl-dot tl-dot-event" />
-              <div className="tl-time">{e.created_at_ms ? new Date(e.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+            <div
+              key={`m-${m.id}`}
+              id={`tl-msg-${m.id}`}
+              className={`tl-item tl-${m.role} ${isCurrent ? "current-match" : ""}`}
+            >
+              <div className="tl-dot" />
+              <div className="tl-time">{m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
               <div className="tl-content">
-                <div className="tl-role tl-role-event">⚡ {eventTypeLabel(e.event_type)}</div>
-                {e.summary && <div className="tl-text mono" style={{ fontSize: 10 }}>{e.summary.slice(0, 80)}</div>}
+                <div className="tl-role">{m.role === "user" ? "👤 用户" : m.role === "assistant" ? "🤖 助手" : m.role}</div>
+                <div className="tl-text">{(m.content_text ?? "").slice(0, 200)}</div>
+                {isCurrent && <span className="msg-match-marker" aria-hidden>🎯</span>}
               </div>
             </div>
           );
-        });
-      })()}
+        }
+        const e = events.find((ee) => ee.id === item.id);
+        if (!e) return null;
+        return (
+          <div
+            key={`e-${e.id}`}
+            id={`tl-event-${e.id}`}
+            className={`tl-item tl-event ${isCurrent ? "current-match" : ""}`}
+          >
+            <div className="tl-dot tl-dot-event" />
+            <div className="tl-time">{e.created_at_ms ? new Date(e.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
+            <div className="tl-content">
+              <div className="tl-role tl-role-event">⚡ {eventTypeLabel(e.event_type)}</div>
+              {e.summary && <div className="tl-text mono" style={{ fontSize: 10 }}>{e.summary.slice(0, 80)}</div>}
+              {isCurrent && <span className="msg-match-marker" aria-hidden>🎯</span>}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 
@@ -409,20 +382,31 @@ export default function ConversationDetail({
       )}
       {/* 私有笔记（不参与搜索/导出/统计；折叠默认开，保存自动） */}
       {onNoteChange && (
-        <PrivateNoteSection note={note ?? ""} onChange={onNoteChange} />
+        <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
       {timelineMode && !loading && renderTimeline()}
-      {!timelineMode && visibleMsgs.map((m, idx) => (
-        <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${currentMatch === idx ? "current-match" : ""}`}>
+      {!timelineMode && visibleMsgs.map((m) => {
+        const isMatch = !!search.trim() && currentMatch?.kind === "msg" && currentMatch?.id === m.id;
+        return (
+        <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
           <div className="role">
             <span className={`avatar ${m.role}`}>{m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}</span>
             <span className="role-label">{m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : m.role}</span>
             {m.created_at_ms && <span className="msg-time">{formatTime(m.created_at_ms)}</span>}
           </div>
-          {renderContent(m, idx)}
+          <MessageBlock
+            message={m}
+            isMatch={isMatch}
+            searchQuery={search}
+            isCollapsed={collapsedMsgs.has(m.id)}
+            onToggleCollapse={onToggleCollapse}
+            onCopyMessage={copyMessage}
+            onCopyMsgId={copyMsgId}
+          />
         </div>
-      ))}
+        );
+      })}
       {events.length > 0 && (<>
         <div className="events-header">执行事件 ({events.length})</div>
         {events.map((e) => (
@@ -436,47 +420,5 @@ export default function ConversationDetail({
         <button className="jump-bottom-btn" onClick={jumpToBottom} title="滚到底部">↓</button>
       )}
     </div>
-  );
-}
-
-/** 私有笔记 section：折叠默认开，autosave on blur（不参与搜索/导出/统计）。 */
-function PrivateNoteSection({ note, onChange }: { note: string; onChange: (n: string | null) => void }) {
-  const [text, setText] = useState(note);
-  // 受控但允许本地编辑（保存前不写回父级，autosave 触发）
-  useEffect(() => { setText(note); }, [note]);
-  const [saved, setSaved] = useState<"idle" | "saving" | "saved">("idle");
-  const save = async (next: string) => {
-    const trimmed = next.trim();
-    if (trimmed === (note ?? "").trim()) { setSaved("idle"); return; }
-    setSaved("saving");
-    try { await onChange(trimmed || null); setSaved("saved"); window.setTimeout(() => setSaved("idle"), 1500); }
-    catch { setSaved("idle"); }
-  };
-  const placeholder = "📝 私人笔记（不参与搜索/导出/统计）";
-  return (
-    <details className="private-note" open={!!note}>
-      <summary>
-        📝 私人笔记 {saved === "saving" && <span className="private-note-status">保存中…</span>}
-        {saved === "saved" && <span className="private-note-status saved">✓ 已保存</span>}
-      </summary>
-      <textarea
-        className="private-note-text"
-        value={text}
-        placeholder={placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onBlur={(e) => save(e.target.value)}
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-            e.preventDefault();
-            save(text);
-            (e.target as HTMLTextAreaElement).blur();
-          }
-        }}
-        rows={3}
-      />
-      <div className="private-note-hint">
-        ⌘+Enter 保存 · 失焦自动保存 · 清空内容后失焦 = 删除笔记
-      </div>
-    </details>
   );
 }

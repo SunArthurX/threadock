@@ -34,7 +34,9 @@ export function calcProjection(
 }
 
 /** 本周 vs 上周成本对比。
- *  - timeseries 至少 7 天（无上次则 lastWeek=0，对比显示「+∞%」不可靠 → 返回 null）
+ *  - timeseries 至少 7 天（无上次则 lastWeek=0，对比显示「+∞%」不可靠 → 返回 null）。
+ *  - P1-B4: 阈值由 14 天降到 7 天；当只有 7 天数据时（lastWeek=0）需要 UI 给出
+ *    "1 周数据 vs 前 1 周（数据较少）" 提示（避免误读为「本周 vs 无」）。
  *  - costRatio: 每 1M tokens 单价（默认 4 美元，对 Claude/Sonnet 中位粗估，仅作对比展示）
  *  - 返回 {thisWeek, lastWeek, costDelta, tokenDelta, costPct, tokenPct} */
 export function weekOverWeek(
@@ -46,7 +48,7 @@ export function weekOverWeek(
   costDelta: number; tokenDelta: number;
   costPct: number; tokenPct: number;
 } | null {
-  if (!timeseries || timeseries.length < 14) return null;
+  if (!timeseries || timeseries.length < 7) return null;
   const last = timeseries.slice(-7);
   const prev = timeseries.slice(-14, -7);
   const t = (arr: typeof timeseries) => arr.reduce((s, x) => s + (x.total_tokens || 0), 0);
@@ -78,11 +80,25 @@ interface Props {
   onBudgetInput: (field: "tokens" | "cost", value: string) => void;
   onSaveBudget: () => void;
   onRecalc: () => void;
+  /**
+   * 按目录维度跳转会话列表（行点击触发）。
+   * TODO: chat view 暂无 dir 维度的原生 filter；目前由 OpsView 退化为
+   *       setView("chat") + setSearchQuery("dir:<value>")，后续应替换为
+   *       原生 filter 状态。
+   */
+  onJumpByDir?: (dir: string) => void;
+  /**
+   * 按模型维度跳转会话列表（行点击触发）。
+   * TODO: chat view 暂无 model 维度的原生 filter；目前由 OpsView 退化为
+   *       setView("chat") + setSearchQuery("model:<value>")，后续应替换为
+   *       原生 filter 状态。
+   */
+  onJumpByModel?: (model: string) => void;
 }
 
 export default function CostSection({
   dirCosts, byProvider, byModel, timeseries, budget, summary, monthUsage, budgetInput, loading,
-  onBudgetInput, onSaveBudget, onRecalc,
+  onBudgetInput, onSaveBudget, onRecalc, onJumpByDir, onJumpByModel,
 }: Props) {
   const tokenPct = budget.monthly_token_limit && monthUsage ? Math.min((monthUsage.tokens / budget.monthly_token_limit) * 100, 999) : null;
   const costPct = budget.monthly_cost_limit && monthUsage ? Math.min((monthUsage.cost_usd / budget.monthly_cost_limit) * 100, 999) : null;
@@ -185,14 +201,15 @@ export default function CostSection({
           loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
         ) : (
           <table className="ops-table">
-            <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th></tr></thead>
+            <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th>{onJumpByDir && <th></th>}</tr></thead>
             <tbody>
               {dirCosts.map((d, i) => (
-                <tr key={i}>
+                <tr key={i} className={onJumpByDir ? "ops-row-clickable" : ""} onClick={onJumpByDir ? () => onJumpByDir(d.dir) : undefined}>
                   <td className="mono" title={d.dir}>{d.dir.split("/").slice(-2).join("/")}</td>
                   <td>{formatTokens(d.tokens)}</td>
                   <td>{formatCost(d.cost_usd)}</td>
                   <td>{d.requests.toLocaleString()}</td>
+                  {onJumpByDir && <td><button className="finding-btn" title={`查看目录 ${d.dir} 的会话`} onClick={(e) => { e.stopPropagation(); onJumpByDir(d.dir); }}>→ 列表</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -240,16 +257,17 @@ export default function CostSection({
           <div className="ops-card-title">按模型成本 Top10</div>
           <div className="ops-table-wrap">
             <table className="ops-table">
-              <thead><tr><th>模型</th><th>Provider</th><th>成本</th><th>Tokens</th><th>请求</th><th>错误</th></tr></thead>
+              <thead><tr><th>模型</th><th>Provider</th><th>成本</th><th>Tokens</th><th>请求</th><th>错误</th>{onJumpByModel && <th></th>}</tr></thead>
               <tbody>
                 {byModel.slice(0, 10).map((m, i) => (
-                  <tr key={i}>
+                  <tr key={i} className={onJumpByModel ? "ops-row-clickable" : ""} onClick={onJumpByModel ? () => onJumpByModel(m.model) : undefined}>
                     <td className="mono" title={m.model}>{m.model.length > 28 ? m.model.slice(0, 28) + "…" : m.model}</td>
                     <td><span className={`badge source ${m.provider_id}`}>{meta(m.provider_id).label}</span></td>
                     <td><b>{formatCost(m.cost_usd)}</b></td>
                     <td>{formatTokens(m.input_tokens + m.output_tokens)}</td>
                     <td>{m.requests.toLocaleString()}</td>
                     <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
+                    {onJumpByModel && <td><button className="finding-btn" title={`查看模型 ${m.model} 的会话`} onClick={(e) => { e.stopPropagation(); onJumpByModel(m.model); }}>→ 列表</button></td>}
                   </tr>
                 ))}
               </tbody>
@@ -263,7 +281,9 @@ export default function CostSection({
         <div className="ops-card">
           <div className="ops-card-title">
             📅 本周 vs 上周
-            <span className="ops-card-sub">成本按 ${4}/M tokens 中位估算</span>
+            <span className="ops-card-sub" title={timeseries && timeseries.length < 14 ? "1 周数据 vs 前 1 周（数据较少）" : "成本按 $4/M tokens 中位估算"}>
+              {timeseries && timeseries.length < 14 ? "1 周数据 vs 前 1 周（数据较少）" : "成本按 $4/M tokens 中位估算"}
+            </span>
           </div>
           <div className="wow-grid">
             <div className="wow-col">

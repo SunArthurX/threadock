@@ -33,6 +33,19 @@ interface Props {
 }
 
 export default function SecuritySection(p: Props) {
+  // P1-B2: 相对时间格式化（与 App.tsx FreshnessBadge 风格保持一致）
+  const relativeTime = (input: string | number | null | undefined): string => {
+    if (input == null) return "—";
+    const ts = typeof input === "number" ? input : Date.parse(input);
+    if (!Number.isFinite(ts)) return "—";
+    const ageMs = Date.now() - ts;
+    if (ageMs < 0) return "刚刚";
+    const min = Math.floor(ageMs / 60_000);
+    if (min < 1) return "刚刚";
+    if (min < 60) return `${min} 分钟前`;
+    if (min < 1440) return `${Math.floor(min / 60)} 小时前`;
+    return `${Math.floor(min / 1440)} 天前`;
+  };
   const findings = (p.audit?.findings ?? []).filter((f) => p.auditKindFilter === "all" || f.kind === p.auditKindFilter);
   const anomalyPager = usePager(p.anomalies, 20);
   const riskyPager = usePager(p.risky, 20);
@@ -102,15 +115,37 @@ export default function SecuritySection(p: Props) {
       <div className="ops-card">
         <div className="ops-card-title">
           🛡 安全审计
-          {p.audit && (
-            <span className="audit-stats">
-              扫描 {p.audit.scanned_messages.toLocaleString()} 消息 / {p.audit.scanned_tool_calls.toLocaleString()} 命令 ·
-              <b className="text-danger"> 高危 {p.audit.high}</b> · <b>中危 {p.audit.medium}</b>
-            </span>
-          )}
+          {p.audit ? (
+            <>
+              <span className="audit-stats">
+                扫描 {p.audit.scanned_messages.toLocaleString()} 消息 / {p.audit.scanned_tool_calls.toLocaleString()} 命令 ·
+                <b className="text-danger"> 高危 {p.audit.high}</b> · <b>中危 {p.audit.medium}</b>
+              </span>
+              {/* P1-B2: 审计新鲜度（与 OpsView 同步按钮风格一致） */}
+              <span className="ops-freshness" style={{ marginLeft: "auto" }} title={`扫描时间：${p.audit.generated_at}`}>· 扫描于 {relativeTime(p.audit.generated_at)}</span>
+            </>
+          ) : null}
         </div>
+        {/* P2-4: 首次访问引导 — 突出主操作 + 背景说明（无 audit 时显示） */}
+        {p.audit == null && !p.auditing && (
+          <div className="audit-hero">
+            <div className="audit-hero-icon" aria-hidden>🔍</div>
+            <div className="audit-hero-body">
+              <div className="audit-hero-title">首次访问？点此开始全库扫描</div>
+              <div className="audit-hero-sub">
+                扫描器会遍历本地所有已归档会话，识别敏感信息（密钥、token、邮箱）
+                与危险命令（rm -rf、sudo、chmod 777 等），并按正则规则匹配。
+                通常 1–2 分钟内完成；扫描结果保存到本地，不会上传到任何服务器。
+              </div>
+              <div className="audit-hero-cta">
+                <button className="action-btn primary" onClick={p.onScan}>▶ 开始全库扫描</button>
+              </div>
+            </div>
+          </div>
+        )}
         <div className="audit-toolbar">
-          <button className="action-btn" onClick={p.onScan}>
+          {/* P2-4: audit==null 时此按钮降级为次要（hero 才是主操作） */}
+          <button className={`action-btn ${p.audit == null && !p.auditing ? "" : "primary"}`} onClick={p.onScan}>
             {p.auditing ? "扫描中…" : p.audit ? "↻ 重新扫描" : "▶ 开始全库扫描"}
           </button>
           {p.audit && p.audit.findings.length > 0 && (<>

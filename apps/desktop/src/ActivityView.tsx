@@ -236,6 +236,16 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [dayConvs, setDayConvs] = useState<Conversation[] | null>(null);
   const [dayConvsLoading, setDayConvsLoading] = useState(false);
+  // P1-C5: 日历年度选择 — "all"=跟 days 走（90/180/365）；具体年份强制 span Jan 1 ~ Dec 31
+  const [year, setYear] = useState<number | "all">("all");
+  // P1-C3: todayKey 跨午夜过期 → 用 state + 1 分钟 interval 自动刷新
+  //   1) 跨日后「今天」高亮 / 「连续活跃」streak / day-detail badge 都立即切换
+  //   2) 组件 unmount 时 clearInterval 避免内存泄漏
+  const computeTodayKey = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const [todayKey, setTodayKey] = useState<string>(computeTodayKey);
   // 热力图维度：all=全工具 / 单一工具
   const [toolFilter, setToolFilter] = useState<string | "all">("all");
   // 工具维度下，热力值 = 当天该工具的调用数；非选中工具的热力 = 全工具值（保留对比）
@@ -261,20 +271,53 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
     })();
   }, [days]);
 
+  // P1-C5: 年度选择 — 把 days 强制覆盖为「从今天到目标年 1/1」的天数，覆盖整年
+  useEffect(() => {
+    if (year === "all") return;
+    const yearStart = new Date(`${year}-01-01T00:00:00`).getTime();
+    const span = Math.max(1, Math.ceil((Date.now() - yearStart) / 86_400_000));
+    setDays(span);
+  }, [year]);
+
+  // P1-C5: 年度选项 = 数据中出现的年份 ∪ 当前年（倒序）
+  const currentYear = new Date().getFullYear();
+  const yearOptions = useMemo<number[]>(() => {
+    const ys = new Set<number>([currentYear]);
+    for (const c of stats?.heatmap ?? []) {
+      const y = Number(c.day.slice(0, 4));
+      if (!Number.isNaN(y)) ys.add(y);
+    }
+    return [...ys].sort((a, b) => b - a);
+  }, [stats, currentYear]);
+
+  // P1-C5: 渲染层只展示目标年的 cells（grid 用）— 今日/7/30 窗口不受影响
+  const visibleHeatmap = useMemo(() => {
+    if (year === "all") return filteredHeatmap;
+    const yPrefix = `${year}-`;
+    return filteredHeatmap.filter((c) => c.day.startsWith(yPrefix));
+  }, [filteredHeatmap, year]);
+
   const heatmapCells = filteredHeatmap;
-  const totalCalls = heatmapCells.reduce((a, b) => a + b.calls, 0);
-  const activeDays = heatmapCells.filter((c) => c.calls > 0).length;
+  // P1-C5: 年度视图下，统计卡累计值用年份范围内的 cells；今日/7/30 仍走原始 cells
+  const cumulativeCells = visibleHeatmap;
+  const totalCalls = cumulativeCells.reduce((a, b) => a + b.calls, 0);
+  const activeDays = cumulativeCells.filter((c) => c.calls > 0).length;
   const avgPerDay = activeDays > 0 ? Math.round(totalCalls / activeDays) : 0;
   const peak = (stats?.hourly ?? []).reduce((a, b) => (b.calls > (a?.calls ?? -1) ? b : a), { hour: 0, calls: 0 });
-  const grid = buildHeatGrid(heatmapCells);
+  const grid = buildHeatGrid(visibleHeatmap);
   const labelAt = new Map(grid.labels.map((l) => [l.col, l.label]));
-  const rangeText = useMemo(() => daysToRange(days), [days]);
+  // P1-C5: 年份选择时显示「2024-01-01 ~ 2024-12-31」而不是 days 推算的 today 范围
+  const rangeText = useMemo(() => {
+    if (year === "all") return daysToRange(days);
+    return `${year}-01-01 ~ ${year}-12-31`;
+  }, [days, year]);
 
   // 近期窗口（今日/7 天/30 天）
   const todayStats = useMemo(() => dayWindowSum(heatmapCells, 1), [heatmapCells]);
   const week7Stats = useMemo(() => dayWindowSum(heatmapCells, 7), [heatmapCells]);
   const month30Stats = useMemo(() => dayWindowSum(heatmapCells, 30), [heatmapCells]);
-  const streak = useMemo(() => calcStreak(heatmapCells), [heatmapCells]);
+  // P1-C3: todayKey 变化时（跨午夜后）也重算 streak，否则「连续活跃」会卡在昨天的计数
+  const streak = useMemo(() => calcStreak(heatmapCells), [heatmapCells, todayKey]);
 
   // 工具 Top 10 列表（带月份切分）
   // 防御性：过滤掉 month 为空/非字符串的脏行
@@ -403,10 +446,11 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDay]);
 
-  const todayKey = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
+  // P1-C3: todayKey 每分钟自动刷新，跨午夜后立刻更新「今天」标记
+  useEffect(() => {
+    const id = setInterval(() => setTodayKey(computeTodayKey()), 60_000);
+    return () => clearInterval(id);
+  }, []);
 
   return (
     <div className="activity-page">
@@ -428,8 +472,34 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
           )}
           <div className="ops-range" style={{ marginLeft: stats ? 8 : "auto" }}>
             {([90, 180, 365] as const).map((d) => (
-              <button key={d} className={`filter-chip ${days === d ? "active" : ""}`} onClick={() => setDays(d)}>
+              <button
+                key={d}
+                className={`filter-chip ${days === d ? "active" : ""}`}
+                onClick={() => setDays(d)}
+                disabled={year !== "all"}
+                title={year !== "all" ? "切换到「全部」后可选" : "按天数查看"}
+              >
                 {d === 365 ? "1 年" : `${d} 天`}
+              </button>
+            ))}
+            {/* P1-C5: 日历年度选择 — 数据中出现的年份 ∪ 当前年；"全部" 切回 90/180/365 */}
+            <span style={{ width: 1, height: 16, background: "var(--border-default, rgba(148,163,199,0.18))", margin: "0 2px" }} />
+            <button
+              key="all-years"
+              className={`filter-chip ${year === "all" ? "active" : ""}`}
+              onClick={() => { setYear("all"); setDays(365); }}
+              title="按右上 90/180/365 天查看"
+            >
+              全部
+            </button>
+            {yearOptions.map((y) => (
+              <button
+                key={y}
+                className={`filter-chip ${year === y ? "active" : ""}`}
+                onClick={() => setYear(y)}
+                title={`只看 ${y} 年（Jan 1 ~ Dec 31）`}
+              >
+                {y}
               </button>
             ))}
           </div>
@@ -494,6 +564,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                 monthLabels={labelAt}
                 selectedDay={selectedDay}
                 todayKey={todayKey}
+                year={year}
                 onClickCell={(day) => setSelectedDay(selectedDay === day ? null : day)}
               />
             </div>

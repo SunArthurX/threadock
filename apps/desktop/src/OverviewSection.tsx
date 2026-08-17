@@ -21,6 +21,10 @@ interface Props {
   onWeeklyReport: () => void;
   /** 打开报告中心（应用内查看 + 历史）。 */
   onOpenReports?: () => void;
+  /** 跳转到指定 provider/session（用于 Token 浪费行「→ 会话」按钮）。 */
+  onJump?: (provider: string, sessionId: string) => void;
+  /** KPI 卡片点击跳转回调（按 label 区分目标视图）。 */
+  onKpiJump?: (kpi: "requests" | "dangerous" | "cost" | "tokens") => void;
 }
 
 
@@ -59,7 +63,12 @@ export function setAllHidden(show: boolean): Set<string> {
 export default function OverviewSection({
   overview, byProvider, byModel, timeseries, topTools, cacheStats,
   health, latency, waste, benchmark, cacheTrend, loading, onWeeklyReport, onOpenReports,
+  onJump, onKpiJump,
 }: Props) {
+  const kpiClick = (key: "requests" | "dangerous" | "cost" | "tokens") => () => onKpiJump?.(key);
+  const jumpBtn = (provider: string, sessionId: string) => onJump ? (
+    <button className="finding-btn" title="跳转到对应会话" onClick={() => onJump(provider, sessionId)}>→ 会话</button>
+  ) : null;
   const [hidden, setHidden] = useState<Set<string>>(loadHiddenCards);
   /** 卡片标题右侧的显隐切换（点标题栏切换，随 localStorage 持久化）。 */
   const vis = (key: CardKey) => (
@@ -76,10 +85,10 @@ export default function OverviewSection({
   const barData = timeseries.map((d) => ({ label: d.day, value: d.total_tokens }));
   const maxToolCalls = Math.max(...topTools.map((t) => t.calls), 1);
   const kpis = overview ? [
-    { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话` },
-    { label: "总 Tokens", num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}` },
-    { label: "估算成本", num: overview.cost_usd, fmt: formatCost, sub: "按定价" },
-    { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 工具`, danger: overview.destructive_calls > 0 },
+    { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话`, onClick: kpiClick("requests") },
+    { label: "总 Tokens", num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}`, onClick: kpiClick("tokens") },
+    { label: "估算成本", num: overview.cost_usd, fmt: formatCost, sub: "按定价", onClick: kpiClick("cost") },
+    { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 工具`, danger: overview.destructive_calls > 0, onClick: kpiClick("dangerous") },
   ] : [];
 
   return (
@@ -245,6 +254,7 @@ export default function OverviewSection({
                 <span className="risk-flag medium">{w.ratio.toFixed(0)}×</span>
                 <span className="mono" style={{ fontSize: 10.5 }}>in {formatTokens(w.input_tokens)} / out {formatTokens(w.output_tokens)}</span>
                 <span className="legend-req">缓存 {formatTokens(w.cache_read)}</span>
+                {jumpBtn(w.provider, w.session_id)}
               </div>
             ))}
           </div>

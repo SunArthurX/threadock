@@ -42,6 +42,8 @@ interface Props {
   selectedDay?: string | null;
   /** 今天的 day（高亮边框）。 */
   todayKey?: string | null;
+  /** P1-C5: 当前展示的年份（用于将来 month label 增强，目前仅供调试/扩展用）。 */
+  year?: number | "all";
   /** 点击 cell。 */
   onClickCell?: (day: string) => void;
 }
@@ -70,7 +72,7 @@ interface HoverInfo {
 }
 
 /** GitHub 风格热力图：7 行（Mon-Sun）× N 列。完全独立样式，inline + aspect-ratio 兜底。 */
-function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, onClickCell }: Props) {
+function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _year, onClickCell }: Props) {
   const [hover, setHover] = useState<HoverInfo | null>(null);
 
   return (
@@ -158,6 +160,45 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, onClickC
                         border: "1px solid rgba(255,255,255,0.06)",
                         borderRadius: 2,
                         background: "transparent",
+                        ['flexShrink' as any]: 0,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  );
+                }
+                // P2-5: 空 cell（day 存在但 calls=0 / sessions=0）允许点击 — 由父组件决定行为
+                //   （通常 setSelectedDay(... ? null : day) 会让空 cell 起到"清空选中"的作用）
+                if (cell.calls === 0 && cell.sessions === 0) {
+                  return (
+                    <div
+                      key={ri}
+                      data-testid="heatmap-cell"
+                      onClick={() => onClickCell?.(cell.day)}
+                      onMouseEnter={(e) => {
+                        setHover({ cell, x: e.clientX, y: e.clientY });
+                        (e.currentTarget as HTMLElement).style.transform = "scale(1.6)";
+                        (e.currentTarget as HTMLElement).style.boxShadow = "0 0 0 1.5px #4f8cff, 0 2px 6px rgba(0,0,0,0.4)";
+                        (e.currentTarget as HTMLElement).style.zIndex = "2";
+                      }}
+                      onMouseMove={(e) => setHover((h) => (h ? { ...h, x: e.clientX, y: e.clientY } : null))}
+                      onMouseLeave={(e) => {
+                        setHover(null);
+                        (e.currentTarget as HTMLElement).style.transform = "";
+                        (e.currentTarget as HTMLElement).style.boxShadow = "";
+                        (e.currentTarget as HTMLElement).style.zIndex = "";
+                      }}
+                      style={{
+                        display: "block",
+                        width: CELL,
+                        height: CELL,
+                        aspectRatio: "1 / 1",
+                        border: selectedDay === cell.day
+                          ? "1.5px solid #fbbf24"
+                          : "1px solid rgba(255,255,255,0.06)",
+                        borderRadius: 2,
+                        background: "transparent",
+                        cursor: "pointer",
+                        transition: "transform 0.1s, box-shadow 0.1s",
                         ['flexShrink' as any]: 0,
                         boxSizing: "border-box",
                       }}
@@ -265,9 +306,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, onClickC
             </>
           ) : (
             <div style={{ color: "var(--text-muted, #5d6880)", fontSize: 11 }}>
-              {cols[0]?.cells.find((c) => c)?.day
-                ? `${hover.cell === null ? "无数据" : ""}`
-                : "无数据"}
+              无数据
               <span style={{ marginLeft: 6, opacity: 0.7 }}>(空格 / 未来日期)</span>
             </div>
           )}

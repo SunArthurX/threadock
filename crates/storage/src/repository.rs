@@ -1505,6 +1505,26 @@ impl Repository {
         Ok(v)
     }
 
+    /// 列出库中实际存在的 provider 集合（未删除会话的去重 provider 名）。
+    /// 用于前端过滤栏「仅显示有数据的来源」，避免对未安装的来源展示空 chip。
+    /// 比全表 list_conversations 轻量：只走 DISTINCT + 索引列。
+    pub fn list_active_providers(&self) -> StorageResult<Vec<String>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT p.name
+             FROM conversations c
+             JOIN providers p ON p.id = c.provider_id
+             WHERE c.source_status != 'deleted'
+             ORDER BY p.name",
+        )?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut v = Vec::new();
+        for r in rows {
+            v.push(r?);
+        }
+        Ok(v)
+    }
+
     // ── 知识提取持久化（plan §13.5）──────────────────────────────────────
 
     // ── 删除（plan §11.4 删除语义 / §3 用户可完全删除）──────────────────

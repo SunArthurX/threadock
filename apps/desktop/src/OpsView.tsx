@@ -15,9 +15,20 @@ type Props = {
   onJumpToConversation?: (provider: string, sessionId: string, messageId: string | null) => void;
   /** 打开报告中心（概览页「报告中心」入口）。 */
   onOpenReports?: () => void;
+  /**
+   * 切换主视图（如 KPI 卡片点击后跳转到 chat/security/cost 等）。
+   * 由 App.tsx 注入；未注入时 KPI 点击不响应（保持可访问性优雅降级）。
+   */
+  onChangeView?: (v: "chat" | "overview" | "cost" | "security" | "assets") => void;
+  /**
+   * 设置 chat 视图的搜索 query（用于按 dir/model 过滤的退化方案）。
+   * TODO: chat view 暂无原生 dir/model filter；目前通过 search query 退化，
+   *       后续应替换为专用 filter 状态。
+   */
+  onSetSearchQuery?: (q: string) => void;
 };
 
-export default function OpsView({ section, onJumpToConversation, onOpenReports }: Props) {
+export default function OpsView({ section, onJumpToConversation, onOpenReports, onChangeView, onSetSearchQuery }: Props) {
   const [range, setRange] = useState<number | null>(30);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -52,6 +63,8 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
   const [auditKindFilter, setAuditKindFilter] = useState<"all" | "sensitive" | "dangerous_command">("all");
   const [expandedRisk, setExpandedRisk] = useState<Set<string>>(new Set());
   const [newPolicy, setNewPolicy] = useState({ name: "", pattern: "", kind: "dangerous_command", severity: "high" });
+  /** 上次成功同步指标的时间戳（ms）。null = 尚未同步 / 同步失败。 */
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
 
   const loadSection = async (sec: Section) => {
     setLoading(true);
@@ -71,10 +84,13 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
       p(invoke<TokenWaste[]>("ops_token_waste", { days: range, n: 10 }).then(setWaste), "waste");
       p(invoke<AgentBenchmark[]>("ops_agent_benchmark", { days: range }).then(setBenchmark), "bench");
     } else if (sec === "cost") {
-      p(invoke<OpsOverview>("ops_overview", { days: range }).then(setOverview), "overview");
+      // P1-B1: 之前 byProvider 永远不会在 cost 分支加载，导致按 Agent 成本分布柱状图空。
+      p(invoke<ProviderUsage[]>("ops_by_provider", { days: range }).then(setByProvider), "prov");
       p(invoke<DirCost[]>("ops_cost_by_dir", { days: range, n: 10 }).then(setDirCosts), "dirCost");
       p(invoke<ModelUsage[]>("ops_by_model", { days: range }).then(setByModel), "model");
-      p(invoke<DailyUsage[]>("ops_timeseries", { days: 14 }).then(setTimeseries), "ts");
+      // P1-B4: 之前写死 14 天；当 range=7 时后续周对比数据被截断。
+      // 改为 max(range, 14) 保证周对比可用；range 越大越完整（不受 14 限制）。
+      p(invoke<DailyUsage[]>("ops_timeseries", { days: Math.max(range ?? 90, 14) }).then(setTimeseries), "ts");
     } else if (sec === "security") {
       p(invoke<RiskyCall[]>("ops_risky_calls", { days: range, n: 50 }).then(setRisky), "risky");
       p(invoke<AnomalyRow[]>("ops_anomalies", { days: range }).then(setAnomalies), "anomaly");
@@ -107,10 +123,14 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
     if (section === "security") tasks.push(loadPolicies());
     (async () => {
       setSyncing(true);
+      let syncOk = false;
       try {
         await invoke("ops_sync", { force: false });
+        syncOk = true;
         await Promise.all([invoke("assets_sync", { force: false }).catch(() => { /* 后台任务失败不打断 UI */ }), invoke("automations_sync", { force: false }).catch(() => { /* 后台任务失败不打断 UI */ })]);
       } catch { /* 失败静默：后台/可选操作 */ }
+      // P1-B2: 同步成功后才更新时间戳；失败保留旧值或 null
+      if (syncOk) setLastSyncedAt(Date.now());
       setSyncing(false);
       loadSection(section);
       if (section === "cost") loadBudget();
@@ -174,10 +194,18 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
             ))}
           </div>
         )}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={async () => { setSyncing(true); try { await invoke("ops_sync", { force: true }); } catch { /* 失败静默：后台/可选操作 */ } setSyncing(false); loadSection(section); }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={async () => { setSyncing(true); let ok = false; try { await invoke("ops_sync", { force: true }); ok = true; } catch { /* 失败静默：后台/可选操作 */ } if (ok) setLastSyncedAt(Date.now()); setSyncing(false); loadSection(section); }}>
             {syncing ? "⟳ 同步指标中…" : "↻ 同步指标"}
           </button>
+          {/* P1-B2: 数据新鲜度指示 — 超过 1 小时变 stale（黄） */}
+          {lastSyncedAt != null && (() => {
+            const ageMs = Date.now() - lastSyncedAt;
+            const stale = ageMs > 60 * 60_000;
+            const min = Math.floor(ageMs / 60_000);
+            const label = min < 1 ? "刚刚" : min < 60 ? `${min} 分钟前` : min < 1440 ? `${Math.floor(min / 60)} 小时前` : `${Math.floor(min / 1440)} 天前`;
+            return <span className={`ops-freshness ${stale ? "stale" : "fresh"}`} title={`上次同步：${new Date(lastSyncedAt).toLocaleString("zh-CN")}`}>· 同步于 {label}</span>;
+          })()}
         </div>
       </div>
       {recalcMsg && <div className="recalc-msg">{recalcMsg}</div>}
@@ -186,7 +214,15 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
         <OverviewSection cacheTrend={cacheTrend} overview={overview} byProvider={byProvider} byModel={byModel}
           timeseries={timeseries} topTools={topTools} cacheStats={cacheStats}
           health={health} latency={latency} waste={waste} benchmark={benchmark}
-          loading={loading} onWeeklyReport={weeklyReport} onOpenReports={onOpenReports} />
+          loading={loading} onWeeklyReport={weeklyReport} onOpenReports={onOpenReports}
+          onJump={(provider, sessionId) => onJumpToConversation?.(provider, sessionId, null)}
+          onKpiJump={(kpi) => {
+            // P0-4: KPI 卡片点击跳转目标视图
+            if (kpi === "requests") onChangeView?.("chat");
+            else if (kpi === "dangerous") onChangeView?.("security");
+            else if (kpi === "cost") onChangeView?.("cost");
+            else if (kpi === "tokens") onChangeView?.("overview");
+          }} />
       )}
       {section === "cost" && (
         <CostSection summary={usageSummary} dirCosts={dirCosts} byProvider={byProvider}
@@ -194,7 +230,11 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports }
           budget={budget} monthUsage={monthUsage}
           budgetInput={budgetInput} loading={loading}
           onBudgetInput={(f, v) => setBudgetInput((p) => ({ ...p, [f]: v }))}
-          onSaveBudget={saveBudget} onRecalc={recalcCost} />
+          onSaveBudget={saveBudget} onRecalc={recalcCost}
+          // P1-A1: 按目录/模型跳转 → 退化到 chat view + search query
+          // TODO: chat view 暂无原生 dir/model filter，后续应替换为专用 filter
+          onJumpByDir={(dir) => { onChangeView?.("chat"); onSetSearchQuery?.(`dir:${dir}`); }}
+          onJumpByModel={(model) => { onChangeView?.("chat"); onSetSearchQuery?.(`model:${model}`); }} />
       )}
       {section === "security" && (
         <SecuritySection anomalies={anomalies} audit={audit} auditing={auditing}

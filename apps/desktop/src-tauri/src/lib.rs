@@ -136,6 +136,7 @@ pub fn run() {
             delete_conversation,
             restore_conversation,
             hard_delete_conversation,
+            available_providers,
             rebuild_search_index,
             sources_new_count,
             ops_usage_summary,

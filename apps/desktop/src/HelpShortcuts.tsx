@@ -30,6 +30,7 @@ const GROUPS: Group[] = [
       { keys: `${MOD} 6`, desc: "跳到「知识库」", scope: "global" },
       { keys: `${MOD} 7`, desc: "跳到「活动」", scope: "global" },
       { keys: `${MOD} 8`, desc: "跳到「项目」", scope: "global" },
+      { keys: `${MOD} R`, desc: "手动刷新（重新拉取会话 + 指标）", scope: "global" },
       { keys: "Esc", desc: "关闭弹窗 / 取消选择", scope: "global" },
     ],
   },

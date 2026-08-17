@@ -200,8 +200,11 @@ pub(crate) async fn knowledge_base_list(
 
     let mut todos: Vec<serde_json::Value> = Vec::new();
     let mut decisions: Vec<serde_json::Value> = Vec::new();
-    let mut commands: std::collections::HashMap<String, i64> = Default::default();
-    let mut files: std::collections::HashMap<String, i64> = Default::default();
+    let mut errors: Vec<serde_json::Value> = Vec::new();
+    let mut summaries: Vec<serde_json::Value> = Vec::new();
+    // (count, last_conversation_id) —— 记最近一次出现该 cmd/file 的会话以便跳转
+    let mut commands: std::collections::HashMap<String, (i64, String)> = Default::default();
+    let mut files: std::collections::HashMap<String, (i64, String)> = Default::default();
     let mut extracted = 0u64;
 
     for c in &convs {
@@ -212,6 +215,20 @@ pub(crate) async fn knowledge_base_list(
         let Ok(v) = serde_json::from_str::<serde_json::Value>(&rec.result_json) else {
             continue;
         };
+        // 摘要（P1-B3 新增 6 类之一）
+        if summaries.len() < 200 {
+            if let Some(s) = v.get("summary").and_then(|x| x.as_str()) {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    summaries.push(serde_json::json!({
+                        "summary": trimmed,
+                        "conversation_id": c.id,
+                        "title": title_of(&c.id),
+                        "message_id": "",
+                    }));
+                }
+            }
+        }
         for d in v
             .get("decisions")
             .and_then(|x| x.as_array())
@@ -219,10 +236,17 @@ pub(crate) async fn knowledge_base_list(
             .unwrap_or_default()
         {
             if decisions.len() < 200 {
+                let mid = d
+                    .get("source_message_ids")
+                    .and_then(|x| x.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
                 decisions.push(serde_json::json!({
                     "text": d.get("decision").and_then(|x| x.as_str()).unwrap_or(""),
                     "conversation_id": c.id,
                     "title": title_of(&c.id),
+                    "message_id": mid,
                 }));
             }
         }
@@ -233,10 +257,38 @@ pub(crate) async fn knowledge_base_list(
             .unwrap_or_default()
         {
             if todos.len() < 300 {
+                let mid = t
+                    .get("source_message_ids")
+                    .and_then(|x| x.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
                 todos.push(serde_json::json!({
                     "text": t.get("text").and_then(|x| x.as_str()).unwrap_or(""),
                     "conversation_id": c.id,
                     "title": title_of(&c.id),
+                    "message_id": mid,
+                }));
+            }
+        }
+        for e in v
+            .get("errors")
+            .and_then(|x| x.as_array())
+            .map(|a| a.as_slice())
+            .unwrap_or_default()
+        {
+            if errors.len() < 200 {
+                let mid = e
+                    .get("source_message_ids")
+                    .and_then(|x| x.as_array())
+                    .and_then(|a| a.first())
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("");
+                errors.push(serde_json::json!({
+                    "error": e.get("error").and_then(|x| x.as_str()).unwrap_or(""),
+                    "conversation_id": c.id,
+                    "title": title_of(&c.id),
+                    "message_id": mid,
                 }));
             }
         }
@@ -247,7 +299,9 @@ pub(crate) async fn knowledge_base_list(
             .unwrap_or_default()
         {
             if let Some(s) = cmd.as_str() {
-                *commands.entry(s.to_string()).or_insert(0) += 1;
+                let entry = commands.entry(s.to_string()).or_insert((0, String::new()));
+                entry.0 += 1;
+                entry.1 = c.id.clone();
             }
         }
         for f in v
@@ -257,14 +311,22 @@ pub(crate) async fn knowledge_base_list(
             .unwrap_or_default()
         {
             if let Some(s) = f.get("path").and_then(|x| x.as_str()) {
-                *files.entry(s.to_string()).or_insert(0) += 1;
+                let entry = files.entry(s.to_string()).or_insert((0, String::new()));
+                entry.0 += 1;
+                entry.1 = c.id.clone();
             }
         }
     }
 
     let mut top_commands: Vec<serde_json::Value> = commands
         .into_iter()
-        .map(|(cmd, n)| serde_json::json!({ "cmd": cmd, "count": n }))
+        .map(|(cmd, (n, cid))| {
+            serde_json::json!({
+                "cmd": cmd,
+                "count": n,
+                "last_conversation_id": cid,
+            })
+        })
         .collect();
     top_commands.sort_by(|a, b| {
         b.get("count")
@@ -275,7 +337,13 @@ pub(crate) async fn knowledge_base_list(
 
     let mut top_files: Vec<serde_json::Value> = files
         .into_iter()
-        .map(|(path, n)| serde_json::json!({ "path": path, "count": n }))
+        .map(|(path, (n, cid))| {
+            serde_json::json!({
+                "path": path,
+                "count": n,
+                "last_conversation_id": cid,
+            })
+        })
         .collect();
     top_files.sort_by(|a, b| {
         b.get("count")
@@ -291,14 +359,61 @@ pub(crate) async fn knowledge_base_list(
         .and_then(|v| v.parse().ok())
         .unwrap_or(0);
 
+    // P1-E5：pending = 未提取的会话；versions = 每会话当前版本号
+    let mut pending: Vec<serde_json::Value> = Vec::new();
+    let mut versions: Vec<serde_json::Value> = Vec::new();
+    for c in &convs {
+        if repo
+            .get_knowledge(&c.id)
+            .map_err(|e| storage_err(e))?
+            .is_none()
+        {
+            let updated = ch_storage::timestamp::to_millis(c.updated_at).unwrap_or(0);
+            let provider_str = serde_json::to_value(&c.provider)
+                .ok()
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| format!("{:?}", c.provider));
+            pending.push(serde_json::json!({
+                "id": c.id,
+                "title": c.effective_title(),
+                "updated_at_ms": updated,
+                "provider": provider_str,
+            }));
+        } else if let Ok(Some(rec)) = repo.get_knowledge(&c.id) {
+            versions.push(serde_json::json!({
+                "conversation_id": c.id,
+                "title": c.effective_title(),
+                "version": rec.version,
+                "extractor": rec.extractor,
+                "extracted_at": ch_storage::timestamp::to_millis(Some(rec.updated_at)).unwrap_or(0),
+            }));
+        }
+    }
+    pending.sort_by(|a, b| {
+        b.get("updated_at_ms")
+            .and_then(|v| v.as_i64())
+            .cmp(&a.get("updated_at_ms").and_then(|v| v.as_i64()))
+    });
+    pending.truncate(50);
+    versions.sort_by(|a, b| {
+        b.get("extracted_at")
+            .and_then(|v| v.as_i64())
+            .cmp(&a.get("extracted_at").and_then(|v| v.as_i64()))
+    });
+    versions.truncate(50);
+
     Ok(serde_json::json!({
         "extracted": extracted,
         "total_conversations": convs.len(),
         "last_extract_ms": last_ms,
         "todos": todos,
         "decisions": decisions,
+        "errors": errors,
+        "summaries": summaries,
         "top_commands": top_commands,
         "top_files": top_files,
+        "pending": pending,
+        "versions": versions,
     }))
 }
 

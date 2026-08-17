@@ -57,7 +57,20 @@ export function projectsToCsv(projects: ProjectRow[]): string {
   return "\uFEFF" + [head, ...rows].join("\n");
 }
 
-export default function ProjectsView({ onJumpToConversation }: { onJumpToConversation?: (cid: string) => void } = {}) {
+/**
+ * @param onJumpToConversation 跳转到指定会话（由 App.tsx 注入）
+ * @param onJumpToChat 跳转到 chat 视图并按 source_dir 过滤（由 App.tsx 注入）。
+ *                     用于项目卡会话列表的"查看全部"链接。
+ *                     P1-A5: 旧版静默截断 10 条 → 现在可点击跳到 chat 全量。
+ *                     Cluster 1 (App.tsx) 需在 ProjectsView 调用处补充此 prop 的实现。
+ */
+export default function ProjectsView({
+  onJumpToConversation,
+  onJumpToChat,
+}: {
+  onJumpToConversation?: (cid: string) => void;
+  onJumpToChat?: (dir: string) => void;
+} = {}) {
   const [projects, setProjects] = useState<ProjectRow[] | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("cost");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -225,7 +238,28 @@ export default function ProjectsView({ onJumpToConversation }: { onJumpToConvers
                   </div>
                 ))}
                 {dirConvs && dirConvs.length > 10 && (
-                  <div className="project-conv-empty">还有 {dirConvs.length - 10} 条未展示（去 chat 页查看完整列表）</div>
+                  <div
+                    className="project-conv-more-link"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // P1-A5: 把截断提示变成可点击跳转：调用 onJumpToChat（App.tsx 注入）
+                      // 跳到 chat 视图并按 source_dir 过滤；无回调时退化为不可点的提示文本。
+                      if (onJumpToChat) onJumpToChat(p.dir);
+                      else showToast(`请在 App.tsx 注入 onJumpToChat 回调以启用「查看全部 ${dirConvs.length} 条」`, "info", 5000);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (onJumpToChat) onJumpToChat(p.dir);
+                      }
+                    }}
+                    title="跳转到 chat 视图并按此项目目录过滤"
+                  >
+                    在 Chat 中查看全部 {dirConvs.length} 条 →
+                  </div>
                 )}
               </div>
             )}

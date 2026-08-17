@@ -225,6 +225,37 @@ export default function SettingsView({
           </section>
 
           <section className="settings-section">
+            <h3>显示偏好</h3>
+            <div className="settings-row">
+              <span>数字格式</span>
+              <div className="settings-segment">
+                <button className={numberFormat === "raw" ? "active" : ""} onClick={() => onNumberFormatChange("raw")}>1,234,567</button>
+                <button className={numberFormat === "k" ? "active" : ""} onClick={() => onNumberFormatChange("k")}>1.2M</button>
+                <button className={numberFormat === "wan" ? "active" : ""} onClick={() => onNumberFormatChange("wan")}>123.4万</button>
+                <button className={numberFormat === "yi" ? "active" : ""} onClick={() => onNumberFormatChange("yi")}>1.2B / 万</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>货币</span>
+              <div className="settings-segment">
+                <button className={currency === "USD" ? "active" : ""} onClick={() => onCurrencyChange("USD")}>$ USD</button>
+                <button className={currency === "CNY" ? "active" : ""} onClick={() => onCurrencyChange("CNY")}>¥ CNY (1 USD ≈ 7.2)</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>时间显示</span>
+              <div className="settings-segment">
+                <button className={dateFormat === "relative" ? "active" : ""} onClick={() => onDateFormatChange("relative")}>3 分钟前</button>
+                <button className={dateFormat === "absolute" ? "active" : ""} onClick={() => onDateFormatChange("absolute")}>2026-08-12 14:23</button>
+                <button className={dateFormat === "iso" ? "active" : ""} onClick={() => onDateFormatChange("iso")}>ISO</button>
+              </div>
+            </div>
+            <div className="settings-hint">
+              偏好仅影响展示与导出列宽，不影响后端存储；换算 1 USD ≈ 7.2 CNY 后续可接实时汇率 API 替换。
+            </div>
+          </section>
+
+          <section className="settings-section">
             <h3>同步</h3>
             <div className="settings-row">
               <span>自动增量同步</span>
@@ -368,37 +399,6 @@ export default function SettingsView({
             onReapplyImportedPrefs={onReapplyImportedPrefs}
           />
 
-          <section className="settings-section">
-            <h3>显示偏好</h3>
-            <div className="settings-row">
-              <span>数字格式</span>
-              <div className="settings-segment">
-                <button className={numberFormat === "raw" ? "active" : ""} onClick={() => onNumberFormatChange("raw")}>1,234,567</button>
-                <button className={numberFormat === "k" ? "active" : ""} onClick={() => onNumberFormatChange("k")}>1.2M</button>
-                <button className={numberFormat === "wan" ? "active" : ""} onClick={() => onNumberFormatChange("wan")}>123.4万</button>
-                <button className={numberFormat === "yi" ? "active" : ""} onClick={() => onNumberFormatChange("yi")}>1.2B / 万</button>
-              </div>
-            </div>
-            <div className="settings-row">
-              <span>货币</span>
-              <div className="settings-segment">
-                <button className={currency === "USD" ? "active" : ""} onClick={() => onCurrencyChange("USD")}>$ USD</button>
-                <button className={currency === "CNY" ? "active" : ""} onClick={() => onCurrencyChange("CNY")}>¥ CNY (1 USD ≈ 7.2)</button>
-              </div>
-            </div>
-            <div className="settings-row">
-              <span>时间显示</span>
-              <div className="settings-segment">
-                <button className={dateFormat === "relative" ? "active" : ""} onClick={() => onDateFormatChange("relative")}>3 分钟前</button>
-                <button className={dateFormat === "absolute" ? "active" : ""} onClick={() => onDateFormatChange("absolute")}>2026-08-12 14:23</button>
-                <button className={dateFormat === "iso" ? "active" : ""} onClick={() => onDateFormatChange("iso")}>ISO</button>
-              </div>
-            </div>
-            <div className="settings-hint">
-              偏好仅影响展示与导出列宽，不影响后端存储；换算 1 USD ≈ 7.2 CNY 后续可接实时汇率 API 替换。
-            </div>
-          </section>
-
           <section className="settings-section danger">
             <h3>按时间重置（并重新刷入）</h3>
             <div className="settings-hint">
@@ -438,7 +438,12 @@ export default function SettingsView({
                 onChange={(e) => setConfirmText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doReset()}
               />
-              <button className="reset-confirm-btn" disabled={!canReset} onClick={doReset}>
+              <button
+                className="reset-confirm-btn"
+                disabled={!canReset || resetting}
+                onClick={doReset}
+                style={resetting ? { cursor: "not-allowed" } : undefined}
+              >
                 {resetting ? "重置并重新刷入中…" : `重置并重新刷入 ${resetDate || ""} 之后的数据`}
               </button>
               <MiniProgress p={mini} />

@@ -11,6 +11,11 @@ export interface BudgetBarProps {
   projectedTokens: number | null;
   costLimit: number | null;
   tokenLimit: number | null;
+  /**
+   * P2-3: 预算条点击回调（用于超限时引导跳转到成本页）。
+   * 仅在 state 为 "warn" / "over" 时建议传入；未传则 bar 不可点。
+   */
+  onClick?: () => void;
 }
 
 /** 预算状态：ok / warning（外推超限）/ over（已超限）。 */
@@ -34,12 +39,20 @@ export default function BudgetBar(props: BudgetBarProps) {
   }
   const state = budgetState(props);
   const pct = costLimit && costLimit > 0 ? Math.min(100, (costSoFar / costLimit) * 100) : 0;
+  // P2-3: 仅在 warn/over 时把 bar 渲染为可点击（避免误触）
+  const interactive = !!props.onClick && (state === "warning" || state === "over");
+  const titleText = projectedCost != null && costLimit
+    ? `${interactive ? "点击跳转到成本页 · " : ""}当月 ${formatCost(costSoFar)} / 预算 ${formatCost(costLimit)} · 外推月底 ${formatCost(projectedCost)}`
+    : `${interactive ? "点击跳转到成本页 · " : ""}当月 ${formatTokens(tokensSoFar)} tokens`;
   return (
-    <div className={`budget-bar ${state}`} title={
-      projectedCost != null && costLimit
-        ? `当月 ${formatCost(costSoFar)} / 预算 ${formatCost(costLimit)} · 外推月底 ${formatCost(projectedCost)}`
-        : `当月 ${formatTokens(tokensSoFar)} tokens`
-    }>
+    <div
+      className={`budget-bar ${state} ${interactive ? "clickable" : ""}`}
+      title={titleText}
+      onClick={interactive ? props.onClick : undefined}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); props.onClick?.(); } } : undefined}
+    >
       <div className="budget-bar-fill" style={{ width: `${pct}%` }} />
       <span className="budget-bar-label">
         {state === "over" ? "⚠ " : state === "warning" ? "◔ " : ""}

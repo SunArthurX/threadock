@@ -1,5 +1,5 @@
 // 全站 Command Palette：⌘K / Ctrl+K 唤起
-// 支持：页面跳转、跳到指定会话、跳到知识条目、跳到活动页指定日期
+// 支持：页面跳转、跳到指定会话、跳到知识条目、跳到活动页指定日期、内置动作
 import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
@@ -19,14 +19,66 @@ const PAGES: { key: Page; icon: string; label: string; hint: string }[] = [
   { key: "projects", icon: "📁", label: "项目", hint: "按 source_dir 归并" },
 ];
 
+// 内置动作：触发外部副作用（开关弹窗 / 跑同步 / 切主题等），由 App 层通过 onAction 实际处理。
+// P1-E3：⌘K 现在不只跳页，也能执行动作。
+export type CommandActionId =
+  | "open_settings"
+  | "trigger_sync"
+  | "toggle_theme"
+  | "show_shortcuts"
+  | "open_reports"
+  | "show_changelog";
+
+const ACTIONS: { id: CommandActionId; icon: string; label: string; hint: string }[] = [
+  { id: "open_settings", icon: "⚙", label: "打开设置", hint: "主题 / 同步 / 预算 / 重置" },
+  { id: "trigger_sync", icon: "⟳", label: "触发同步", hint: "立即从来源拉取最新会话" },
+  { id: "toggle_theme", icon: "🌓", label: "切换主题 深/浅", hint: "深色 ⇄ 浅色" },
+  { id: "show_shortcuts", icon: "?", label: "显示快捷键", hint: "列出所有全局快捷键" },
+  { id: "open_reports", icon: "📄", label: "打开周报中心", hint: "历史周报列表" },
+  { id: "show_changelog", icon: "📝", label: "查看更新日志", hint: "本版本的变更说明" },
+];
+
+// 列表项的判别联合（P1-E3）
+type Command =
+  | { kind: "page"; page: typeof PAGES[number] }
+  | { kind: "action"; action: typeof ACTIONS[number] }
+  | { kind: "conv"; conv: Conversation }
+  | { kind: "reuse"; hit: {
+      message_id: string;
+      conversation_id: string;
+      title: string | null;
+      user_title: string | null;
+      model: string | null;
+      provider_name: string;
+      snippet: string;
+      body: string;
+      cost_usd: number;
+    } };
+
 export interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
   onJumpPage: (p: Page) => void;
-  onJumpConversation?: (cid: string) => void;
+  onJumpConversation?: (cid: string, mid?: string) => void;
+  /** 触发内置动作（设置 / 同步 / 切主题 等）。由 App 层实现副作用。 */
+  onAction?: (action: CommandActionId) => void;
 }
 
-export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }: CommandPaletteProps) {
+const RECENT_KEY = "ch-cmd-recent";
+const RECENT_MAX = 10;
+
+function loadRecent(): string[] {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[]; }
+  catch { return []; }
+}
+function pushRecent(q: string) {
+  const trimmed = q.trim();
+  if (!trimmed) return;
+  const next = [trimmed, ...loadRecent().filter((x) => x !== trimmed)].slice(0, RECENT_MAX);
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* 静默 */ }
+}
+
+export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, onAction }: CommandPaletteProps) {
   const [q, setQ] = useState("");
   const [convs, setConvs] = useState<Conversation[]>([]);
   // Prompt 复用推荐：相似历史 user 消息 + 当时 cost
@@ -105,21 +157,28 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     return () => window.clearTimeout(t);
   }, [q]);
 
-  const items = useMemo(() => {
+  // 候选列表：page / action / conv / reuse（P1-E3 命令判别联合）
+  const items = useMemo<Command[]>(() => {
     const lower = q.trim().toLowerCase();
     const ql = lower;
-    const matchedPages = PAGES.filter(
+    const matchedPages: Command[] = PAGES.filter(
       (p) => !ql || p.label.toLowerCase().includes(ql) || p.hint.toLowerCase().includes(ql) || p.key.toLowerCase().includes(ql),
-    ).map((p) => ({ kind: "page" as const, page: p }));
-    const matchedConvs = ql
+    ).map((p) => ({ kind: "page", page: p }));
+    const matchedActions: Command[] = ql
+      ? ACTIONS.filter(
+          (a) => a.label.toLowerCase().includes(ql) || a.hint.toLowerCase().includes(ql),
+        ).map((a) => ({ kind: "action", action: a }))
+      : [];
+    const matchedConvs: Command[] = ql
       ? convs.filter((c) =>
           (c.title ?? "").toLowerCase().includes(ql) ||
           (c.user_title ?? "").toLowerCase().includes(ql) ||
           (c.provider ?? "").toLowerCase().includes(ql),
-        ).slice(0, 15).map((c) => ({ kind: "conv" as const, conv: c }))
-      : convs.slice(0, 8).map((c) => ({ kind: "conv" as const, conv: c }));
-    return { matchedPages, matchedConvs, total: matchedPages.length + matchedConvs.length };
-  }, [q, convs]);
+        ).slice(0, 15).map((c) => ({ kind: "conv", conv: c }))
+      : convs.slice(0, 8).map((c) => ({ kind: "conv", conv: c }));
+    const matchedReuse: Command[] = promptReuse.map((h) => ({ kind: "reuse", hit: h }));
+    return [...matchedPages, ...matchedActions, ...matchedConvs, ...matchedReuse];
+  }, [q, convs, promptReuse]);
 
   // 键盘上下选择
   useEffect(() => {
@@ -127,7 +186,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setActive((a) => Math.min(a + 1, items.total - 1));
+        setActive((a) => Math.min(a + 1, items.length - 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setActive((a) => Math.max(0, a - 1));
@@ -140,35 +199,40 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
     return () => window.removeEventListener("keydown", onKey);
   }, [open, items, active, onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Prompt 复用 item 在列表里按 (page, conv, reuse) 顺序排，索引分段计算
+  // commit 顺序：page → action → conv → reuse（与 items 顺序保持一致）
   const commitActive = () => {
-    const pageCount = items.matchedPages.length;
-    const convCount = items.matchedConvs.length;
-    if (active < pageCount) {
-      const pick = items.matchedPages[active];
-      onJumpPage(pick.page.key);
-      onClose();
-    } else if (active < pageCount + convCount) {
-      const pick = items.matchedConvs[active - pageCount];
-      if (onJumpConversation) {
-        onJumpConversation(pick.conv.id);
+    const pick = items[active];
+    if (!pick) return;
+    // 记一次最近查询（哪怕只是 Enter 触发的也记下来）
+    if (q.trim()) pushRecent(q);
+    switch (pick.kind) {
+      case "page":
+        onJumpPage(pick.page.key);
         onClose();
-      } else {
-        onJumpPage("chat");
+        return;
+      case "action":
+        if (onAction) onAction(pick.action.id);
         onClose();
-      }
-    } else {
-      const idx = active - pageCount - convCount;
-      const pick = promptReuse[idx];
-      if (pick && onJumpConversation) {
-        onJumpConversation(pick.conversation_id);
-        onClose();
-      }
+        return;
+      case "conv":
+        if (onJumpConversation) {
+          onJumpConversation(pick.conv.id);
+          onClose();
+        } else {
+          onJumpPage("chat");
+          onClose();
+        }
+        return;
+      case "reuse":
+        if (onJumpConversation) {
+          onJumpConversation(pick.hit.conversation_id, pick.hit.message_id);
+          onClose();
+        }
+        return;
     }
   };
 
   if (!open) return null;
-  const all = [...items.matchedPages, ...items.matchedConvs, ...promptReuse];
   return (
     <div className="cmd-overlay" onClick={onClose}>
       <div className="cmd-modal" onClick={(e) => e.stopPropagation()}>
@@ -183,10 +247,11 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
           />
         </div>
         <ScrollArea className="cmd-list">
-          {items.matchedPages.length > 0 && (
+          {/* 页面组 */}
+          {items.some((i) => i.kind === "page") && (
             <div className="cmd-group">
               <div className="cmd-group-title">页面</div>
-              {items.matchedPages.map((it, i) => (
+              {items.map((it, i) => it.kind === "page" ? (
                 <div
                   key={`p-${it.page.key}`}
                   className={`cmd-row ${active === i ? "active" : ""}`}
@@ -197,70 +262,85 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation }
                   <span className="cmd-row-label">{it.page.label}</span>
                   <span className="cmd-row-hint">{it.page.hint}</span>
                 </div>
-              ))}
+              ) : null)}
             </div>
           )}
-          {items.matchedConvs.length > 0 && (
+          {/* 动作组（P1-E3） */}
+          {items.some((i) => i.kind === "action") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">最近会话（{items.matchedConvs.length}）</div>
-              {items.matchedConvs.map((it, i) => {
-                const idx = items.matchedPages.length + i;
-                return (
-                  <div
-                    key={`c-${it.conv.id}`}
-                    className={`cmd-row ${active === idx ? "active" : ""}`}
-                    onMouseEnter={() => setActive(idx)}
-                    onClick={() => {
-                      if (onJumpConversation) {
-                        onJumpConversation(it.conv.id);
-                        onClose();
-                      } else {
-                        onJumpPage("chat");
-                        onClose();
-                      }
-                    }}
-                  >
-                    <span className="cmd-row-icon">💬</span>
-                    <span className="cmd-row-label">
-                      {it.conv.user_title ?? it.conv.title ?? "(无标题)"}
-                    </span>
-                    <span className="cmd-row-hint">
-                      {it.conv.provider}{formatTime(it.conv.started_at_ms ?? null)}
-                    </span>
-                  </div>
-                );
-              })}
+              <div className="cmd-group-title">动作</div>
+              {items.map((it, i) => it.kind === "action" ? (
+                <div
+                  key={`a-${it.action.id}`}
+                  className={`cmd-row ${active === i ? "active" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => { if (onAction) onAction(it.action.id); onClose(); }}
+                  data-testid="cmd-action"
+                >
+                  <span className="cmd-row-icon">{it.action.icon}</span>
+                  <span className="cmd-row-label">{it.action.label}</span>
+                  <span className="cmd-row-hint">{it.action.hint}</span>
+                </div>
+              ) : null)}
             </div>
           )}
-          {promptReuse.length > 0 && (
+          {/* 会话组 */}
+          {items.some((i) => i.kind === "conv") && (
+            <div className="cmd-group">
+              <div className="cmd-group-title">最近会话（{items.filter((i) => i.kind === "conv").length}）</div>
+              {items.map((it, i) => it.kind === "conv" ? (
+                <div
+                  key={`c-${it.conv.id}`}
+                  className={`cmd-row ${active === i ? "active" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => {
+                    if (onJumpConversation) {
+                      onJumpConversation(it.conv.id);
+                      onClose();
+                    } else {
+                      onJumpPage("chat");
+                      onClose();
+                    }
+                  }}
+                >
+                  <span className="cmd-row-icon">💬</span>
+                  <span className="cmd-row-label">
+                    {it.conv.user_title ?? it.conv.title ?? "(无标题)"}
+                  </span>
+                  <span className="cmd-row-hint">
+                    {it.conv.provider}{formatTime(it.conv.started_at_ms ?? null)}
+                  </span>
+                </div>
+              ) : null)}
+            </div>
+          )}
+          {/* Prompt 复用组 */}
+          {items.some((i) => i.kind === "reuse") && (
             <div className="cmd-group">
               <div className="cmd-group-title">💡 你之前问过类似问题（Prompt 复用）</div>
-              {promptReuse.map((h, i) => {
-                const idx = items.matchedPages.length + items.matchedConvs.length + i;
-                return (
-                  <div
-                    key={`r-${h.message_id}`}
-                    className={`cmd-row ${active === idx ? "active" : ""}`}
-                    onMouseEnter={() => setActive(idx)}
-                    onClick={() => {
-                      if (onJumpConversation) {
-                        onJumpConversation(h.conversation_id);
-                        onClose();
-                      }
-                    }}
-                    data-testid="cmd-prompt-reuse"
-                  >
-                    <span className="cmd-row-icon">🔁</span>
-                    <span className="cmd-row-label" dangerouslySetInnerHTML={{ __html: h.snippet }} />
-                    <span className="cmd-row-hint">
-                      {h.provider_name}{h.model ? ` · ${h.model}` : ""}{h.cost_usd > 0 ? ` · $${h.cost_usd.toFixed(2)}` : ""}
-                    </span>
-                  </div>
-                );
-              })}
+              {items.map((it, i) => it.kind === "reuse" ? (
+                <div
+                  key={`r-${it.hit.message_id}`}
+                  className={`cmd-row ${active === i ? "active" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => {
+                    if (onJumpConversation) {
+                      onJumpConversation(it.hit.conversation_id, it.hit.message_id);
+                      onClose();
+                    }
+                  }}
+                  data-testid="cmd-prompt-reuse"
+                >
+                  <span className="cmd-row-icon">🔁</span>
+                  <span className="cmd-row-label" dangerouslySetInnerHTML={{ __html: it.hit.snippet }} />
+                  <span className="cmd-row-hint">
+                    {it.hit.provider_name}{it.hit.model ? ` · ${it.hit.model}` : ""}{it.hit.cost_usd > 0 ? ` · $${it.hit.cost_usd.toFixed(2)}` : ""}
+                  </span>
+                </div>
+              ) : null)}
             </div>
           )}
-          {all.length === 0 && (
+          {items.length === 0 && (
             <div className="cmd-empty">没有匹配项（试试「活动」「成本」或会话标题关键词）</div>
           )}
         </ScrollArea>

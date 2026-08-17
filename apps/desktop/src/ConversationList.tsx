@@ -1,10 +1,12 @@
 // 会话列表组件
 // 第 11 轮大改版：4 行 filter-bar 合并成 1 行 toolbar（3 个 dropdown + 搜索 + 数量）；
 // 列表项去掉复选框 / hover-pin-toggle / hover-fav-toggle —— 全部走右键菜单（⌘点击多选 + ⌘A 全选 + ⋯ / 右键触发）。
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Conversation, sourceLabel, formatTime } from "./types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Conversation, sourceLabel } from "./types";
 import { showToast } from "./toast";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import ConvItem from "./ConvItem";
 
 /** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
 export type ListScope = "all" | "favorite" | "archived" | "deleted";
@@ -160,6 +162,10 @@ export default function ConversationList({
   const [bulkTagInput, setBulkTagInput] = useState("");
   // 右键菜单：当前点击的会话 + 屏幕坐标
   const [ctxMenu, setCtxMenu] = useState<{ conv: Conversation; x: number; y: number } | null>(null);
+  // 右键菜单触发的「加标签」内联输入：避免原生 window.prompt 阻断流程
+  const [tagInput, setTagInput] = useState<{ ids: string[]; count: number; value: string; x: number; y: number } | null>(null);
+  // 虚拟列表的滚动容器 ref
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const togglePin = (id: string) => {
     setPinned((p) => {
@@ -232,7 +238,7 @@ export default function ConversationList({
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIds, sorted]);
 
-  const handleItemClick = (c: Conversation, e: React.MouseEvent) => {
+  const handleItemClick = useCallback((c: Conversation, e: React.MouseEvent) => {
     const mod = e.metaKey || e.ctrlKey;
     if (mod) {
       e.preventDefault();
@@ -246,9 +252,9 @@ export default function ConversationList({
       if (selectedIds.size > 0) setSelectedIds(new Set());
       onSelect(c);
     }
-  };
+  }, [selectedIds, onSelect]);
 
-  const handleContextMenu = (c: Conversation, e: React.MouseEvent) => {
+  const handleContextMenu = useCallback((c: Conversation, e: React.MouseEvent) => {
     e.preventDefault();
     // 如果右键的不是已选中的项，先单选它
     if (!selectedIds.has(c.id) && selectedIds.size <= 1) {
@@ -258,9 +264,9 @@ export default function ConversationList({
       setSelectedIds(new Set([c.id]));
     }
     setCtxMenu({ conv: c, x: e.clientX, y: e.clientY });
-  };
+  }, [selectedIds, onSelect]);
 
-  const buildMenu = (c: Conversation): MenuItem[] => {
+  const buildMenu = (c: Conversation, c_x: number, c_y: number): MenuItem[] => {
     const isMulti = selectedIds.size > 1 && selectedIds.has(c.id);
     const targetCount = isMulti ? selectedIds.size : 1;
     const targetIds = isMulti ? [...selectedIds] : [c.id];
@@ -310,11 +316,9 @@ export default function ConversationList({
       items.push({
         icon: "🏷",
         label: `加标签${isMulti ? `到 ${targetCount} 条` : ""}…`,
-        onClick: async () => {
-          const tag = (typeof window !== "undefined" ? window.prompt("输入标签名（自动去 # 前缀）", "") : "")?.trim().replace(/^#+/, "").trim() ?? "";
-          if (!tag) return;
-          const fn = onBulkAddTag ? (ids: string[]) => onBulkAddTag(ids, tag) : undefined;
-          if (fn) { await fn(targetIds); showToast(`✓ 已加标签 #${tag} 到 ${targetCount} 条`, "info"); }
+        onClick: () => {
+          // 打开内联输入（位置贴 context menu 下方），不在此处用 window.prompt 阻断流程
+          setTagInput({ ids: targetIds, count: targetCount, value: "", x: c_x, y: c_y });
         },
         group: 1,
       });
@@ -339,57 +343,54 @@ export default function ConversationList({
     return items;
   };
 
-  const renderItem = (c: Conversation, isChild = false) => {
-    const active = selectedConv?.id === c.id;
-    const isSelected = selectedIds.has(c.id);
-    const isPinned = pinned.has(c.id) && !isChild;
-    return (
-      <div key={c.id}>
-        <div
-          className={`list-item ${isChild ? "child-item" : ""} ${active ? "active" : ""} ${isSelected ? "selected-multi" : ""} ${isPinned ? "pinned" : ""}`}
-          onClick={(e) => handleItemClick(c, e)}
-          onContextMenu={(e) => !isChild && handleContextMenu(c, e)}
-        >
-          <div className="title">
-            {!isChild && c.child_count > 0 && (
-              <span
-                className="expand-toggle"
-                onClick={(e) => { e.stopPropagation(); onToggleExpand(c); }}
-              >
-                {expandedParents.has(c.id) ? "▼" : "▶"}
-              </span>
-            )}
-            {isChild && <span className="child-arrow">↳</span>}
-            {isPinned && <span className="pin-star" title="已置顶（永远排最前）">📌</span>}
-            {c.user_title ?? c.title ?? "(无标题)"}
-          </div>
-          <div className="meta">
-            <span className={`badge source ${c.provider}`}>{sourceLabel(c.provider)}</span>
-            <span className="meta-time">{formatTime(c.updated_at_ms)}</span>
-            {!isChild && c.child_count > 0 && <span className="meta-child">{c.child_count} 子</span>}
-            {c.model && <span className="meta-model">{c.model}</span>}
-            {scope === "deleted" && (
-              <span
-                className="restore-btn"
-                title="恢复此会话"
-                onClick={(e) => { e.stopPropagation(); onRestore?.(c); }}
-              >↩ 恢复</span>
-            )}
-          </div>
-        </div>
-        {!isChild && expandedParents.has(c.id) && childConvs[c.id] && (
-          <div className="child-list">
-            {childConvs[c.id].length === 0 && <div className="child-empty">无子任务</div>}
-            {childConvs[c.id].map((ch) => renderItem(ch, true))}
-          </div>
-        )}
-      </div>
-    );
-  };
+  // per-item flags（useMemo Map：避免每行重新计算 set.has）
+  const itemFlags = useMemo(() => {
+    const map = new Map<string, { isActive: boolean; isSelected: boolean; isPinned: boolean; isExpanded: boolean; isChild: boolean }>();
+    for (const c of sorted) {
+      map.set(c.id, {
+        isActive: selectedConv?.id === c.id,
+        isSelected: selectedIds.has(c.id),
+        isPinned: pinned.has(c.id),
+        isExpanded: expandedParents.has(c.id),
+        isChild: false,
+      });
+    }
+    return map;
+  }, [sorted, selectedConv, selectedIds, pinned, expandedParents]);
+
+  // 虚拟列表：默认关闭（getScrollElement 返 null → virtualizer 用 initialRect）。
+  // 仅当父级真有可滚动高度（>0）时才打开：jsdom 下高度为 0，关闭即走 initialRect 兜底。
+  const [enableVirtualization, setEnableVirtualization] = useState(false);
+  useEffect(() => {
+    const el = parentRef.current;
+    if (el && el.getBoundingClientRect().height > 0) {
+      setEnableVirtualization(true);
+    }
+  }, [sorted.length]);
+  const rowVirtualizer = useVirtualizer({
+    count: sorted.length,
+    getScrollElement: () => (enableVirtualization ? parentRef.current : null),
+    estimateSize: () => 80,
+    overscan: 8,
+    initialRect: { width: 0, height: 600 },
+  });
 
   // 来源 chip：仅显示有数据的来源
   const providerChips = (["zcode", "claude-code", "cursor", "minimax-code", "codex"] as const)
     .filter((p) => !availableProviders || availableProviders.size === 0 || availableProviders.has(p));
+
+  // 提交右键菜单触发的「加标签」内联输入
+  const submitTagInput = async () => {
+    if (!tagInput) return;
+    const tag = tagInput.value.trim().replace(/^#+/, "").trim();
+    setTagInput(null);
+    setCtxMenu(null);
+    if (!tag) return;
+    if (onBulkAddTag) {
+      await onBulkAddTag(tagInput.ids, tag);
+      showToast(`✓ 已加标签 #${tag} 到 ${tagInput.count} 条`, "info");
+    }
+  };
 
   return (
     <>
@@ -502,7 +503,73 @@ export default function ConversationList({
       {loading && (
         <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载会话…</span></div>
       )}
-      {!loading && sorted.map((c) => renderItem(c))}
+      {!loading && sorted.length > 0 && (
+        <div
+          ref={parentRef}
+          className="list-virtual-container"
+          style={{ position: "relative", height: rowVirtualizer.getTotalSize() }}
+        >
+          {rowVirtualizer.getVirtualItems().map((vi) => {
+            const c = sorted[vi.index];
+            if (!c) return null;
+            const flags = itemFlags.get(c.id);
+            if (!flags) return null;
+            const isExpanded = flags.isExpanded;
+            const children = isExpanded ? (childConvs[c.id] ?? []) : [];
+            return (
+              <div
+                key={c.id}
+                data-index={vi.index}
+                ref={rowVirtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: "100%",
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              >
+                <ConvItem
+                  conv={c}
+                  isChild={false}
+                  isActive={flags.isActive}
+                  isSelected={flags.isSelected}
+                  isPinned={flags.isPinned}
+                  isExpanded={isExpanded}
+                  scope={scope}
+                  childCount={c.child_count}
+                  onItemClick={(e) => handleItemClick(c, e)}
+                  onContextMenu={(e) => handleContextMenu(c, e)}
+                  onToggleExpand={(e) => { e.stopPropagation(); onToggleExpand(c); }}
+                  onRestore={(e) => { e.stopPropagation(); onRestore?.(c); }}
+                />
+                {isExpanded && (
+                  <div className="child-list">
+                    {children.length === 0 && <div className="child-empty">无子任务</div>}
+                    {children.map((ch) => (
+                      <ConvItem
+                        key={ch.id}
+                        conv={ch}
+                        isChild={true}
+                        isActive={selectedConv?.id === ch.id}
+                        isSelected={selectedIds.has(ch.id)}
+                        isPinned={false}
+                        isExpanded={false}
+                        scope={scope}
+                        childCount={0}
+                        onItemClick={(e) => handleItemClick(ch, e)}
+                        onContextMenu={() => { /* 子项不响应右键 */ }}
+                        onToggleExpand={() => { /* 子项无展开 */ }}
+                        onRestore={(e) => { e.stopPropagation(); onRestore?.(ch); }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       {!loading && conversations.length === 0 && (
         <div className="empty empty-cta">
           <div className="empty-icon">📥</div>
@@ -521,9 +588,34 @@ export default function ConversationList({
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
-          items={buildMenu(ctxMenu.conv)}
-          onClose={() => setCtxMenu(null)}
+          items={buildMenu(ctxMenu.conv, ctxMenu.x, ctxMenu.y)}
+          onClose={() => { setCtxMenu(null); setTagInput(null); }}
         />
+      )}
+      {/* 右键「加标签」触发的内联输入（替代 window.prompt） */}
+      {tagInput && (
+        <>
+          <div className="contextmenu-backdrop" onClick={() => { setTagInput(null); setCtxMenu(null); }} />
+          <div
+            className="contextmenu"
+            style={{ left: tagInput.x, top: tagInput.y + 32, padding: 6 }}
+            role="menu"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              className="bulk-tag-input"
+              autoFocus
+              placeholder="# 标签名（自动去 # 前缀）"
+              value={tagInput.value}
+              onChange={(e) => setTagInput({ ...tagInput, value: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); void submitTagInput(); }
+                else if (e.key === "Escape") { e.preventDefault(); setTagInput(null); setCtxMenu(null); }
+              }}
+              title="Enter 提交 · Esc 取消"
+            />
+          </div>
+        </>
       )}
     </>
   );

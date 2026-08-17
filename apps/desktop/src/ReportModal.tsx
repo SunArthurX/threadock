@@ -37,10 +37,12 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
     setLoading(false);
   };
   const openHistory = async (name: string) => {
+    // 切历史报告：先清空旧 HTML + 立刻标记 current（避免 iframe 在新数据回来前显示上一份）
+    setHtml(null);
+    setCurrent(name);
     setLoading(true);
     try {
       setHtml(await invoke<string>("read_report", { name }));
-      setCurrent(name);
     } catch { /* 静默 */ }
     setLoading(false);
   };
@@ -135,13 +137,21 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
           )}
-          {loading && <div className="sk-line" style={{ margin: 12 }} />}
+          {loading && !html && (
+            <div className="report-skeleton" aria-label="加载报告中…">
+              <div className="sk-line sk-lg" />
+              <div className="sk-line sk-sm" />
+              <div className="sk-line sk-sm" />
+              <div className="sk-line sk-sm" />
+            </div>
+          )}
           {html && (
             <iframe
+              key={current ?? "live"}
               className="report-frame"
               sandbox="allow-same-origin"
               srcDoc={html}
-              title="周报"
+              title={current ? `历史报告：${current}` : "实时周报"}
             />
           )}
       </ScrollArea>

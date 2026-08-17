@@ -21,7 +21,8 @@ import ChangelogModal, { shouldShowChangelog } from "./ChangelogModal";
 import OnboardingTour, { isOnboardingSeen, markOnboardingSeen, resetOnboarding } from "./OnboardingTour";
 import { Toasts } from "./Toasts";
 import ErrorBoundary from "./ErrorBoundary";
-import { CommandPalette, type Page } from "./CommandPalette";
+import StatusBar from "./StatusBar";
+import { CommandPalette, type Page, type CommandActionId } from "./CommandPalette";
 import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast";
 import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
@@ -76,23 +77,7 @@ function FreshnessBadge() {
   return <span className="freshness-badge freshness-stale" title={`上次同步：${fmt(min)} — 数据可能过期，点导入刷新`}>🟠 {fmt(min)}</span>;
 }
 
-/** 底部状态栏：当前页 + 同步状态 + 实时时间 + 快捷键提示。 */
-function StatusBar({ syncResult, syncing, nowMs, viewLabel }: { syncResult: string | null; syncing: boolean; nowMs: number; viewLabel: string }) {
-  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-  const mod = isMac ? "⌘" : "Ctrl";
-  const time = new Date(nowMs).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-  return (
-    <div className="status-bar">
-      <span className="status-cell">📍 {viewLabel}</span>
-      <span className={`status-cell status-sync ${syncing ? "syncing" : syncResult ? "done" : ""}`}>
-        {syncing ? "⟳ 同步中…" : (syncResult ?? "○ 待同步")}
-      </span>
-      <span className="status-cell status-spacer" />
-      <span className="status-cell status-hint">{mod}K 命令 · {mod}? 速查 · {mod}F 搜索 · {mod}R 刷新</span>
-      <span className="status-cell status-time">{time}</span>
-    </div>
-  );
-}
+/** 底部状态栏已拆为独立组件 ./StatusBar.tsx（自管 1s 刷新，避免整树重渲染）。 */
 
 export default function App() {
   const [view, setView] = useState<View>(() => {
@@ -157,11 +142,10 @@ export default function App() {
   // 库中实际存在会话的来源集合（无数据的来源不在筛选栏显示，如未装 Cursor）
   const [availableProviders, setAvailableProviders] = useState<Set<string>>(new Set());
   const refreshProviders = async () => {
+    // 走 available_providers（DISTINCT）避免对每条会话拉整行；之前用 list_conversations 全表扫描（P1-E1）
     try {
-      const all = await invoke<Conversation[]>("list_conversations", {
-        workspaceId: null, provider: null, favorite: null, archived: null, includeDeleted: false,
-      });
-      setAvailableProviders(new Set(all.map((c) => c.provider)));
+      const names = await invoke<string[]>("available_providers", {});
+      setAvailableProviders(new Set(names));
     } catch { /* 静默：失败时保持全部 chips */ }
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -193,16 +177,15 @@ export default function App() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailPanelRef = useRef<ScrollAreaRef>(null);
+  // 详情加载序号：每次 selectConversation / jumpToSearchResult / jumpFromAudit 进入即 +1，
+  // 任何 await 之后置状态前比对「当前序号 === 函数入口捕获的序号」，避免快速 A→B 点击时
+  // A 的稍后 await 回调把 B 的消息列表覆盖掉（P0-3）。
+  const loadSeqRef = useRef(0);
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; detail: string; finished: boolean } | null>(null);
-  // 状态栏：当前时间（每秒刷新）
-  const [nowMs, setNowMs] = useState(Date.now());
-  useEffect(() => {
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
+  // 状态栏的 1s 时间刷新已迁出 App → ./StatusBar.tsx（自管状态，避免整树重渲染）
   useEffect(() => {
     const un = listen<{ current: number; total: number; detail: string; finished: boolean }>("sync_progress", (e) => {
       setSyncProgress(e.payload);
@@ -296,7 +279,10 @@ export default function App() {
         return;
       }
       // ⌘F / Ctrl+F 焦点搜索框（preventDefault 屏蔽浏览器默认页内查找）
+      // 当前在「对话」详情页时让 ConversationDetail 自己处理（详情内搜索），
+      // 顶栏搜索框在该场景不存在（P1-C2 双抢焦点）。
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        if (view === "chat" && selectedConv) return; // 留给 ConversationDetail
         e.preventDefault();
         searchInputRef.current?.focus();
         searchInputRef.current?.select();
@@ -329,7 +315,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [sourcePanel, searchResults, helpOpen, cmdOpen]);
+  }, [sourcePanel, searchResults, helpOpen, cmdOpen, view, selectedConv]);
 
   useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
 
@@ -357,6 +343,10 @@ export default function App() {
       // 同步返回的剩余计数：红点/菜单瞬时刷新（免去 sources_new_count 二次全量扫描）
       if (result.new_counts) {
         setNewCount({ ...(result.new_counts as unknown as Record<string, number>), total: result.new_total ?? 0 });
+      }
+      // 后端可能把「同步后实际有数据的 provider 集合」一并返回，省去一次 available_providers 调用
+      if (Array.isArray(result.providers)) {
+        setAvailableProviders(new Set(result.providers as unknown as string[]));
       }
       const parts: string[] = [];
       for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"]] as [string,string][]) {
@@ -408,25 +398,33 @@ export default function App() {
   };
 
   const selectConversation = async (c: Conversation, highlightId?: string) => {
+    const seq = ++loadSeqRef.current;
     setSelectedConv(c);
     setHighlightMsgId(highlightId ?? null);
     setCollapsedMsgs(new Set());
     setMsgsLoading(true);
     try {
       const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: c.id });
+      // 已被更新的加载覆盖（用户已切到其他会话）→ 静默丢弃
+      if (loadSeqRef.current !== seq) return;
       setMessages(detail.messages); setEvents(detail.events);
       setCompletenessLabel(detail.completeness_label); setKnowledge(null);
       setDetailTags(detail.tags ?? []);
-      if (highlightId) setTimeout(() => document.getElementById(`msg-${highlightId}`)?.scrollIntoView({behavior:"smooth",block:"center"}), 100);
+      if (highlightId) setTimeout(() => {
+        // 滚动前再校验一次：避免 setTimeout 期间又切到别的会话
+        if (loadSeqRef.current !== seq) return;
+        document.getElementById(`msg-${highlightId}`)?.scrollIntoView({behavior:"smooth",block:"center"});
+      }, 100);
     } catch (e) { showError(e); }
-    setMsgsLoading(false);
+    if (loadSeqRef.current === seq) setMsgsLoading(false);
     // 加载该会话的私有笔记（失败/不存在 → null）
     try {
       const n = await invoke<{ note: string; updated_at: number } | null>("get_conversation_note", { id: c.id });
+      if (loadSeqRef.current !== seq) return;
       setNoteText(n?.note ?? null);
-    } catch { setNoteText(null); }
+    } catch { if (loadSeqRef.current === seq) setNoteText(null); }
     // 刷新全部标签（标签增删后保持最新，乐观策略：每次选会话都拉一次；命中缓存避免重复调用）
-    refreshAllTags();
+    if (loadSeqRef.current === seq) refreshAllTags();
   };
   const refreshAllTags = async () => {
     try { setAllTags(await invoke<{ tag: string; count: number }[]>("list_all_tags", { limit: 100 })); }
@@ -477,14 +475,19 @@ export default function App() {
   };
 
   const jumpToSearchResult = async (r: SearchResult) => {
+    // 与 selectConversation 共享同一序号：搜索结果跳进会话时也需请求隔离（P0-3）
+    const seq = ++loadSeqRef.current;
     try {
       const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: r.conversation_id });
+      if (loadSeqRef.current !== seq) return;
       setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
       setCompletenessLabel(detail.completeness_label); setKnowledge(null);
       setDetailTags(detail.tags ?? []);
-      setDetailTags(detail.tags ?? []);
       setHighlightMsgId(r.message_id); setCollapsedMsgs(new Set()); setSearchResults(null);
-      setTimeout(() => document.getElementById(`msg-${r.message_id}`)?.scrollIntoView({behavior:"smooth",block:"center"}), 120);
+      setTimeout(() => {
+        if (loadSeqRef.current !== seq) return;
+        document.getElementById(`msg-${r.message_id}`)?.scrollIntoView({behavior:"smooth",block:"center"});
+      }, 120);
     } catch (e) { showError(e); }
   };
 
@@ -573,14 +576,22 @@ export default function App() {
   };
 
   /** 重置后的统一刷新（实际删除由设置弹窗的 reset_range 命令完成）。 */
+  const [resetting, setResetting] = useState(false);
   const resetData = async () => {
-    setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
-    setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
-    setChildConvs({}); setExpandedParents(new Set());
-    setNewCount(null);
-    refreshNewCount();
-    refreshProviders();
-    window.setTimeout(() => autoSync(true), 1500);
+    setResetting(true);
+    try {
+      // reset_range 命令由 SettingsView 内部 await 执行；这里只负责 UI 状态清理 + 后续刷新。
+      setConversations([]); setSelectedConv(null); setMessages([]); setEvents([]);
+      setKnowledge(null); setSelectedWs(null); setProviderFilter(null); setDetailTags([]);
+      setChildConvs({}); setExpandedParents(new Set());
+      setNewCount(null);
+      refreshNewCount();
+      refreshProviders();
+      window.setTimeout(() => autoSync(true), 1500);
+    } finally {
+      // 给 reset_range + 1.5s 后台重导留出 4 秒「禁用期」防止误连点；UI 反馈后解除
+      window.setTimeout(() => setResetting(false), 4000);
+    }
   };
 
   // ── 会话级治理动作 ──
@@ -601,27 +612,36 @@ export default function App() {
       showToast(!c.archived ? "🗄 已归档" : "📤 已取消归档");
     } catch (e) { showError(e); }
   };
-  // 单条删除（带 undo）：复用 onBulkDelete 内部循环
+  // 共享软删 + 撤销 toast 助手（单条 / 批量共用，避免「两个命令 + source_conversation_id」错位）
+  const performSoftDeleteWithUndo = async (targets: Conversation[]) => {
+    if (targets.length === 0) return;
+    const snapshot = targets.map((x) => ({ ...x }));
+    for (const c of snapshot) {
+      try { await invoke("delete_conversation", { id: c.id }); } catch { /* 单条失败不影响整体 */ }
+    }
+    await loadConversations();
+    if (selectedConv && snapshot.some((c) => c.id === selectedConv.id)) setSelectedConv(null);
+    const label = snapshot.length === 1
+      ? `🗑 已移入回收站（${snapshot[0].user_title ?? snapshot[0].title ?? "未命名"}）`
+      : `🗑 已删除 ${snapshot.length} 条会话`;
+    showToast(
+      label,
+      "info",
+      6000,
+      async () => {
+        for (const c of snapshot) {
+          try { await invoke("restore_conversation", { id: c.id }); }
+          catch { /* 单条失败不影响整体 */ }
+        }
+        await loadConversations();
+        showToast(`↩ 已恢复 ${snapshot.length} 条会话`, "info");
+      },
+      "撤销删除",
+    );
+  };
+  // 单条删除（带 undo）：薄壳转共享助手
   const deleteOneWithUndo = async (c: Conversation) => {
-    const snapshot = conversations.filter((x) => x.id === c.id).map((x) => ({ ...x }));
-    try {
-      for (const id of [c.id]) {
-        try { await invoke("soft_delete_conversation", { id }); } catch { /* 单条失败不影响整体 */ }
-      }
-      await loadConversations();
-      if (selectedConv?.id === c.id) setSelectedConv(null);
-      showToast(
-        `🗑 已移入回收站（${c.user_title ?? c.title ?? "未命名"}）`,
-        "info",
-        6000,
-        async () => {
-          try { await invoke("restore_conversation", { id: c.id }); await loadConversations(); showToast("↩ 已恢复", "info"); }
-          catch (e) { showError(e); }
-        },
-        "撤销",
-      );
-    } catch (e) { showError(e); }
-    void snapshot;
+    await performSoftDeleteWithUndo([c]);
   };
   // 复制标题到剪贴板
   const copyConvTitle = async (c: Conversation) => {
@@ -629,11 +649,8 @@ export default function App() {
     try { await navigator.clipboard.writeText(t); showToast("✓ 标题已复制", "info", 1500); }
     catch { showToast("剪贴板不可用", "error"); }
   };
-  // 跳到详情并滚动到指定消息
-  const jumpToMessage = async (_c: Conversation, _messageId?: string) => {
-    // 预留给未来「跨会话跳到指定消息」场景；当前由 jumpFromAudit 直接调用 selectConversation。
-  };
-  void jumpToMessage;
+  // 跳到详情并滚动到指定消息：原 jumpToMessage 空 stub 已删除。
+  // 跨会话跳到指定消息场景由 selectConversation(cid, mid) 直接承担（详见 P0-3 / P1-A3）。
 
   const restoreConv = async (c: Conversation) => {
     try {
@@ -676,9 +693,12 @@ export default function App() {
   };
 
   const jumpFromAudit = async (provider: string, sourceConvId: string, messageId: string | null) => {
+    // 先抢一个序号，避免与并发 selectConversation 互相覆盖（selectConversation 内部还会再 +1，但 setView 同步置状态是安全的）
+    const seq = ++loadSeqRef.current;
     setView("chat");
     try {
       const conv = await invoke<Conversation | null>("get_conversation_by_source", { provider, sourceConversationId: sourceConvId });
+      if (loadSeqRef.current !== seq) return;
       if (conv) await selectConversation(conv, messageId ?? undefined);
       else setError("未找到对应会话");
     } catch (e) { showError(e); }
@@ -781,13 +801,23 @@ export default function App() {
           open={cmdOpen}
           onClose={() => setCmdOpen(false)}
           onJumpPage={(p) => { setView(p); localStorage.setItem("ch-view", p); }}
-          onJumpConversation={async (cid) => {
+          onJumpConversation={async (cid, mid) => {
             setView("chat");
-            try {
-              const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
-              setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
-              setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
-            } catch (e) { showError(e); }
+            // 复用 selectConversation 走序号守卫路径（P0-3 + P1-A3 契约）
+            const conv = conversations.find((c) => c.id === cid);
+            if (conv) await selectConversation(conv, mid);
+            else showError(`未找到会话：${cid}`);
+          }}
+          onAction={(action: CommandActionId) => {
+            // P1-E3：⌘K 动作分发。映射到 App 已有 setState / 同步函数。
+            switch (action) {
+              case "open_settings": setSettingsOpen(true); break;
+              case "trigger_sync": runManualSync(); showToast("⟳ 已触发同步", "info", 2000); break;
+              case "toggle_theme": changeTheme(theme === "dark" ? "light" : "dark"); showToast(`✓ 主题已切换：${theme === "dark" ? "浅色" : "深色"}`, "info", 1500); break;
+              case "show_shortcuts": setHelpOpen(true); break;
+              case "open_reports": setReportsOpen(true); break;
+              case "show_changelog": setChangelogOpen(true); break;
+            }
           }}
         />
 
@@ -798,10 +828,12 @@ export default function App() {
             convTitle={selectedConv.user_title ?? selectedConv.title}
             onClose={() => setKnowledge(null)}
             onReextract={extractKnowledge}
-            onJumpToConversation={(cid) => {
+            onJumpToConversation={async (cid) => {
               // 跨会话引用跳到其他会话：保留知识弹窗
-              invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: cid })
-                .then((d) => { setSelectedConv(d.conversation); setMessages(d.messages); setEvents(d.events); setCompletenessLabel(d.completeness_label); setDetailTags(d.tags ?? []); setKnowledge(null); });
+              // 复用 selectConversation 走序号守卫（P0-3）
+              const conv = conversations.find((c) => c.id === cid);
+              if (conv) { setKnowledge(null); await selectConversation(conv); }
+              else showError(`未找到会话：${cid}`);
             }}
           />
         )}
@@ -829,7 +861,7 @@ export default function App() {
             currency={currency} onCurrencyChange={changeCurrency}
             dateFormat={dateFormat} onDateFormatChange={changeDateFormat}
             onNavigate={(v) => setView(v)}
-            onReset={resetData} resetting={false}
+            onReset={resetData} resetting={resetting}
             onClose={() => setSettingsOpen(false)}
             onShowChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }}
             onShowOnboarding={() => { resetOnboarding(); setSettingsOpen(false); setOnboardingOpen(true); }}
@@ -854,34 +886,29 @@ export default function App() {
         )}
 
         {view === "knowledge" ? (
-          <KnowledgeView onJump={async (cid) => {
+          <KnowledgeView onJump={async (cid, mid) => {
             setView("chat");
-            try {
-              const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
-              setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
-              setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
-            } catch (e) { showError(e); }
+            // 复用 selectConversation 走序号守卫 + 滚动到 mid（P1-A3 契约：可选 message id）
+            const conv = conversations.find((c) => c.id === cid);
+            if (conv) await selectConversation(conv, mid);
+            else showError(`未找到会话：${cid}`);
           }} />
         ) : view === "activity" ? (
           <ActivityView
             onJumpToConversation={async (cid) => {
               setView("chat");
-              try {
-                const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
-                setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
-                setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
-              } catch (e) { showError(e); }
+              const conv = conversations.find((c) => c.id === cid);
+              if (conv) await selectConversation(conv);
+              else showError(`未找到会话：${cid}`);
             }}
           />
         ) : view === "projects" ? (
           <ProjectsView
             onJumpToConversation={async (cid) => {
               setView("chat");
-              try {
-                const detail = await invoke<import("./types").ConversationDetailDto>("get_conversation_detail", { conversationId: cid });
-                setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
-                setCompletenessLabel(detail.completeness_label); setDetailTags(detail.tags ?? []);
-              } catch (e) { showError(e); }
+              const conv = conversations.find((c) => c.id === cid);
+              if (conv) await selectConversation(conv);
+              else showError(`未找到会话：${cid}`);
             }}
           />
         ) : view !== "chat" ? (
@@ -920,32 +947,9 @@ export default function App() {
                       showToast(`✓ 已为 ${ids.length} 条会话加标签 #${tag}`, "info");
                     }}
                     onBulkDelete={async (ids) => {
-                      // 软删前先记录原状态，撤销时能恢复
-                      const snapshot = conversations.filter((c) => ids.includes(c.id));
-                      for (const id of ids) {
-                        try { await invoke("delete_conversation", { id }); } catch {}
-                      }
-                      await loadConversations();
-                      if (snapshot.length > 0) {
-                        showToast(
-                          `🗑 已删除 ${snapshot.length} 条会话`,
-                          "info",
-                          6000,
-                          async () => {
-                            // 撤销：用 restore_conversation 命令（按 source_conversation_id）
-                            for (const c of snapshot) {
-                              try {
-                                await invoke("restore_conversation", {
-                                  id: c.source_conversation_id,
-                                });
-                              } catch { /* 单条失败不影响整体 */ }
-                            }
-                            await loadConversations();
-                            showToast(`↩ 已恢复 ${snapshot.length} 条会话`, "info");
-                          },
-                          "撤销删除",
-                        );
-                      }
+                      // 复用单条同款助手：避免「用 source_conversation_id 撤销导致恢复失败」
+                      const targets = conversations.filter((c) => ids.includes(c.id));
+                      await performSoftDeleteWithUndo(targets);
                     }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </ScrollArea>
@@ -1016,7 +1020,7 @@ export default function App() {
           </div>
         )}
         </ErrorBoundary>
-        <StatusBar syncResult={syncResult} syncing={syncing} nowMs={nowMs} viewLabel={VIEW_LABEL[view]} />
+        <StatusBar syncResult={syncResult} syncing={syncing} viewLabel={VIEW_LABEL[view]} />
       </div>
     </div>
   );

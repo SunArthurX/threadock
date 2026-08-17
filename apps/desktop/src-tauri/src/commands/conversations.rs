@@ -293,6 +293,16 @@ pub(crate) async fn delete_conversation(
     Ok(())
 }
 
+/// 列出库中实际存在会话的 provider（按 name 去重）。比 list_conversations 轻量：
+/// 不拉 messages/events，单独的 DISTINCT 查询，用于过滤栏「仅显示有数据的来源」。
+#[tauri::command]
+pub(crate) async fn available_providers(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<Vec<String>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.list_active_providers().map_err(|e| storage_err(e))
+}
+
 /// 恢复软删除。
 #[tauri::command]
 pub(crate) async fn restore_conversation(

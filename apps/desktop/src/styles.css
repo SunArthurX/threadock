@@ -794,6 +794,21 @@ button {
   background: var(--accent-bg);
 }
 
+/* Primary button：填充式强调（如 P2-4 安全审计首次访问的主操作） */
+.action-btn.primary {
+  background: var(--accent, #4f8cff);
+  color: #fff;
+  border-color: var(--accent, #4f8cff);
+  font-weight: 600;
+  padding: 7px 18px;
+  font-size: 13px;
+}
+.action-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover, #6ea0ff);
+  color: #fff;
+  border-color: var(--accent-hover, #6ea0ff);
+}
+
 .action-btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -1446,6 +1461,7 @@ button {
   max-width: 1180px;
   align-self: center; /* 宽屏居中不顶满 */
   width: 100%;
+  overflow-y: auto; /* round-26 修复：Cluster 4/5 加内容后页面超出视口无滚动 */
 }
 
 .ops-toolbar {
@@ -1482,6 +1498,20 @@ button {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 16px 18px;
+}
+
+/* P0-4: 可点击 KPI 卡片（带 onClick 时应用） */
+.ops-kpi.clickable {
+  cursor: pointer;
+  transition: background var(--transition, 150ms), border-color var(--transition, 150ms);
+  user-select: none;
+}
+.ops-kpi.clickable:hover {
+  background: var(--bg-hover, #1a1f2e);
+  border-color: var(--border-default, rgba(148, 163, 199, 0.14));
+}
+.ops-kpi.clickable:active {
+  background: var(--bg-active, #1f2537);
 }
 
 .ops-kpi.danger {
@@ -2017,6 +2047,57 @@ button {
   font-weight: 450;
   margin-left: auto;
 }
+
+/* P1-B2: 数据新鲜度指示（OpsView 同步按钮旁 + SecuritySection 审计卡片标题） */
+.ops-freshness {
+  font-size: 11px;
+  color: var(--text-muted, #8b96ad);
+  opacity: 0.85;
+  font-weight: 450;
+}
+.ops-freshness.fresh { color: var(--c-codex, #2da44e); }
+.ops-freshness.stale { color: var(--warn, #f59e0b); }
+
+/* P0-4: 可点击行（成本页项目/模型 Top10） */
+.ops-row-clickable {
+  cursor: pointer;
+  transition: background var(--transition, 150ms);
+}
+.ops-row-clickable:hover {
+  background: var(--bg-hover, #1a1f2e);
+}
+
+/* P2-4: 安全审计首次访问 hero 引导卡 */
+.audit-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+  background: linear-gradient(135deg, rgba(79, 140, 255, 0.08) 0%, rgba(167, 139, 250, 0.06) 100%);
+  border: 1px solid rgba(79, 140, 255, 0.25);
+  border-radius: var(--radius-md, 8px);
+}
+.audit-hero-icon {
+  font-size: 28px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.audit-hero-body { flex: 1; min-width: 0; }
+.audit-hero-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #e6e9f2);
+  margin-bottom: 6px;
+}
+.audit-hero-sub {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-secondary, #b3b9c9);
+  margin-bottom: 12px;
+}
+.audit-hero-cta { display: flex; gap: 8px; }
 
 /* 审计发现列表 */
 .audit-findings {
@@ -2833,6 +2914,11 @@ button {
 .budget-bar.over .budget-bar-fill { background: #dc2626; opacity: .45; }
 .budget-bar.over .budget-bar-label { color: #f87171; font-weight: 600; }
 
+/* P2-3: 预算条可点击（warn/over + 有 onClick） */
+.budget-bar.clickable { cursor: pointer; transition: filter var(--transition, 150ms), transform var(--transition, 150ms); }
+.budget-bar.clickable:hover { filter: brightness(1.15); }
+.budget-bar.clickable:active { transform: scale(0.98); }
+
 /* 会话列表 scope 与星标 */
 .scope-bar { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border, #2a2e3a); }
 .scope-chip { border: 1px solid transparent; background: none; color: inherit; font-size: 12px; padding: 3px 10px; border-radius: 99px; cursor: pointer; opacity: .75; }
@@ -3003,6 +3089,8 @@ button {
 .project-conv-list { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border, #2a2e3a); display: flex; flex-direction: column; gap: 4px; }
 .project-conv-title { font-size: 10.5px; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
 .project-conv-empty { font-size: 11px; opacity: 0.5; padding: 4px 0; }
+.project-conv-more-link { display: inline-block; margin-top: 4px; font-size: 11px; color: var(--accent, #4f8cff); cursor: pointer; padding: 4px 0; }
+.project-conv-more-link:hover { text-decoration: underline; }
 .project-conv-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 4px 6px; border-radius: 5px; cursor: pointer; }
 .project-conv-row:hover { background: rgba(79, 140, 255, 0.12); }
 .project-conv-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3028,6 +3116,8 @@ button {
 .report-open-btn:hover { border-color: var(--accent); }
 .report-time { font-size: 10.5px; color: var(--text-muted); }
 .report-frame { width: 100%; height: calc(100% - 20px); border: 1px solid var(--border, #2a2e3a); border-radius: 10px; background: #fff; }
+.report-skeleton { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px 12px; min-height: 220px; }
+.report-skeleton .sk-line { width: 70%; }
 
 /* 知识库优化 */
 .todo-check { cursor: pointer; font-size: 14px; opacity: .8; }
@@ -3397,6 +3487,7 @@ button {
 .onboarding-step-num { font-size: 11px; opacity: 0.5; font-weight: 600; letter-spacing: 0.5px; }
 .onboarding-text { margin: 0 0 12px; line-height: 1.6; font-size: 13.5px; opacity: 0.9; }
 .onboarding-hint { font-size: 12px; opacity: 0.75; padding: 8px 12px; background: rgba(79,140,255,0.08); border-left: 2px solid var(--accent, #4f8cff); border-radius: 0 6px 6px 0; }
+.onboarding-hint-branch { margin-top: 6px; background: rgba(245,158,11,0.10); border-left-color: #f59e0b; font-weight: 500; }
 .onboarding-footer { padding: 10px 20px; }
 .onboarding-skip-hint { font-size: 11.5px; opacity: 0.5; cursor: pointer; padding: 4px 8px; }
 .onboarding-skip-hint:hover { opacity: 0.85; text-decoration: underline; }

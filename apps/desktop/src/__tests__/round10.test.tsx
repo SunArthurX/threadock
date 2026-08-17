@@ -293,6 +293,30 @@ describe("代码高亮：边界情况", () => {
   });
 });
 
+describe("代码高亮：block-level 多行字符串（round 25 P2-2 回归）", () => {
+  it("Python 三引号字符串整段当 string（不被行扫描切碎）", () => {
+    const code = 'msg = """\nhello\nworld\ndef not_keyword:\n"""';
+    const html = renderToStaticMarkup(<code>{highlightCode(code, "python")}</code>);
+    // 多行字符串中不应有独立的 def keyword 切出
+    expect(/tok-keyword">def</.test(html)).toBe(false);
+  });
+
+  it("JS 模板字面量（含 ${...}）整段当 string", () => {
+    const code = "const s = `hi ${name} world`;";
+    const html = renderToStaticMarkup(<code>{highlightCode(code, "js")}</code>);
+    // const 应是 keyword，但 ${...} 内部不被破坏
+    expect(html).toContain("tok-keyword");
+    expect(html).toContain("const");
+  });
+
+  it("Rust raw string r#\"...\"# 整段当 string", () => {
+    const code = 'let s = r#"raw "with quote" and stuff"#;';
+    const html = renderToStaticMarkup(<code>{highlightCode(code, "rs")}</code>);
+    // let 仍是 keyword；raw string 内部不应被拆 string 再 string
+    expect(html).toContain("let");
+  });
+});
+
 describe("BarChart 横向网格线", () => {
   it("渲染 3 条 .barchart-grid-line（25% / 50% / 75%）", () => {
     const { container } = render(<BarChart data={[{ label: "a", value: 10 }]} />);

@@ -13,12 +13,19 @@ export const PROVIDER_META: Record<string, { label: string; color: string }> = {
 };
 export const meta = (p: string) => PROVIDER_META[p] ?? { label: p, color: "#8b96ad" };
 
-export function AnimatedKpi({ label, num, fmt, sub, danger }: {
-  label: string; num: number; fmt: (v: number) => string; sub: string; danger?: boolean;
+export function AnimatedKpi({ label, num, fmt, sub, danger, onClick }: {
+  label: string; num: number; fmt: (v: number) => string; sub: string; danger?: boolean; onClick?: () => void;
 }) {
   const v = useCountUp(num);
+  const interactive = !!onClick;
   return (
-    <div className={`ops-kpi ${danger ? "danger" : ""}`}>
+    <div
+      className={`ops-kpi ${danger ? "danger" : ""} ${interactive ? "clickable" : ""}`}
+      onClick={onClick}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}
+    >
       <div className="ops-kpi-value">{fmt(v)}</div>
       <div className="ops-kpi-label">{label}</div>
       <div className="ops-kpi-sub">{sub}</div>
