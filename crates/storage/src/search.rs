@@ -315,7 +315,7 @@ pub fn filter_conversation_ids(
         Some("archived") => where_clauses.push("is_archived = 1".to_string()),
         Some("deleted") => where_clauses.push("source_status = 'deleted'".to_string()),
         Some("active") => {
-            where_clauses.push("source_status != 'deleted' AND is_archived = 0".to_string())
+            where_clauses.push("source_status != 'deleted' AND is_archived = 0".to_string());
         }
         _ => {}
     }
