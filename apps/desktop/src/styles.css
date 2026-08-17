@@ -3615,3 +3615,59 @@ button {
 /* Settings / Knowledge / Help / Onboarding / Changelog / Report modal 自适应视口 */
 .settings-modal { max-width: 92vw; max-height: 88vh; overflow: hidden; display: flex; flex-direction: column; }
 .settings-modal .settings-body { overflow-y: auto; flex: 1; min-height: 0; }
+
+/* ── v1.0.0 保存搜索：列表内删除按钮 ───────────────────────────── */
+.saved-search-del {
+  opacity: 0.55;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1;
+}
+.saved-search-del:hover {
+  opacity: 1;
+  color: var(--danger, #e5484d);
+}
+
+/* ── v1.0.0 原始视图（Raw Store 未标准化归档，只读）────────────── */
+.raw-payload-view {
+  margin: 8px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--bg-inset, rgba(127, 127, 127, 0.08));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+/* ── v1.0.0 Workspace 管理（设置页分区）────────────────────────── */
+.ws-admin-list { max-height: 260px; margin-top: 6px; }
+.ws-admin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.ws-admin-row:hover { background: var(--bg-inset, rgba(127, 127, 127, 0.08)); }
+.ws-admin-name {
+  flex: 1;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-conf-badge {
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.ws-conf-badge.ok { opacity: 0.7; }
+.ws-conf-badge.low {
+  background: rgba(229, 72, 77, 0.16);
+  color: var(--danger, #e5484d);
+}

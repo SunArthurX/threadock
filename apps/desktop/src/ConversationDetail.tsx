@@ -1,5 +1,6 @@
-// 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制）
+// 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制/原始视图/来源应用）
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
@@ -71,6 +72,37 @@ export default function ConversationDetail({
 
   // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
   const [showJumpBottom, setShowJumpBottom] = useState(false);
+
+  // ── 原始视图 / 来源应用 / 恢复命令（plan P2-3，v1.0.0）──────────────
+  const [rawView, setRawView] = useState(false);
+  const [rawContent, setRawContent] = useState<string | null>(null);
+  // 切换会话时退出原始视图（受控状态随 conv.id 重置）
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- conv.id 变化时同步重置派生 UI 状态，属 prop 同步模式
+  useEffect(() => { setRawView(false); setRawContent(null); }, [conv.id]);
+  const toggleRawView = async () => {
+    if (rawView) { setRawView(false); return; }
+    try {
+      const raw = await invoke<string | null>("conversation_raw", { conversationId: conv.id });
+      setRawContent(raw ?? null);
+      setRawView(true);
+    } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
+  };
+  const openSourceApp = async () => {
+    try {
+      const msg = await invoke<string>("open_source_app", { provider: conv.provider });
+      showToast(msg, "info");
+    } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
+  };
+  const copyResumeCommand = async () => {
+    try {
+      const cmd = await invoke<string | null>("resume_command", { conversationId: conv.id });
+      if (!cmd) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
+      const r = await copyToClipboard(cmd);
+      if (r.ok) showToast(`✓ 已复制：${cmd}`, "info");
+      else showToast(r.error ?? "复制失败", "error");
+    } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
+  };
+
   /** 解析父级滚动容器：ScrollArea 的 ref 可能是 { inner } 包装，也可能是原生 HTMLElement。 */
   const scrollEl = useCallback((): HTMLElement | null => {
     const cur = scrollContainerRef?.current ?? null;
@@ -289,6 +321,19 @@ export default function ConversationDetail({
         <button className={`action-btn ${timelineMode ? "active" : ""}`} onClick={onToggleTimeline}>
           {timelineMode ? "💬 消息" : "🕐 时间线"}
         </button>
+        <button
+          className={`action-btn ${rawView ? "active" : ""}`}
+          onClick={toggleRawView}
+          title="切换原始视图：显示 Raw Store 里的未标准化原始归档（plan P2-3）"
+        >
+          {rawView ? "🔤 统一视图" : "🗂 原始视图"}
+        </button>
+        <button className="action-btn" onClick={openSourceApp} title="打开该会话的来源应用（Cursor / ZCode / MiniMax Code）">
+          ↗ 来源应用
+        </button>
+        <button className="action-btn" onClick={copyResumeCommand} title="复制「恢复原会话」命令（claude-code / codex CLI 来源支持）">
+          ⏯ 恢复命令
+        </button>
         <button className="action-btn" onClick={onExtractKnowledge} disabled={loading || messages.length === 0}>
           {loading ? "提取中…" : "✨ 知识"}
         </button>
@@ -393,8 +438,14 @@ export default function ConversationDetail({
         <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
-      {timelineMode && !loading && renderTimeline()}
-      {!timelineMode && visibleMsgs.map((m) => {
+      {/* 原始视图（plan P2-3）：Raw Store 未标准化归档，只读展示 */}
+      {rawView && !loading && (
+        rawContent === null
+          ? <div className="empty">该会话没有原始归档（直读导入的来源不落 Raw Store）</div>
+          : <pre className="raw-payload-view">{rawContent}</pre>
+      )}
+      {!rawView && timelineMode && !loading && renderTimeline()}
+      {!rawView && !timelineMode && visibleMsgs.map((m) => {
         const isMatch = !!search.trim() && currentMatch?.kind === "msg" && currentMatch?.id === m.id;
         return (
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
@@ -415,7 +466,7 @@ export default function ConversationDetail({
         </div>
         );
       })}
-      {events.length > 0 && (<>
+      {!rawView && events.length > 0 && (<>
         <div className="events-header">执行事件 ({events.length})</div>
         {events.map((e) => (
           <div key={e.id} className={`event ${e.event_type}`}>

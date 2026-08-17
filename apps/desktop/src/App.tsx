@@ -480,6 +480,33 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem(SEARCH_HISTORY_KEY) ?? "[]") as string[]; } catch { return []; }
   });
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  // ── 保存的搜索（plan §13.2，v1.0.0：跨会话持久，服务端 V14 表）──────
+  const [savedSearches, setSavedSearches] = useState<{ id: string; name: string; query_text: string }[]>([]);
+  const loadSavedSearches = async () => {
+    try { setSavedSearches(await invoke("saved_search_list")); } catch { /* 后台加载失败不打断 UI */ }
+  };
+  // 挂载时拉一次保存搜索列表（数据加载模式，setState 在异步回调里）
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- 数据加载 effect：加载完成后才 setState，非同步级联
+  useEffect(() => { void loadSavedSearches(); }, []);
+  const saveCurrentSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    const name = window.prompt("给这条搜索起个名字：", q.slice(0, 24));
+    if (name === null) return;
+    if (!name.trim()) { showToast("名称不能为空", "error"); return; }
+    try {
+      await invoke("saved_search_upsert", { name: name.trim(), query: q });
+      showToast("✓ 已保存搜索", "info");
+      await loadSavedSearches();
+    } catch (e) { showError(e); }
+  };
+  const deleteSavedSearch = async (id: string) => {
+    try {
+      await invoke("saved_search_delete", { id });
+      await loadSavedSearches();
+    } catch (e) { showError(e); }
+  };
   const addSearchHistory = (q: string) => {
     const trimmed = q.trim();
     if (!trimmed) return;
@@ -763,19 +790,35 @@ export default function App() {
             ) : syncResult && <span className="sync-status done">{syncResult}</span>}
 
             <div className="search-box">
-              <input ref={searchInputRef} type="text" placeholder="搜索所有会话…  (⌘K 唤起命令面板)"
+              <input ref={searchInputRef} type="text" placeholder="搜索所有会话… 支持 provider:/workspace:/type:/status:/file:/model:/after:/before: 前缀"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doSearch()}
                 onFocus={() => setHistoryOpen(true)}
                 onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
               <button onClick={() => doSearch()}>搜索</button>
+              <button className="kb-copy" title="保存当前搜索条件（可再次一键执行）" disabled={!searchQuery.trim()}
+                onClick={saveCurrentSearch}>☆ 保存</button>
               {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
-              {historyOpen && searchHistory.length > 0 && !searchResults && (
+              {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchResults && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
-                  <div className="search-history-head">
-                    <span>最近搜索</span>
-                    <button className="kb-copy" onClick={clearSearchHistory} title="清空历史">清空</button>
-                  </div>
+                  {savedSearches.length > 0 && (
+                    <div className="search-history-head">
+                      <span>保存的搜索</span>
+                    </div>
+                  )}
+                  {savedSearches.map((s) => (
+                    <button key={s.id} className="search-history-item" onClick={() => { setSearchQuery(s.query_text); setHistoryOpen(false); doSearch(s.query_text); }}>
+                      <span className="search-history-q">⭐ {s.name}</span>
+                      <span className="search-history-hint saved-search-del" title="删除这条保存的搜索"
+                        onClick={(e) => { e.stopPropagation(); deleteSavedSearch(s.id); }}>×</span>
+                    </button>
+                  ))}
+                  {searchHistory.length > 0 && (
+                    <div className="search-history-head">
+                      <span>最近搜索</span>
+                      <button className="kb-copy" onClick={clearSearchHistory} title="清空历史">清空</button>
+                    </div>
+                  )}
                   {searchHistory.map((q, i) => (
                     <button key={i} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
                       <span className="search-history-q">{q}</span>
@@ -978,6 +1021,13 @@ export default function App() {
                       // 复用单条同款助手：避免「用 source_conversation_id 撤销导致恢复失败」
                       const targets = conversations.filter((c) => ids.includes(c.id));
                       await performSoftDeleteWithUndo(targets);
+                    }}
+                    onBulkSplit={async (ids, name) => {
+                      try {
+                        await invoke("workspace_split", { conversationIds: ids, newName: name });
+                        showToast(`✓ 已把 ${ids.length} 条会话拆分到「${name}」`, "info");
+                        loadConversations();
+                      } catch (e) { showError(e); }
                     }}
                     onClearWs={() => { setSelectedWs(null); setConversations([]); }} />}
             </ScrollArea>

@@ -144,13 +144,15 @@ interface Props {
   onBulkDelete?: (ids: string[]) => Promise<void> | void;
   /** 批量加标签（每个 id 都会调一次 add_tag，未来可加 batch 接口） */
   onBulkAddTag?: (ids: string[], tag: string) => Promise<void> | void;
+  /** 批量拆分：把选中会话移到新 Workspace（plan §4.3 手动拆分，v1.0.0） */
+  onBulkSplit?: (ids: string[], newWorkspaceName: string) => Promise<void> | void;
 }
 
 export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
   expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onArchiveOne, onDeleteOne, onCopyTitle, onRestore,
-  onBulkFavorite, onBulkArchive, onBulkDelete, onBulkAddTag,
+  onBulkFavorite, onBulkArchive, onBulkDelete, onBulkAddTag, onBulkSplit,
 }: Props) {
   const [dateFilter, setDateFilter] = useState<DateFilter>(() => loadLS(DATE_KEY, ["all", "today", "week", "month"] as const, "all"));
   const [sortBy, setSortBy] = useState<SortBy>(() => loadLS(SORT_KEY, ["updated", "created", "title"] as const, "updated"));
@@ -496,6 +498,11 @@ export default function ConversationList({
             }}
             title="输入标签名后按 Enter（自动去 # 前缀）"
           />
+          <button className="bulk-btn" title="把这批会话拆分到一个新 Workspace（plan §4.3 手动拆分）" onClick={() => {
+            const name = window.prompt(`把选中的 ${selectedIds.size} 条会话移到新 Workspace，输入名称：`);
+            if (!name?.trim()) return;
+            onBulkSplit?.([...selectedIds], name.trim());
+          }}>📂 拆分到新 Workspace</button>
           <button className="bulk-btn danger" onClick={() => {
             onBulkDelete?.([...selectedIds]);
             setSelectedIds(new Set());

@@ -16,6 +16,7 @@ import { showToast } from "./toast";
 import { formatTime } from "./types";
 import { exportAllSettings, importAllSettings, defaultSettingsFilename } from "./settingsIO";
 import ScrollArea from "./ScrollArea";
+import WorkspaceSection from "./WorkspaceSection";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
 
@@ -308,6 +309,8 @@ export default function SettingsView({
               <button className="action-btn" onClick={() => { onClose(); onNavigate("security"); }}>前往 安全 页 →</button>
             </div>
           </section>
+
+          <WorkspaceSection />
 
           <section className="settings-section">
             <h3>存储与维护</h3>
