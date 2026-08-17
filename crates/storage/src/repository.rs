@@ -648,8 +648,7 @@ impl Repository {
         // ① 收集被删 conversations 的本地 id + 源侧 source_conversation_id
         // （后者用于清 import_state——否则重置后 autoSync 走增量会全 skip，导致"重置 = 数据丢失"）
         let conv_ids: Vec<String> = {
-            let mut stmt =
-                conn.prepare("SELECT id FROM conversations WHERE updated_at >= ?1")?;
+            let mut stmt = conn.prepare("SELECT id FROM conversations WHERE updated_at >= ?1")?;
             let rows = stmt.query_map(params![start_ms], |r| r.get(0))?;
             rows.collect::<rusqlite::Result<Vec<_>>>()?
         };
@@ -701,11 +700,9 @@ impl Repository {
             // ⑤ 同步清 import_state（用 source_conversation_id 匹配）—— 否则 autoSync 增量会全 skip
             if !source_ids.is_empty() {
                 for chunk in source_ids.chunks(500) {
-                    let placeholders =
-                        chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-                    let sql = format!(
-                        "DELETE FROM import_state WHERE source_id IN ({placeholders})"
-                    );
+                    let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+                    let sql =
+                        format!("DELETE FROM import_state WHERE source_id IN ({placeholders})");
                     conn.execute(&sql, rusqlite::params_from_iter(chunk.iter()))?;
                 }
             }
@@ -1341,7 +1338,11 @@ impl Repository {
 
     /// 设置用户自定义标题（user_title）。传空串或 null 表示清除。
     /// 原始 title（agent 提取）保留不变；前端展示用 COALESCE(user_title, title)。
-    pub fn set_user_title(&self, conversation_id: &str, user_title: Option<&str>) -> StorageResult<()> {
+    pub fn set_user_title(
+        &self,
+        conversation_id: &str,
+        user_title: Option<&str>,
+    ) -> StorageResult<()> {
         let conn = self.conn.lock().expect("mutex poisoned");
         // 空串视为清除
         let normalized = user_title.map(|s| s.trim()).filter(|s| !s.is_empty());
@@ -1381,7 +1382,10 @@ impl Repository {
         let now_ms = timestamp::to_millis(Some(now_utc())).expect("timestamp conversion failed");
         let trimmed = note.map(|s| s.trim()).filter(|s| !s.is_empty());
         if trimmed.is_none() {
-            conn.execute("DELETE FROM conversation_notes WHERE conversation_id = ?1", [conversation_id])?;
+            conn.execute(
+                "DELETE FROM conversation_notes WHERE conversation_id = ?1",
+                [conversation_id],
+            )?;
             return Ok(0);
         }
         let text = trimmed.unwrap();
@@ -1484,7 +1488,9 @@ impl Repository {
              ORDER BY cnt DESC, tag ASC
              LIMIT ?1",
         )?;
-        let rows = stmt.query_map([limit], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+        })?;
         let mut v = Vec::new();
         for r in rows {
             v.push(r?);
@@ -2034,9 +2040,9 @@ mod tests {
         };
         // 在「昨天 23:30」「今天 00:30」「今天 01:00」三处插 3 条（localtime 下覆盖跨日）
         let day_ms = 86_400_000_i64;
-        let ts1 = now_ms - day_ms - 30 * 60_000;     // 昨天 23:30（UTC）
-        let ts2 = now_ms - 30 * 60_000;              // 今天 00:30（UTC）
-        let ts3 = now_ms;                              // 现在
+        let ts1 = now_ms - day_ms - 30 * 60_000; // 昨天 23:30（UTC）
+        let ts2 = now_ms - 30 * 60_000; // 今天 00:30（UTC）
+        let ts3 = now_ms; // 现在
         {
             let conn = r.conn.lock().expect("mutex");
             conn.execute(
@@ -2057,7 +2063,11 @@ mod tests {
         // 工作日+周末拆分总数应等于 3
         let weekend_total: i64 = stats.hourly_weekend.iter().map(|h| h.calls).sum();
         let weekday_total: i64 = stats.hourly_weekday.iter().map(|h| h.calls).sum();
-        assert_eq!(weekend_total + weekday_total, 3, "工作日+周末 总数应等于 3 条");
+        assert_eq!(
+            weekend_total + weekday_total,
+            3,
+            "工作日+周末 总数应等于 3 条"
+        );
         // tools_trend 按月聚合：应至少有 1 行
         assert!(!stats.tools_trend.is_empty());
         // tool_daily 应含 Bash 工具
@@ -2154,28 +2164,28 @@ mod tests {
                 &ConversationFilter::new().with_started_range_ms(300_000, 700_000),
             )
             .expect("unexpected None");
-        assert_eq!(in_range.len(), 1, "应只命中 started_at ∈ [300s, 700s] 的会话");
+        assert_eq!(
+            in_range.len(),
+            1,
+            "应只命中 started_at ∈ [300s, 700s] 的会话"
+        );
         assert!(in_range[0].source_conversation_id.contains("date-in"));
 
         // 只有 from ≥ 300s → c2 + c3
         let after = r
-            .list_conversations_filtered(
-                &ConversationFilter {
-                    started_after_ms: Some(300_000),
-                    ..ConversationFilter::new()
-                },
-            )
+            .list_conversations_filtered(&ConversationFilter {
+                started_after_ms: Some(300_000),
+                ..ConversationFilter::new()
+            })
             .expect("unexpected None");
         assert_eq!(after.len(), 2);
 
         // 只有 to ≤ 700s → c1 + c2
         let before = r
-            .list_conversations_filtered(
-                &ConversationFilter {
-                    started_before_ms: Some(700_000),
-                    ..ConversationFilter::new()
-                },
-            )
+            .list_conversations_filtered(&ConversationFilter {
+                started_before_ms: Some(700_000),
+                ..ConversationFilter::new()
+            })
             .expect("unexpected None");
         assert_eq!(before.len(), 2);
     }

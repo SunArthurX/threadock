@@ -1345,10 +1345,7 @@ impl Repository {
     /// 返回具名字段的对象（前端按 `{ day, calls, sessions }` 读）。
     /// 改前是 `Vec<(String, i64, i64)>`，serde 默认序列化为 `[["2026-08-10", 5, 2]]`，
     /// 前端当对象读全是 `undefined`，导致统计 NaN 且 `month.slice(2)` 抛错。
-    pub fn activity_stats(
-        &self,
-        days: i64,
-    ) -> StorageResult<ActivityStats> {
+    pub fn activity_stats(&self, days: i64) -> StorageResult<ActivityStats> {
         let conn = self.conn.lock().expect("mutex poisoned");
         let cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days * 86_400_000;
 
@@ -1390,7 +1387,11 @@ impl Repository {
             let mut we = vec![0i64; 24];
             let mut total = vec![0i64; 24];
             let rows = stmt.query_map(params![cutoff], |r| {
-                Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, i64>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?;
             for row in rows {
                 let (h, dow, c) = row?;
@@ -1404,9 +1405,18 @@ impl Repository {
                 }
             }
             for h in 0..24 {
-                hourly.push(HourBucket { hour: h as i64, calls: total[h] });
-                hourly_weekday.push(HourBucket { hour: h as i64, calls: wd[h] });
-                hourly_weekend.push(HourBucket { hour: h as i64, calls: we[h] });
+                hourly.push(HourBucket {
+                    hour: h as i64,
+                    calls: total[h],
+                });
+                hourly_weekday.push(HourBucket {
+                    hour: h as i64,
+                    calls: wd[h],
+                });
+                hourly_weekend.push(HourBucket {
+                    hour: h as i64,
+                    calls: we[h],
+                });
             }
         }
 
@@ -1433,8 +1443,8 @@ impl Repository {
         // 日级工具分布：按天 + 工具聚合（仅最近 90 天避免数据爆炸）
         let mut tool_daily: Vec<DailyTool> = Vec::new();
         {
-            let day_cutoff = timestamp::to_millis(Some(now_utc())).unwrap_or(0)
-                - days.min(90) * 86_400_000;
+            let day_cutoff =
+                timestamp::to_millis(Some(now_utc())).unwrap_or(0) - days.min(90) * 86_400_000;
             let mut stmt = conn.prepare(
                 "SELECT date(ts/1000,'unixepoch','localtime') AS d, tool_name, COUNT(*)
                  FROM tool_call_records WHERE ts >= ?1 AND ts IS NOT NULL
@@ -1499,7 +1509,10 @@ impl Repository {
 
     /// 按 source_dir 列出 conversations（项目页「查看会话」用）。
     /// 路径匹配与 projects_overview 口径一致：空串视为「(未知目录)」。
-    pub fn conversations_by_source_dir(&self, dir: &str) -> StorageResult<Vec<ch_domain::Conversation>> {
+    pub fn conversations_by_source_dir(
+        &self,
+        dir: &str,
+    ) -> StorageResult<Vec<ch_domain::Conversation>> {
         let conn = self.conn.lock().expect("mutex poisoned");
         // projects_overview 把空/缺失归并为 (未知目录)；这里用哨兵 "__MISSING__" 走 NULL/空 匹配
         let sentinel = if dir.is_empty() || dir == "(未知目录)" {

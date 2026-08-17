@@ -18,7 +18,7 @@ pub use repository::{
     AuditMessageRow, AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyTool,
     DailyUsage, DirCost, GovernanceLogRow, HeatCell, HourBucket, KnowledgeRecord, LatencyStat,
     ModelUsage, MonthProjection, NoteDto, OpsOverview, PolicyRuleRecord, ProviderUsage,
-    RedactionRuleRecord, Repository, TagCountDto, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
-    WeeklySummary,
+    RedactionRuleRecord, Repository, TagCountDto, TokenWaste, ToolTrend, ToolUsageRow,
+    UsageSummary, WeeklySummary,
 };
 pub use search::{build_match_expr, PromptReuseHit, SearchQuery, SearchResult};

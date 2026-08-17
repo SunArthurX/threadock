@@ -429,11 +429,9 @@ mod tests {
         use ch_domain::{Timestamp, UsageRecord, UsageStatus};
 
         let repo = Repository::open_in_memory().expect("unexpected None");
-        let f = write_md(
-            "# ProjectDirTest\n\n## User\nhi\n## Assistant\nhello\n",
-        );
-        let summary = import_markdown(&repo, None, f.path(), Some("project-x"))
-            .expect("unexpected None");
+        let f = write_md("# ProjectDirTest\n\n## User\nhi\n## Assistant\nhello\n");
+        let summary =
+            import_markdown(&repo, None, f.path(), Some("project-x")).expect("unexpected None");
         let conv = repo
             .get_conversation(&summary.conversation_id)
             .expect("get_conversation")
@@ -465,7 +463,10 @@ mod tests {
 
         // 之前会因 `u.source_conversation_id` 列不存在而炸：no such column
         let res = repo.conversations_by_source_dir("project-x");
-        assert!(res.is_ok(), "conversations_by_source_dir must not fail: {res:?}");
+        assert!(
+            res.is_ok(),
+            "conversations_by_source_dir must not fail: {res:?}"
+        );
         let list = res.unwrap();
         assert_eq!(list.len(), 1, "应找到 1 条 source_dir=project-x 的会话，conv.id={:?} conv.source_conversation_id={:?} usage.source_session_id={:?}", conv.id, conv.source_conversation_id, source_session_id);
         assert_eq!(list[0].id, conv.id);
@@ -584,7 +585,12 @@ mod tests {
             .prompt_reuse_search("MySQL", 10)
             .expect("prompt reuse search");
         let first_cost = hits[0].cost_usd;
-        assert_eq!(hits.len(), 2, "应命中 2 条 user 消息（会话 1 + 2）：got {}", hits.len());
+        assert_eq!(
+            hits.len(),
+            2,
+            "应命中 2 条 user 消息（会话 1 + 2）：got {}",
+            hits.len()
+        );
         // 全部是 user 角色（过滤掉了 assistant / system / tool）
         for h in &hits {
             assert!(
@@ -610,9 +616,7 @@ mod tests {
         }
 
         // 边界：空 query 返回空
-        let empty = repo
-            .prompt_reuse_search("", 10)
-            .expect("empty query");
+        let empty = repo.prompt_reuse_search("", 10).expect("empty query");
         assert!(empty.is_empty(), "空 query 必须返回空列表");
 
         // 边界：不存在的关键词返回空
