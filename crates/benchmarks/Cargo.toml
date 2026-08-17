@@ -12,6 +12,7 @@ ch-storage = { path = "../storage" }
 ch-search = { path = "../search" }
 ch-normalization = { path = "../normalization" }
 ch-adapter-markdown = { path = "../adapter-markdown" }
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
 tempfile = "3"

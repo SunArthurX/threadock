@@ -5,7 +5,9 @@
 //! 这些测试标记为 #[ignore]，因为它们需要较长时间和数据量。
 //! 普通 `cargo test` 不会跑它们。
 
-use ch_benchmarks::{bench_fts5_search, bench_tantivy_search, percentile, seed_conversations};
+use ch_benchmarks::{
+    bench_fts5_search, bench_tantivy_search, percentile, seed_bulk_fast, seed_conversations,
+};
 use ch_search::index::IndexableMessage;
 use ch_storage::{Repository, SearchQuery};
 use tempfile::TempDir;
@@ -169,24 +171,16 @@ fn bench_smoke() {
 }
 
 /// Gate 1 红线（plan §1.4/Phase 2 验收）：**10 万会话**规模下搜索 P95 < 300ms。
-/// 与上面的小规模用例分开：seed 100k 会话耗时数分钟，仅在发布前跑。
+/// seed 用 [`seed_bulk_fast`]（分块事务直写，FTS5 触发器生效）——
+/// 逐条 upsert 的慢路径在 10 万级要 ~1 小时，且测的是导入吞吐不是搜索。
 /// 运行：`cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --nocapture`
 #[test]
 #[ignore = "10 万会话 seed 需数分钟，仅发布前验证"]
 fn large_scale_search_gate1() {
     let dir = TempDir::new().expect("tempdir creation failed");
-    let repo = Repository::open(dir.path().join("bench-large.db")).expect("unexpected None");
-
-    // 20000 会话 × 5 消息 = 10 万消息；会话数按 Gate 1 的 100k 会话口径再乘 5 批
-    // （用 20k×5 批循环写满 100k 会话，避免单次内存峰值）
-    let start = std::time::Instant::now();
-    let mut total_msgs = 0usize;
-    const BATCHES: usize = 5;
-    for _ in 0..BATCHES {
-        let (_ms, msgs, _n) = seed_conversations(&repo, 20_000, 5);
-        total_msgs += msgs;
-    }
-    let seed_secs = start.elapsed().as_secs_f64();
+    let db = dir.path().join("bench-large.db");
+    let (seed_secs, total_msgs) = seed_bulk_fast(&db, 100_000, 5);
+    let repo = Repository::open(&db).expect("unexpected None");
     let n_conv = repo
         .list_conversations(None)
         .expect("unexpected None")
@@ -205,11 +199,11 @@ fn large_scale_search_gate1() {
     println!("┌──────────────────────────────────────────────────┐");
     println!("│ Gate 1 大规模基准：100k 会话 FTS5 P95 < 300ms     │");
     println!("├──────────────────────────────────────────────────┤");
-    println!("│ 会话数:   {n_conv:>10}                              ");
-    println!("│ 消息数:   {total_msgs:>10}                              ");
-    println!("│ seed 耗时: {seed_secs:>8.1} s                        ");
-    println!("│ 查询次数: {count:>10}                                ");
-    println!("│ P95 延迟: {p95:>10.1} ms                             ");
+    println!("│ 会话数:    {n_conv:>10}");
+    println!("│ 消息数:    {total_msgs:>10}");
+    println!("│ seed 耗时: {seed_secs:>8.1} s");
+    println!("│ 查询次数:  {count:>10}");
+    println!("│ P95 延迟:  {p95:>10.1} ms");
     println!(
         "│ 结果:     {}",
         if p95 < 300.0 { "✓ PASS" } else { "✗ FAIL" }
