@@ -447,7 +447,7 @@ pub(crate) async fn knowledge_xref(
         }
         // 取 Top 10
         let mut ranked: Vec<(String, i64)> = by_conv.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|x| std::cmp::Reverse(x.1));
         ranked.truncate(10);
         let mut convs = Vec::with_capacity(ranked.len());
         for (cid, _n) in &ranked {

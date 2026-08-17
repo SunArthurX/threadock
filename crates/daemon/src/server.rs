@@ -1024,12 +1024,12 @@ mod tests {
             .expect("unexpected None")
             .starts_with("conv_"));
         assert_eq!(result["messages"], 2);
-        assert!(
+        assert_eq!(
             result["raw_payload_id"]
                 .as_str()
                 .expect("unexpected None")
-                .len()
-                == 64
+                .len(),
+            64
         );
 
         // 导入后能搜到

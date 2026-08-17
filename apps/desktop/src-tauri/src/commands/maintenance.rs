@@ -627,7 +627,7 @@ mod reset_range_tests {
         let (_d, state) = make_state();
         let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let old_conv_ms = now_ms - 30 * 86_400_000;
-        let new_conv_ms = now_ms - 1 * 86_400_000;
+        let new_conv_ms = now_ms - 86_400_000;
         let usage_ms = now_ms - 60 * 86_400_000; // 应是最小
 
         let repo = state.repo.lock().expect("mutex poisoned");

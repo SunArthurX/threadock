@@ -369,7 +369,7 @@ pub(crate) async fn knowledge_base_list(
             .is_none()
         {
             let updated = ch_storage::timestamp::to_millis(c.updated_at).unwrap_or(0);
-            let provider_str = serde_json::to_value(&c.provider)
+            let provider_str = serde_json::to_value(c.provider)
                 .ok()
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| format!("{:?}", c.provider));
