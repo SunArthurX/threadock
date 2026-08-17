@@ -97,14 +97,40 @@ struct SchemaFields {
     body: Field,
 }
 
-fn build_schema() -> (Schema, SchemaFields) {
+/// 中文分词器选择（plan §13.1「分词器可插拔 + N-gram 兜底」）。
+///
+/// - `NGram`：默认。双字 N-gram，零词典依赖，中文召回稳定。
+/// - `Jieba`：需 `jieba` feature。词典分词，准确率高、索引更小；
+///   **切换分词器必须重建索引**（旧文档按旧分词写入，混用会导致查询不命中；
+///   GUI「设置 → 存储 → 重建索引」或 `rebuild_search_index` 命令）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChineseTokenizer {
+    #[default]
+    NGram,
+    #[cfg(feature = "jieba")]
+    Jieba,
+}
+
+impl ChineseTokenizer {
+    /// 写进 schema 的分词器注册名（决定索引期与查询期用同一套分词）。
+    #[must_use]
+    pub fn registry_name(self) -> &'static str {
+        match self {
+            Self::NGram => "ngram",
+            #[cfg(feature = "jieba")]
+            Self::Jieba => "jieba",
+        }
+    }
+}
+
+fn build_schema(tokenizer: ChineseTokenizer) -> (Schema, SchemaFields) {
     let mut schema_builder = Schema::builder();
 
-    // 文本字段：用 ngram 分词（中文友好），title/body 启用索引与存储
+    // 文本字段：按选择的中文分词器（默认 ngram），title/body 启用索引与存储
     let text_opts = TextOptions::default()
         .set_indexing_options(
             TextFieldIndexing::default()
-                .set_tokenizer("ngram")
+                .set_tokenizer(tokenizer.registry_name())
                 .set_index_option(IndexRecordOption::WithFreqsAndPositions),
         )
         .set_stored();
@@ -129,7 +155,7 @@ fn build_schema() -> (Schema, SchemaFields) {
     (schema_builder.build(), fields)
 }
 
-/// 注册 N-gram 分词器（min=2, max=2，覆盖中文双字召回）。
+/// 注册分词器：ngram（默认）+ raw（ID 精确匹配）+ jieba（可选 feature）。
 fn register_tokenizers(index: &TantivyIndex) {
     let ngram = TextAnalyzer::builder(NgramTokenizer::new(2, 2, false).expect("unexpected None"))
         .filter(LowerCaser)
@@ -144,6 +170,83 @@ fn register_tokenizers(index: &TantivyIndex) {
         "raw",
         TextAnalyzer::builder(RawTokenizer::default()).build(),
     );
+    #[cfg(feature = "jieba")]
+    tokenizers.register(
+        "jieba",
+        TextAnalyzer::builder(jieba_tokenizer::JiebaTokenizer).build(),
+    );
+}
+
+/// jieba 分词的 tantivy TokenStream 适配（feature = "jieba" 时编译）。
+///
+/// 直接适配而不依赖 tantivy-jieba 三方 crate：避免其与 tantivy 0.26 的
+/// 版本耦合。词典（~5MB）通过全局 OnceLock 单例共享，Tokenizer 本体是
+/// 零大小 unit struct（满足 tantivy 的 Clone bound 且不复制词典）。
+#[cfg(feature = "jieba")]
+mod jieba_tokenizer {
+    use jieba_rs::Jieba;
+    use std::sync::OnceLock;
+    use tantivy::tokenizer::{Token, TokenStream, Tokenizer};
+
+    static JIEBA: OnceLock<Jieba> = OnceLock::new();
+
+    fn global_jieba() -> &'static Jieba {
+        JIEBA.get_or_init(Jieba::new)
+    }
+
+    #[derive(Debug, Default, Clone, Copy)]
+    pub struct JiebaTokenizer;
+
+    impl Tokenizer for JiebaTokenizer {
+        type TokenStream<'a> = JiebaTokenStream<'a>;
+        fn token_stream<'a>(&'a mut self, text: &'a str) -> Self::TokenStream<'a> {
+            // Search 模式：对长词再切子词，提升召回；HMM 开启新词发现。
+            // 注意 jieba 的 Token.start/end 是 Unicode 字符位置，
+            // tantivy 要字节偏移 —— 用 byte_start/byte_end。
+            let intervals = global_jieba()
+                .tokenize(text, jieba_rs::TokenizeMode::Search, true)
+                .into_iter()
+                .map(|t| (t.byte_start, t.byte_end))
+                .collect::<Vec<_>>();
+            JiebaTokenStream {
+                text,
+                intervals,
+                index: 0,
+                token: Token::default(),
+            }
+        }
+    }
+
+    pub struct JiebaTokenStream<'a> {
+        text: &'a str,
+        intervals: Vec<(usize, usize)>,
+        index: usize,
+        token: Token,
+    }
+
+    impl TokenStream for JiebaTokenStream<'_> {
+        fn advance(&mut self) -> bool {
+            if self.index >= self.intervals.len() {
+                return false;
+            }
+            let (start, end) = self.intervals[self.index];
+            self.index += 1;
+            self.token = Token {
+                offset_from: start,
+                offset_to: end,
+                position: self.index,
+                text: self.text[start..end].to_lowercase(),
+                position_length: 1,
+            };
+            true
+        }
+        fn token(&self) -> &Token {
+            &self.token
+        }
+        fn token_mut(&mut self) -> &mut Token {
+            &mut self.token
+        }
+    }
 }
 
 /// Tantivy 搜索索引。
@@ -169,9 +272,20 @@ pub struct IndexableMessage {
 }
 
 impl SearchIndex {
-    /// 打开（或创建）位于 `path` 的持久化索引。
+    /// 打开（或创建）位于 `path` 的持久化索引（默认 N-gram 分词）。
     pub fn open(path: impl AsRef<Path>) -> LibResult<Self> {
-        let (schema, fields) = build_schema();
+        Self::open_with_tokenizer(path, ChineseTokenizer::NGram)
+    }
+
+    /// 打开（或创建）索引并指定中文分词器（plan §13.1 可插拔）。
+    ///
+    /// 注意：既有索引的 schema 固定了创建时的分词器；切换分词器后必须
+    /// 重建索引（delete_all + 重灌），否则新旧文档分词不一致导致漏召回。
+    pub fn open_with_tokenizer(
+        path: impl AsRef<Path>,
+        tokenizer: ChineseTokenizer,
+    ) -> LibResult<Self> {
+        let (schema, fields) = build_schema(tokenizer);
         let path_ref = path.as_ref();
         std::fs::create_dir_all(path_ref)?;
         // 判断目录是否已有索引（含 meta.json）
@@ -197,9 +311,14 @@ impl SearchIndex {
         })
     }
 
-    /// 创建内存索引（主要用于测试）。
+    /// 创建内存索引（主要用于测试，默认 N-gram）。
     pub fn open_in_memory() -> LibResult<Self> {
-        let (schema, fields) = build_schema();
+        Self::open_in_memory_with(ChineseTokenizer::NGram)
+    }
+
+    /// 创建指定分词器的内存索引（测试 / jieba 验证用）。
+    pub fn open_in_memory_with(tokenizer: ChineseTokenizer) -> LibResult<Self> {
+        let (schema, fields) = build_schema(tokenizer);
         let index = TantivyIndex::create_in_ram(schema);
         register_tokenizers(&index);
         let reader = index
@@ -748,6 +867,39 @@ mod tests {
             .search(&SearchQuery::new("keyword").with_limit(3))
             .expect("unexpected None");
         assert!(hits.len() <= 3);
+    }
+
+    #[test]
+    fn tokenizer_choice_names() {
+        assert_eq!(ChineseTokenizer::NGram.registry_name(), "ngram");
+        assert!(ChineseTokenizer::default() == ChineseTokenizer::NGram);
+    }
+
+    // jieba 分词器端到端（cargo test -p ch-search --features jieba）
+    #[cfg(feature = "jieba")]
+    #[test]
+    fn jieba_tokenizer_chinese_search() {
+        let idx =
+            SearchIndex::open_in_memory_with(ChineseTokenizer::Jieba).expect("unexpected None");
+        index_samples(
+            &idx,
+            &[msg(
+                "m1",
+                "c1",
+                "数据库连接池",
+                "讨论 PostgreSQL 连接池泄漏的排查方案",
+            )],
+        );
+        // 词典分词：整词查询应命中
+        let hits = idx
+            .search(&SearchQuery::new("连接池"))
+            .expect("SQL execution failed");
+        assert!(!hits.is_empty(), "jieba should match whole word 连接池");
+        // 二级子词也应命中（Search 模式切子词）
+        let sub = idx
+            .search(&SearchQuery::new("泄漏"))
+            .expect("SQL execution failed");
+        assert!(!sub.is_empty(), "jieba Search mode should match sub-words");
     }
 
     #[test]

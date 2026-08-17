@@ -13,6 +13,13 @@ serde.workspace = true
 serde_json.workspace = true
 tantivy.workspace = true
 tracing.workspace = true
+# 可插拔中文分词（plan §13.1）：默认 N-gram 兜底；开 jieba feature 后可用
+# cargo build -p ch-search --features jieba
+jieba-rs = { version = "0.10.3", default-features = false, features = ["default-dict"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+
+[features]
+# 启用 jieba 分词器（词典 ~5MB，编译慢；默认关闭走 N-gram 兜底）
+jieba = ["dep:jieba-rs"]

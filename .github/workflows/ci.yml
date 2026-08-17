@@ -59,6 +59,17 @@ jobs:
       - name: Test (workspace)
         run: cargo test --workspace
 
+  jieba:
+    name: jieba tokenizer feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # plan §13.1 可插拔分词器：jieba feature 默认关闭，单独验证编译+测试
+      - name: Test with jieba feature
+        run: cargo test -p ch-search --features jieba
+
   msrv:
     name: MSRV (1.88)
     runs-on: ubuntu-latest
