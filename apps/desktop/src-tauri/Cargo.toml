@@ -56,4 +56,6 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 tempfile = "3"
+# tauri::test mock app（命令层 E2E 旅程测试用）
+tauri = { version = "2.0", features = ["test"] }
 fs_extra = "1"

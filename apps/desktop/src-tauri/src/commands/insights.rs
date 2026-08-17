@@ -436,6 +436,7 @@ mod activity_tests {
             .expect("file I/O failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
         let repo = state.repo.lock().expect("mutex poisoned");

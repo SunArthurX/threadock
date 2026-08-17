@@ -1091,6 +1091,7 @@ mod backlog_e2e_tests {
         std::fs::copy(&app_db, dir.path().join("threadock.db")).expect("file I/O failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
 

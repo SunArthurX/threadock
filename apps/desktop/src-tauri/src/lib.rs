@@ -46,6 +46,7 @@ pub fn run() {
             // 嵌入 DaemonState（plan §8.2 单点写者），统一持有 repo + search_index + raw_store
             let daemon_state = DaemonState::open(DaemonStateConfig {
                 data_dir: data_dir.clone(),
+                ..Default::default()
             })
             .expect("open daemon state");
             app.manage(daemon_state);
@@ -169,6 +170,9 @@ pub fn run() {
 }
 
 // ── 命令层测试（此前为 0 覆盖）──────────────────────────────────────────
+
+#[cfg(test)]
+mod e2e_journeys;
 
 #[cfg(test)]
 mod tests {

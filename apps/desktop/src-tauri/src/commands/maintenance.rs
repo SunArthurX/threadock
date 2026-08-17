@@ -376,6 +376,7 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
         let raw_store = state.raw_store.lock().expect("mutex poisoned");
@@ -437,6 +438,7 @@ mod tests {
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
         // 导入一条会话（走完整流水线：raw + DB + 索引）
@@ -571,6 +573,7 @@ mod reset_timing_tests {
         }
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
 
@@ -599,6 +602,7 @@ mod reset_range_tests {
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
         (dir, state)
@@ -782,6 +786,7 @@ mod reset_range_tests {
             .expect("file I/O failed");
         let state = DaemonState::open(DaemonStateConfig {
             data_dir: dir.path().to_path_buf(),
+            ..Default::default()
         })
         .expect("state open");
         let now_ms =
