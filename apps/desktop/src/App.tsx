@@ -530,7 +530,9 @@ export default function App() {
       setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
       setCompletenessLabel(detail.completeness_label); setKnowledge(null);
       setDetailTags(detail.tags ?? []);
-      setHighlightMsgId(r.message_id); setCollapsedMsgs(new Set()); setSearchResults(null);
+      // 保留 searchResults：点击结果跳进会话后左栏仍是搜索列表，便于继续逐条浏览；
+      // 退出搜索模式统一走 Esc / 顶栏「清除」（会同时清空 searchQuery）。
+      setHighlightMsgId(r.message_id); setCollapsedMsgs(new Set());
       setTimeout(() => {
         if (loadSeqRef.current !== seq) return;
         document.getElementById(`msg-${r.message_id}`)?.scrollIntoView({behavior:"smooth",block:"center"});
