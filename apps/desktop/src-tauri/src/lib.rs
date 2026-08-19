@@ -64,6 +64,8 @@ pub fn run() {
             extract_knowledge,
             knowledge_xref,
             search,
+            search_grouped,
+            search_tree_hits,
             prompt_reuse_search,
             import_file,
             list_zcode_sessions,

@@ -17,6 +17,21 @@ export interface SearchResult {
   message_id: string; conversation_id: string; provider: string;
   role: string; title: string | null; snippet: string;
 }
+/** 搜索命中按「主对话」分组的聚合行（左栏搜索模式）：
+ *  root_* 是主对话信息；conversation_id 是实际命中的会话（is_child=true 时为子任务）。 */
+export interface SearchHitGroup {
+  root_conversation_id: string;
+  root_title: string | null;
+  root_updated_at_ms: number | null;
+  provider: string;
+  conversation_id: string;
+  title: string | null;
+  is_child: boolean;
+  hit_count: number;
+  best_message_id: string;
+  best_role: string;
+  snippet: string;
+}
 export interface ImportResultDto {
   conversation_id: string; workspace_id: string | null;
   messages: number; events: number; completeness: string;

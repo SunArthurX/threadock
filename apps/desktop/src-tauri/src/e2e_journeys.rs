@@ -309,3 +309,119 @@ fn journey_saved_searches() {
             .is_err()
     );
 }
+
+/// 旅程 4：搜索按主对话分组 + 会话树内命中步进。
+/// 场景：主对话（导入 fixture）+ 直接写库造一个含关键词的子任务，
+/// 验证子任务命中折叠到主对话 root 之下、树内命中按阅读顺序排列。
+#[test]
+fn journey_search_grouped_and_tree_hits() {
+    let h = harness();
+    let state = h.state();
+
+    // 主对话：导入真实 fixture（含 WorkManager 关键词）
+    let imported = tauri::async_runtime::block_on(import_file(
+        state.clone(),
+        fixture_in_dir(h._dir.path(), "tauri-background.md"),
+        Some("e2e-search".into()),
+    ))
+    .expect("import");
+
+    // 子任务：写连接直接造（父子靠 source_parent_id 关联）
+    let (child_id, child_msg_id) = {
+        let repo = state.repo.lock().expect("poisoned");
+        let parent = repo
+            .get_conversation(&imported.conversation_id)
+            .expect("get parent")
+            .expect("parent exists");
+        let mut child = ch_domain::Conversation::new(ch_domain::Provider::Generic, "child-src-1");
+        child.title = Some("子任务：后台任务".into());
+        child.source_parent_id = Some(parent.source_conversation_id.clone());
+        let cid = repo.upsert_conversation(&child).expect("upsert conv");
+        let mut m = ch_domain::Message::new(&cid, ch_domain::Role::Assistant, 1);
+        m.content_text = Some("WorkManager 在子任务里也被提到".into());
+        let mid = repo.upsert_message(&m).expect("upsert msg");
+        (cid, mid)
+    };
+
+    // 直写绕过了导入管线 → 给 Tantivy 补同一消息的文档（与导入路径同款三步），
+    // 保证双引擎（Tantivy / FTS5 触发器）结果一致
+    {
+        let idx = state.search_index.lock().expect("poisoned");
+        let mut writer = idx
+            .writer(ch_search::index::DEFAULT_WRITER_HEAP)
+            .expect("writer");
+        idx.index_message(
+            &mut writer,
+            &ch_search::index::IndexableMessage {
+                message_id: child_msg_id,
+                conversation_id: child_id.clone(),
+                provider: ch_domain::Provider::Generic,
+                workspace_id: None,
+                role: ch_domain::Role::Assistant,
+                title: Some("子任务：后台任务".into()),
+                body: Some("WorkManager 在子任务里也被提到".into()),
+            },
+        )
+        .expect("index message");
+        idx.commit(writer).expect("commit");
+    }
+
+    // search_grouped：子任务命中折叠到主对话 root 之下
+    let groups = tauri::async_runtime::block_on(search_grouped(
+        state.clone(),
+        "WorkManager".into(),
+        None,
+    ))
+    .expect("grouped");
+    assert!(!groups.is_empty(), "应有分组命中");
+    let child_group = groups
+        .iter()
+        .find(|g| g.conversation_id == child_id)
+        .expect("子任务命中应有自己的聚合行");
+    assert!(child_group.is_child, "子任务行应标记 is_child");
+    assert_eq!(
+        child_group.root_conversation_id, imported.conversation_id,
+        "子任务命中应折叠到主对话 root"
+    );
+    assert!(child_group.hit_count >= 1);
+    assert!(groups
+        .iter()
+        .any(|g| g.conversation_id == imported.conversation_id && !g.is_child),
+        "主对话自身命中行应以自己为 root");
+
+    // search_tree_hits：主对话 + 子任务内的命中，主对话在前
+    let hits = tauri::async_runtime::block_on(search_tree_hits(
+        state.clone(),
+        "WorkManager".into(),
+        imported.conversation_id.clone(),
+        None,
+    ))
+    .expect("tree hits");
+    assert!(hits.len() >= 2, "主对话与子任务都应有命中");
+    assert_eq!(
+        hits[0].conversation_id, imported.conversation_id,
+        "阅读顺序：主对话命中排最前"
+    );
+    let child_pos = hits
+        .iter()
+        .position(|x| x.conversation_id == child_id)
+        .expect("子任务命中应在树内");
+    assert!(child_pos > 0, "子任务命中应在主对话之后");
+
+    // role 过滤透传：仅 user 时子任务（assistant）命中被排除
+    let user_only = tauri::async_runtime::block_on(search_tree_hits(
+        state.clone(),
+        "WorkManager".into(),
+        imported.conversation_id.clone(),
+        Some("user".into()),
+    ))
+    .expect("tree hits role");
+    assert!(
+        user_only.iter().all(|x| x.role == "user"),
+        "role=user 应只剩用户消息命中"
+    );
+    assert!(
+        !user_only.iter().any(|x| x.conversation_id == child_id),
+        "assistant 的子任务命中不应出现"
+    );
+}

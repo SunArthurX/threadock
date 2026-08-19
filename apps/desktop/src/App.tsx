@@ -7,7 +7,7 @@ import OpsView from "./OpsView";
 import SourcePanel from "./SourcePanel";
 import ConversationList from "./ConversationList";
 import ConversationDetail from "./ConversationDetail";
-import SearchPanel from "./SearchPanel";
+import SearchResultsPanel from "./SearchResultsPanel";
 import ImportMenu from "./ImportMenu";
 import SettingsView from "./SettingsView";
 import BudgetBar from "./BudgetBar";
@@ -28,7 +28,7 @@ import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDat
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import type { ListScope } from "./ConversationList";
-import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchResult, SourceSession, ExtractionResult } from "./types";
+import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, SourceSession, ExtractionResult } from "./types";
 import { sourceLabel } from "./types";
 
 type View = Page;
@@ -126,7 +126,12 @@ export default function App() {
   } | null>(null);
   const [selectedWs, setSelectedWs] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
+  // 搜索模式：命中按主对话分组（左栏），null = 非搜索模式
+  const [searchGroups, setSearchGroups] = useState<SearchHitGroup[] | null>(null);
+  // 角色筛选（"" 全部 / user / assistant）：透传后端重查
+  const [searchRole, setSearchRole] = useState("");
+  // 右栏命中步进：当前搜索在某会话树（主对话+子对话）内的全部命中与当前下标
+  const [hitNav, setHitNav] = useState<{ query: string; hits: SearchResult[]; idx: number } | null>(null);
   const [highlightMsgId, setHighlightMsgId] = useState<string | null>(null);
   const [collapsedMsgs, setCollapsedMsgs] = useState<Set<string>>(new Set());
   const [timelineMode, setTimelineMode] = useState(false);
@@ -181,7 +186,7 @@ export default function App() {
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailPanelRef = useRef<ScrollAreaRef>(null);
-  // 详情加载序号：每次 selectConversation / jumpToSearchResult / jumpFromAudit 进入即 +1，
+  // 详情加载序号：每次 selectConversation / stepToHit / jumpFromAudit 进入即 +1，
   // 任何 await 之后置状态前比对「当前序号 === 函数入口捕获的序号」，避免快速 A→B 点击时
   // A 的稍后 await 回调把 B 的消息列表覆盖掉（P0-3）。
   const loadSeqRef = useRef(0);
@@ -256,6 +261,65 @@ export default function App() {
 
   const runManualSync = async () => {
     await autoSync();
+  };
+
+  // 滚动并高亮定位到某条消息（命中步进 / 分组跳转共用）
+  const scrollMsgIntoView = (mid: string) => {
+    setTimeout(() => {
+      document.getElementById(`msg-${mid}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+  };
+
+  // 打开一个分组行（主对话或子对话）：拉取该主对话树内全部命中并进入步进模式，
+  // 起始命中 = 点击的会话内的第一条（点主对话头则从树内第一条开始）
+  const openSearchGroup = async (g: SearchHitGroup) => {
+    const q = searchQuery.trim();
+    if (!q) return;
+    try {
+      const hits = await invoke<SearchResult[]>("search_tree_hits", {
+        query: q, rootConversationId: g.root_conversation_id, role: searchRole || null,
+      });
+      if (!hits.length) { showToast("该会话（含子对话）没有可跳转的命中", "info"); return; }
+      let idx = hits.findIndex((h) => h.conversation_id === g.conversation_id);
+      if (idx < 0) idx = 0;
+      setHitNav({ query: q, hits, idx });
+      await stepToHit(hits[idx], idx);
+    } catch (e) { showError(e); }
+  };
+
+  // 步进到第 idx 个命中：跨会话自动切换详情（走序号守卫防并发覆盖，P0-3）
+  const stepToHit = async (hit: SearchResult, idx: number) => {
+    setHitNav((p) => (p ? { ...p, idx } : p));
+    if (selectedConv?.id === hit.conversation_id) {
+      // 同一会话内移动：仅更新高亮并滚动
+      setHighlightMsgId(hit.message_id);
+      scrollMsgIntoView(hit.message_id);
+      return;
+    }
+    const seq = ++loadSeqRef.current;
+    try {
+      const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: hit.conversation_id });
+      if (loadSeqRef.current !== seq) return;
+      setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
+      setCompletenessLabel(detail.completeness_label); setKnowledge(null);
+      setDetailTags(detail.tags ?? []);
+      setHighlightMsgId(hit.message_id); setCollapsedMsgs(new Set());
+      scrollMsgIntoView(hit.message_id);
+    } catch (e) { showError(e); }
+  };
+
+  // ↑/↓ 步进（循环）；由右栏步进条按钮与全局方向键触发
+  const stepHits = (dir: 1 | -1) => {
+    if (!hitNav || hitNav.hits.length === 0) return;
+    const next = (hitNav.idx + dir + hitNav.hits.length) % hitNav.hits.length;
+    void stepToHit(hitNav.hits[next], next);
+  };
+
+  // 退出搜索模式：清分组 + 步进 + 关键词
+  const clearSearchMode = () => {
+    setSearchGroups(null);
+    setHitNav(null);
+    setSearchQuery("");
   };
 
   // ── effects ──
@@ -375,11 +439,20 @@ export default function App() {
         }
         return;
       }
+      // 命中步进：↑/↓ 在当前会话树（主对话+子对话）的命中间跳转；
+      // 输入框聚焦时不抢方向键（列表滚动 / 建议选择等场景）
+      if (hitNav && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+        const tag = (document.activeElement as HTMLElement | null)?.tagName ?? "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        stepHits(e.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
       if (e.key === "Escape") {
         if (helpOpen) setHelpOpen(false);
         else if (cmdOpen) setCmdOpen(false);
         else if (sourcePanel) setSourcePanel(null);
-        else if (searchResults) { setSearchResults(null); setSearchQuery(""); }
+        else if (searchGroups) clearSearchMode();
       }
     };
     window.addEventListener("keydown", handler);
@@ -387,13 +460,13 @@ export default function App() {
     // runManualSync 每次渲染重建，加入依赖会让全局 keydown 监听器每渲染重挂一次；
     // 处理器所需的状态已尽数列入，有意省略该函数依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourcePanel, searchResults, helpOpen, cmdOpen, view, selectedConv]);
+  }, [sourcePanel, searchGroups, hitNav, helpOpen, cmdOpen, view, selectedConv]);
 
-  // 筛选/范围变化且不在搜索结果模式时重载列表；searchResults/loadConversations
+  // 筛选/范围变化且不在搜索结果模式时重载列表；searchGroups/loadConversations
   // 加入依赖会导致每次渲染重载（loadConversations 每次渲染重建），有意省略；
   // loadConversations 内部同步 setConvsLoading(true) 属 effect 数据加载模式，有意保留。
   // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { if (!searchResults) loadConversations(); }, [providerFilter, scope]);
+  useEffect(() => { if (!searchGroups) loadConversations(); }, [providerFilter, scope]);
 
   const changeSyncInterval = (min: number) => {
     setSyncIntervalMin(min);
@@ -464,15 +537,17 @@ export default function App() {
   };
 
   // ── actions ──
-  const doSearch = async (overrideQuery?: string) => {
-    // 空关键词 + 勾选「仅我的提问」= 全量我的提问；两者皆空则清空结果
-    const q = (overrideQuery ?? searchQuery).trim();
-    if (!q) { setSearchResults(null); return; }
+  // 统一搜索入口：命中按主对话分组（左栏）；role 为 "" / "user" / "assistant"
+  const runSearch = async (q: string, role: string) => {
+    if (!q) { setSearchGroups(null); setHitNav(null); return; }
     try {
-      setSearchResults(await invoke<SearchResult[]>("search", { query: q }));
+      setSearchGroups(await invoke<SearchHitGroup[]>("search_grouped", { query: q, role: role || null }));
+      // 新查询重置右栏步进（旧会话树的命中不再有效）
+      setHitNav(null);
       addSearchHistory(q);
     } catch (e) { showError(e); }
   };
+  const doSearch = (overrideQuery?: string) => runSearch((overrideQuery ?? searchQuery).trim(), searchRole);
 
   // 搜索历史：localStorage 持久化最近 10 条；按使用时间倒序
   const SEARCH_HISTORY_KEY = "ch-search-history";
@@ -519,25 +594,6 @@ export default function App() {
   const clearSearchHistory = () => {
     setSearchHistory([]);
     try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* 静默 */ }
-  };
-
-  const jumpToSearchResult = async (r: SearchResult) => {
-    // 与 selectConversation 共享同一序号：搜索结果跳进会话时也需请求隔离（P0-3）
-    const seq = ++loadSeqRef.current;
-    try {
-      const detail = await invoke<ConversationDetailDto>("get_conversation_detail", { conversationId: r.conversation_id });
-      if (loadSeqRef.current !== seq) return;
-      setSelectedConv(detail.conversation); setMessages(detail.messages); setEvents(detail.events);
-      setCompletenessLabel(detail.completeness_label); setKnowledge(null);
-      setDetailTags(detail.tags ?? []);
-      // 保留 searchResults：点击结果跳进会话后左栏仍是搜索列表，便于继续逐条浏览；
-      // 退出搜索模式统一走 Esc / 顶栏「清除」（会同时清空 searchQuery）。
-      setHighlightMsgId(r.message_id); setCollapsedMsgs(new Set());
-      setTimeout(() => {
-        if (loadSeqRef.current !== seq) return;
-        document.getElementById(`msg-${r.message_id}`)?.scrollIntoView({behavior:"smooth",block:"center"});
-      }, 120);
-    } catch (e) { showError(e); }
   };
 
   const exportCurrent = async (format: "markdown" | "json") => {
@@ -800,8 +856,8 @@ export default function App() {
               <button onClick={() => doSearch()}>搜索</button>
               <button className="kb-copy" title="保存当前搜索条件（可再次一键执行）" disabled={!searchQuery.trim()}
                 onClick={saveCurrentSearch}>☆ 保存</button>
-              {searchResults && <button onClick={() => { setSearchResults(null); setSearchQuery(""); }}>清除</button>}
-              {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchResults && (
+              {searchGroups && <button onClick={clearSearchMode}>清除</button>}
+              {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchGroups && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
                   {savedSearches.length > 0 && (
                     <div className="search-history-head">
@@ -981,8 +1037,10 @@ export default function App() {
         ) : (
           <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
             <ScrollArea style={{ width: listWidth }}>
-              {searchResults
-                ? <SearchPanel results={searchResults} query={searchQuery} onJump={jumpToSearchResult} />
+              {searchGroups
+                ? <SearchResultsPanel groups={searchGroups} query={searchQuery} role={searchRole}
+                    onRoleChange={(r) => { setSearchRole(r); void runSearch(searchQuery.trim(), r); }}
+                    onOpen={openSearchGroup} activeConversationId={selectedConv?.id ?? null} />
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
                     loading={convsLoading} providerFilter={providerFilter} selectedWs={selectedWs}
                     expandedParents={expandedParents} childConvs={childConvs}
@@ -1038,6 +1096,19 @@ export default function App() {
               title="拖拽调整会话列表宽度"
             />
             <ScrollArea ref={detailPanelRef}>
+              {/* 命中步进条：当前会话树（主对话+子对话）内的全部命中，↑/↓ 跨会话跳转 */}
+              {hitNav && (
+                <div className="hit-nav-bar">
+                  <span className="hit-nav-query" title="当前搜索关键词">🎯 {hitNav.query}</span>
+                  <span className="hit-nav-count">
+                    {hitNav.hits.length === 0 ? "无命中" : `${hitNav.idx + 1} / ${hitNav.hits.length}`}
+                  </span>
+                  <button className="msg-search-btn" onClick={() => stepHits(-1)} disabled={hitNav.hits.length < 2} title="上一处命中（↑）">↑</button>
+                  <button className="msg-search-btn" onClick={() => stepHits(1)} disabled={hitNav.hits.length < 2} title="下一处命中（↓）">↓</button>
+                  <span className="hit-nav-hint">↑/↓ 在主对话与子对话的命中间跳转</span>
+                  <button className="msg-search-btn" onClick={clearSearchMode} title="退出搜索模式（Esc）">✕</button>
+                </div>
+              )}
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}
                     completenessLabel={completenessLabel}
@@ -1045,6 +1116,7 @@ export default function App() {
                     loading={msgsLoading} exporting={exporting} timelineMode={timelineMode}
                     highlightMsgId={highlightMsgId} collapsedMsgs={collapsedMsgs}
                     tags={detailTags}
+                    searchPreset={hitNav?.query ?? null}
                     onAddTag={addTag} onRemoveTag={removeTag} onRescanAudit={rescanAudit}
                     note={noteText}
                     onNoteChange={async (text) => {

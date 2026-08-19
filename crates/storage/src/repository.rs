@@ -759,6 +759,49 @@ impl Repository {
         )?)
     }
 
+    /// 批量按内部 id 取会话（搜索结果按主对话分组：一次 IN 查询替代逐条 get）。
+    pub fn conversations_by_ids(&self, ids: &[String]) -> StorageResult<Vec<Conversation>> {
+        batch_load_conversations(self, ids, None)
+    }
+
+    /// 批量按 (provider_id, source_conversation_id) 取会话：
+    /// 子任务命中回溯主对话（source_parent_id → 父 source id）用。
+    pub fn conversations_by_source_ids(
+        &self,
+        provider_id: &str,
+        source_ids: &[String],
+    ) -> StorageResult<Vec<Conversation>> {
+        batch_load_conversations(self, source_ids, Some(provider_id))
+    }
+
+    /// 批量取消息的 (conversation_id, sequence_number)：
+    /// 搜索命中跨会话按「主对话 → 子对话 → 各自消息序号」阅读顺序排序用。
+    pub fn message_order_by_ids(
+        &self,
+        ids: &[String],
+    ) -> StorageResult<std::collections::HashMap<String, (String, i64)>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT id, conversation_id, sequence_number FROM messages
+             WHERE id IN ({placeholders})"
+        );
+        let args: Vec<SqlValue> = ids.iter().map(|i| SqlValue::Text(i.clone())).collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_from_iter(args), |r| {
+            Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get(2)?)))
+        })?;
+        let mut out = std::collections::HashMap::new();
+        for row in rows {
+            let (id, order) = row?;
+            out.insert(id, order);
+        }
+        Ok(out)
+    }
+
     /// 一次查询统计所有父会话的子任务数（key = (source_parent_id, provider_id)）。
     ///
     /// 会话列表页的 child_count 批量来源：替代每会话一次 count_children 的 N+1。
@@ -1808,6 +1851,46 @@ fn row_to_workspace(r: &rusqlite::Row<'_>) -> rusqlite::Result<Workspace> {
         updated_at: timestamp::from_millis(Some(r.get::<_, i64>(8)?))
             .expect("timestamp conversion failed"),
     })
+}
+
+/// 批量取会话的共享实现：`keys` 按 id IN 查；给 `provider_id` 时改为
+/// (provider_id, source_conversation_id IN) 查（父会话回溯路径）。
+/// 两类查询列完全一致，仅 WHERE 不同。
+fn batch_load_conversations(
+    repo: &Repository,
+    keys: &[String],
+    provider_id: Option<&str>,
+) -> StorageResult<Vec<Conversation>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = repo.conn.lock().expect("mutex poisoned");
+    let placeholders = vec!["?"; keys.len()].join(",");
+    let mut sql = String::from(
+        "SELECT c.id, c.workspace_id, p.name, c.installation_id, c.source_conversation_id,
+                c.title, c.user_title, c.status, c.model, c.started_at, c.updated_at,
+                c.completed_at, c.source_status, c.source_url, c.completeness_score,
+                c.content_hash, c.raw_payload_id, c.source_parent_id
+         FROM conversations c JOIN providers p ON p.id = c.provider_id",
+    );
+    let mut args: Vec<SqlValue> = Vec::with_capacity(keys.len() + 1);
+    match provider_id {
+        Some(pid) => {
+            sql.push_str(&format!(
+                " WHERE c.provider_id = ? AND c.source_conversation_id IN ({placeholders})"
+            ));
+            args.push(SqlValue::Text(pid.to_string()));
+        }
+        None => sql.push_str(&format!(" WHERE c.id IN ({placeholders})")),
+    }
+    args.extend(keys.iter().map(|k| SqlValue::Text(k.clone())));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_from_iter(args), row_to_conversation)?;
+    let mut v = Vec::new();
+    for r in rows {
+        v.push(r?);
+    }
+    Ok(v)
 }
 
 fn row_to_conversation(r: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
@@ -3050,5 +3133,52 @@ mod tests {
         assert_eq!(links[0].workspace_id, wid);
         assert_eq!(links[0].match_confidence, Some(0.6));
         assert_eq!(links[0].match_method.as_deref(), Some("name_similarity"));
+    }
+
+    /// 搜索分组三件套：conversations_by_ids / conversations_by_source_ids /
+    /// message_order_by_ids（父子 + 消息序号一次取齐）。
+    #[test]
+    fn batch_loads_for_search_grouping() {
+        let r = repo();
+        // 主对话 + 子任务（source_parent_id 指向主对话 source id）
+        let mut parent = Conversation::new(Provider::Generic, "parent-src");
+        parent.title = Some("主对话".into());
+        let mut child = Conversation::new(Provider::Generic, "child-src");
+        child.title = Some("子任务".into());
+        child.source_parent_id = Some("parent-src".into());
+        let pid = r.upsert_conversation(&parent).expect("upsert failed");
+        let cid = r.upsert_conversation(&child).expect("upsert failed");
+
+        // 按内部 id 批量取
+        let by_ids = r
+            .conversations_by_ids(&[pid.clone(), cid.clone(), "no-such".into()])
+            .expect("unexpected None");
+        assert_eq!(by_ids.len(), 2, "不存在的 id 应被忽略");
+
+        // 按 (provider_id, source ids) 批量取：子任务回溯主对话
+        let by_source = r
+            .conversations_by_source_ids("prov_generic", &["parent-src".into()])
+            .expect("unexpected None");
+        assert_eq!(by_source.len(), 1);
+        assert_eq!(by_source[0].id, pid);
+        // 空 keys 短路，不产生 SQL
+        assert!(r
+            .conversations_by_source_ids("prov_generic", &[])
+            .expect("unexpected None")
+            .is_empty());
+
+        // 消息序号批量取
+        let mut m1 = Message::new(&pid, Role::User, 1);
+        m1.content_text = Some("白板是什么".into());
+        let mut m2 = Message::new(&cid, Role::Assistant, 2);
+        m2.content_text = Some("白板是协作画布".into());
+        let mid1 = r.upsert_message(&m1).expect("upsert failed");
+        let mid2 = r.upsert_message(&m2).expect("upsert failed");
+        let order = r
+            .message_order_by_ids(&[mid2.clone(), mid1.clone()])
+            .expect("unexpected None");
+        assert_eq!(order.get(&mid1), Some(&(pid.clone(), 1)));
+        assert_eq!(order.get(&mid2), Some(&(cid.clone(), 2)));
+        assert_eq!(order.len(), 2);
     }
 }

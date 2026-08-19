@@ -85,6 +85,7 @@ mod import;
 mod insights;
 mod maintenance;
 mod ops;
+mod search_cmd;
 mod settings;
 mod workspace_cmd;
 
@@ -97,5 +98,6 @@ pub(crate) use import::*;
 pub(crate) use insights::*;
 pub(crate) use maintenance::*;
 pub(crate) use ops::*;
+pub(crate) use search_cmd::*;
 pub(crate) use settings::*;
 pub(crate) use workspace_cmd::*;

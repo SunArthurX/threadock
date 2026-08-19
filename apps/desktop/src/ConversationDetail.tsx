@@ -36,6 +36,9 @@ interface Props {
   onNoteChange?: (note: string | null) => Promise<void> | void;
   /** 全部标签（按使用频次倒序），供输入时自动补全 */
   allTags?: { tag: string; count: number }[];
+  /** 搜索模式联动：从搜索结果进入会话时预填关键词并打开页内搜索条
+   *  （消息内关键词高亮 + 页内 Enter 步进照旧可用）；null = 清除。 */
+  searchPreset?: string | null;
 }
 
 export default function ConversationDetail({
@@ -43,7 +46,7 @@ export default function ConversationDetail({
   timelineMode, highlightMsgId, collapsedMsgs, tags,
   scrollContainerRef, onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
   onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
-  note, onNoteChange, allTags,
+  note, onNoteChange, allTags, searchPreset,
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -79,6 +82,13 @@ export default function ConversationDetail({
   // 切换会话时退出原始视图（受控状态随 conv.id 重置）
   // eslint-disable-next-line react-hooks/set-state-in-effect -- conv.id 变化时同步重置派生 UI 状态，属 prop 同步模式
   useEffect(() => { setRawView(false); setRawContent(null); }, [conv.id]);
+  // 搜索模式联动：preset 变化（进入搜索步进 / 退出搜索）时同步页内搜索条；
+  // 用户手动 ⌘F 时 preset 不变、effect 不重跑，互不干扰
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- searchPreset/conv.id 变化时同步派生 UI 状态，属 prop 同步模式
+    if (searchPreset) { setSearch(searchPreset); setSearchOpen(true); setSearchIdx(0); }
+    else { setSearch(""); setSearchOpen(false); setSearchIdx(0); }
+  }, [searchPreset, conv.id]);
   const toggleRawView = async () => {
     if (rawView) { setRawView(false); return; }
     try {

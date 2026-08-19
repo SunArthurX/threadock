@@ -1,7 +1,7 @@
 //! 前端 DTO 与领域对象 → DTO 的转换（跨域共享）。
 
 use ch_domain::Workspace;
-use ch_storage::SearchResult as DbSearchResult;
+
 
 #[derive(serde::Serialize)]
 pub struct WorkspaceDto {
@@ -76,6 +76,25 @@ pub struct SearchResultDto {
     pub role: String,
     pub title: Option<String>,
     /// 带 <b> 高亮标签的命中片段（前端 dangerouslySetInnerHTML 渲染）。
+    pub snippet: String,
+}
+
+/// 搜索命中按「主对话」分组的聚合行（GUI 搜索模式左栏）。
+/// 子任务命中折叠到所属主对话之下：root_* 是主对话信息，
+/// conversation_id / title 是实际命中的会话（is_child=true 时为子任务）。
+#[derive(serde::Serialize)]
+pub struct SearchHitGroupDto {
+    pub root_conversation_id: String,
+    pub root_title: Option<String>,
+    pub root_updated_at_ms: Option<i64>,
+    pub provider: String,
+    pub conversation_id: String,
+    pub title: Option<String>,
+    pub is_child: bool,
+    pub hit_count: i64,
+    /// 最佳命中（引擎相关序第一条）定位 + 片段。
+    pub best_message_id: String,
+    pub best_role: String,
     pub snippet: String,
 }
 
@@ -180,16 +199,5 @@ pub(crate) fn event_dto(e: ch_domain::Event) -> EventDto {
         event_type: e.event_type.to_string(),
         summary: e.summary,
         sequence_number: e.sequence_number,
-    }
-}
-
-pub(crate) fn search_result_dto(r: DbSearchResult) -> SearchResultDto {
-    SearchResultDto {
-        message_id: r.message_id,
-        conversation_id: r.conversation_id,
-        provider: r.provider.to_string(),
-        role: r.role.to_string(),
-        title: r.title,
-        snippet: r.snippet,
     }
 }

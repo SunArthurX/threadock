@@ -644,6 +644,110 @@ button {
   letter-spacing: 0.04em;
 }
 
+/* 搜索结果按主对话分组（左栏搜索模式）：root 行 + 缩进的会话命中行 */
+.search-group {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.search-group-root {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 16px 5px;
+  cursor: pointer;
+  background: var(--bg-2, rgba(255, 255, 255, 0.03));
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  transition: background var(--transition);
+}
+.search-group-root:hover {
+  background: var(--bg-hover);
+}
+.search-group-caret {
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+.search-group-root .title {
+  font-size: 12px;
+  font-weight: 620;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-hit-total {
+  font-size: 10px;
+  color: var(--accent-hover);
+  background: var(--accent-bg);
+  border-radius: 8px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+.search-group-row {
+  padding-left: 30px;
+}
+.search-group-row.active {
+  background: rgba(79, 140, 255, 0.12);
+  border-left: 3px solid var(--accent, #4f8cff);
+  padding-left: 27px;
+}
+.search-row-kind {
+  font-size: 10px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.search-row-kind.parent {
+  color: var(--accent-hover);
+  background: var(--accent-bg);
+}
+.search-row-kind.child {
+  color: var(--text-faint);
+  background: rgba(127, 127, 127, 0.14);
+}
+.search-hit-count {
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* 右栏命中步进条（搜索模式，跨主对话/子对话跳转） */
+.hit-nav-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-2, #1c1c20);
+  border-bottom: 1px solid var(--border, #333);
+  font-size: 12px;
+}
+.hit-nav-query {
+  font-weight: 600;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hit-nav-count {
+  font-family: var(--font-mono);
+  color: var(--text-faint);
+  min-width: 44px;
+}
+.hit-nav-hint {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* 会话列表多选 + 批量操作 */
 .list-item-check {
   margin: 0 6px 0 0;
@@ -699,7 +803,7 @@ button {
 .tag-suggest-item:hover, .tag-suggest-item.active { background: var(--bg-elevated, rgba(255,255,255,0.06)); }
 .tag-suggest-count { font-size: 10.5px; opacity: 0.55; }
 
-/* SearchPanel 顶部：筛选 + 复制 */
+/* 搜索面板顶部：筛选（SearchResultsPanel 复用） */
 .search-panel-head { display: flex; align-items: center; gap: 10px; }
 .search-panel-actions { margin-left: auto; display: flex; gap: 6px; align-items: center; }
 .search-panel-select {
