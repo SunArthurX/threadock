@@ -1876,15 +1876,15 @@ fn batch_load_conversations(
          FROM conversations c JOIN providers p ON p.id = c.provider_id",
     );
     let mut args: Vec<SqlValue> = Vec::with_capacity(keys.len() + 1);
-    match provider_id {
+    // WHERE 片段单独 format 再拼（clippy::format_push_string 禁止 push_str(&format!())）
+    let where_sql = match provider_id {
         Some(pid) => {
-            sql.push_str(&format!(
-                " WHERE c.provider_id = ? AND c.source_conversation_id IN ({placeholders})"
-            ));
             args.push(SqlValue::Text(pid.to_string()));
+            format!(" WHERE c.provider_id = ? AND c.source_conversation_id IN ({placeholders})")
         }
-        None => sql.push_str(&format!(" WHERE c.id IN ({placeholders})")),
-    }
+        None => format!(" WHERE c.id IN ({placeholders})"),
+    };
+    sql.push_str(&where_sql);
     args.extend(keys.iter().map(|k| SqlValue::Text(k.clone())));
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params_from_iter(args), row_to_conversation)?;

@@ -514,7 +514,8 @@ pub(crate) async fn set_user_title(
     title: Option<String>,
 ) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-    repo.set_user_title(&id, title.as_deref()).map_err(|e| storage_err(e))
+    repo.set_user_title(&id, title.as_deref())
+        .map_err(|e| storage_err(e))
 }
 
 /// 读取会话的私有笔记 + 最后修改时间。
@@ -525,7 +526,10 @@ pub(crate) async fn get_conversation_note(
     id: String,
 ) -> Result<Option<ch_storage::NoteDto>, String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-    Ok(repo.get_note(&id).map_err(|e| storage_err(e))?.map(|(note, updated_at)| ch_storage::NoteDto { note, updated_at }))
+    Ok(repo
+        .get_note(&id)
+        .map_err(|e| storage_err(e))?
+        .map(|(note, updated_at)| ch_storage::NoteDto { note, updated_at }))
 }
 
 /// 列出全部会话标签（去重 + 频次倒序）—— 供前端标签自动补全。
@@ -535,8 +539,13 @@ pub(crate) async fn list_all_tags(
     limit: Option<i64>,
 ) -> Result<Vec<ch_storage::TagCountDto>, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-    let rows = repo.list_all_tags(limit.unwrap_or(50)).map_err(|e| storage_err(e))?;
-    Ok(rows.into_iter().map(|(tag, count)| ch_storage::TagCountDto { tag, count }).collect())
+    let rows = repo
+        .list_all_tags(limit.unwrap_or(50))
+        .map_err(|e| storage_err(e))?;
+    Ok(rows
+        .into_iter()
+        .map(|(tag, count)| ch_storage::TagCountDto { tag, count })
+        .collect())
 }
 
 /// 设置/清除会话的私有笔记。
@@ -549,7 +558,8 @@ pub(crate) async fn set_conversation_note(
     note: Option<String>,
 ) -> Result<i64, String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-    repo.set_note(&id, note.as_deref()).map_err(|e| storage_err(e))
+    repo.set_note(&id, note.as_deref())
+        .map_err(|e| storage_err(e))
 }
 
 #[tauri::command]

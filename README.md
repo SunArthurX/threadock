@@ -185,6 +185,17 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 
 方法清单（plan §16.1）：`system.getInfo` / `workspace.list` / `conversation.list` / `conversation.get` / `conversation.delete` / `conversation.restore` / `conversation.similar` / `message.list` / `event.list` / `search.query` / `knowledge.extract` / `knowledge.save` / `knowledge.get` / `provider.sync`
 
+## 提交前预检（推荐）
+
+```bash
+scripts/precheck.sh --install-hooks   # 一次性：pre-commit=lint 档，pre-push=test 档
+scripts/precheck.sh                   # 手动跑：lint 档（fmt×2 + clippy×2 + tsc + eslint）
+scripts/precheck.sh test              # lint + 全部测试 + 构建（= CI 的 Rust/Jieba/Frontend 三个 job）
+scripts/precheck.sh all               # 再加 cargo audit + MSRV 1.88 check（装了对应工具才跑）
+```
+
+脚本逐条镜像 `.github/workflows/ci.yml` 的命令（clippy 带 CI 同款 `-W clippy::pedantic -D warnings` 旗标——本地裸 `cargo clippy` 不带旗标会漏掉 pedantic 违规，出现"本地绿、CI 红"）。紧急跳过：`git commit --no-verify`。
+
 ## 运行测试
 
 ```bash

@@ -68,12 +68,21 @@ fn journey_conversation_lifecycle() {
     assert!(imported.messages >= 3, "应有消息");
 
     // 列表 + 详情
-    let list = tauri::async_runtime::block_on(list_conversations(state.clone(), None, None, None, None, None))
-        .expect("list");
+    let list = tauri::async_runtime::block_on(list_conversations(
+        state.clone(),
+        None,
+        None,
+        None,
+        None,
+        None,
+    ))
+    .expect("list");
     assert_eq!(list.len(), 1);
-    let detail =
-        tauri::async_runtime::block_on(get_conversation_detail(state.clone(), imported.conversation_id.clone()))
-            .expect("detail");
+    let detail = tauri::async_runtime::block_on(get_conversation_detail(
+        state.clone(),
+        imported.conversation_id.clone(),
+    ))
+    .expect("detail");
     assert!(!detail.messages.is_empty());
     assert!(!detail.completeness_label.is_empty(), "完整度标签应存在");
 
@@ -87,19 +96,24 @@ fn journey_conversation_lifecycle() {
     assert!(!syntax.is_empty(), "provider: 语法搜索应有命中");
 
     // 收藏 → status:favorite 语法（DB 后过滤路径）
-    tauri::async_runtime::block_on(set_favorite(state.clone(), imported.conversation_id.clone(), true))
-        .expect("favorite");
-    let fav = tauri::async_runtime::block_on(search(
+    tauri::async_runtime::block_on(set_favorite(
         state.clone(),
-        "status:favorite sync".into(),
-        None,
+        imported.conversation_id.clone(),
+        true,
     ))
-    .expect("search favorite");
+    .expect("favorite");
+    let fav =
+        tauri::async_runtime::block_on(search(state.clone(), "status:favorite sync".into(), None))
+            .expect("search favorite");
     assert!(!fav.is_empty(), "status:favorite 应命中已收藏会话");
 
     // 标签
-    tauri::async_runtime::block_on(add_tag(state.clone(), imported.conversation_id.clone(), "e2e-tag".into()))
-        .expect("add tag");
+    tauri::async_runtime::block_on(add_tag(
+        state.clone(),
+        imported.conversation_id.clone(),
+        "e2e-tag".into(),
+    ))
+    .expect("add tag");
     let detail2 = tauri::async_runtime::block_on(get_conversation_detail(
         state.clone(),
         imported.conversation_id.clone(),
@@ -133,38 +147,68 @@ fn journey_conversation_lifecycle() {
     assert!(resume.is_none(), "generic 来源不支持恢复命令");
 
     // 软删：默认列表不可见（回收站语义）；详情仍可读（回收站需查看）
-    tauri::async_runtime::block_on(delete_conversation(state.clone(), imported.conversation_id.clone()))
-        .expect("soft delete");
+    tauri::async_runtime::block_on(delete_conversation(
+        state.clone(),
+        imported.conversation_id.clone(),
+    ))
+    .expect("soft delete");
     let default_list = tauri::async_runtime::block_on(list_conversations(
-        state.clone(), None, None, None, None, None,
+        state.clone(),
+        None,
+        None,
+        None,
+        None,
+        None,
     ))
     .expect("list after delete");
     assert!(
-        !default_list.iter().any(|c| c.id == imported.conversation_id),
+        !default_list
+            .iter()
+            .any(|c| c.id == imported.conversation_id),
         "软删后默认列表不应出现"
     );
     let deleted_list = tauri::async_runtime::block_on(list_conversations(
-        state.clone(), None, None, None, None, Some(true),
+        state.clone(),
+        None,
+        None,
+        None,
+        None,
+        Some(true),
     ))
     .expect("list deleted");
     assert!(
-        deleted_list.iter().any(|c| c.id == imported.conversation_id),
+        deleted_list
+            .iter()
+            .any(|c| c.id == imported.conversation_id),
         "include_deleted 列表应包含软删会话"
     );
-    tauri::async_runtime::block_on(restore_conversation(state.clone(), imported.conversation_id.clone()))
-        .expect("restore");
+    tauri::async_runtime::block_on(restore_conversation(
+        state.clone(),
+        imported.conversation_id.clone(),
+    ))
+    .expect("restore");
     let restored_list = tauri::async_runtime::block_on(list_conversations(
-        state.clone(), None, None, None, None, None,
+        state.clone(),
+        None,
+        None,
+        None,
+        None,
+        None,
     ))
     .expect("list after restore");
     assert!(
-        restored_list.iter().any(|c| c.id == imported.conversation_id),
+        restored_list
+            .iter()
+            .any(|c| c.id == imported.conversation_id),
         "恢复后默认列表应重新出现"
     );
 
     // 硬删 → 详情失败
-    tauri::async_runtime::block_on(hard_delete_conversation(state.clone(), imported.conversation_id.clone()))
-        .expect("hard delete");
+    tauri::async_runtime::block_on(hard_delete_conversation(
+        state.clone(),
+        imported.conversation_id.clone(),
+    ))
+    .expect("hard delete");
     assert!(
         tauri::async_runtime::block_on(get_conversation_detail(
             state.clone(),
@@ -205,14 +249,22 @@ fn journey_workspace_governance() {
     // 重命名 alpha
     let alpha_id = a.workspace_id.clone().expect("alpha ws id");
     let beta_id = b.workspace_id.clone().expect("beta ws id");
-    tauri::async_runtime::block_on(workspace_rename(state.clone(), alpha_id.clone(), "alpha-renamed".into()))
-        .expect("rename");
+    tauri::async_runtime::block_on(workspace_rename(
+        state.clone(),
+        alpha_id.clone(),
+        "alpha-renamed".into(),
+    ))
+    .expect("rename");
     let wss = tauri::async_runtime::block_on(list_workspaces(state.clone())).expect("ws list 2");
     assert!(wss.iter().any(|w| w.display_name == "alpha-renamed"));
 
     // 合并 beta → alpha（会话数迁移）
-    let moved = tauri::async_runtime::block_on(workspace_merge(state.clone(), beta_id.clone(), alpha_id.clone()))
-        .expect("merge");
+    let moved = tauri::async_runtime::block_on(workspace_merge(
+        state.clone(),
+        beta_id.clone(),
+        alpha_id.clone(),
+    ))
+    .expect("merge");
     assert_eq!(moved, 1, "beta 的 1 条会话应迁入 alpha");
     let wss = tauri::async_runtime::block_on(list_workspaces(state.clone())).expect("ws list 3");
     assert_eq!(wss.len(), 1, "合并后只剩 1 个 workspace");
@@ -239,8 +291,15 @@ fn journey_workspace_governance() {
     ))
     .expect("split");
     assert!(!new_id.is_empty());
-    let in_new = tauri::async_runtime::block_on(list_conversations(state.clone(), Some(new_id.clone()), None, None, None, None))
-        .expect("list in split");
+    let in_new = tauri::async_runtime::block_on(list_conversations(
+        state.clone(),
+        Some(new_id.clone()),
+        None,
+        None,
+        None,
+        None,
+    ))
+    .expect("list in split");
     assert_eq!(in_new.len(), 1);
 
     // 来源映射置信度：通用文件导入不写 source_workspaces（该表由 IDE
@@ -280,7 +339,9 @@ fn journey_saved_searches() {
 
     let list = tauri::async_runtime::block_on(saved_search_list(state.clone())).expect("list");
     assert_eq!(list.len(), 2);
-    assert!(list.iter().any(|s| s.id == id1 && s.query_text.contains("thiserror")));
+    assert!(list
+        .iter()
+        .any(|s| s.id == id1 && s.query_text.contains("thiserror")));
 
     // 同名覆盖不新增
     let id1b = tauri::async_runtime::block_on(saved_search_upsert(
@@ -294,20 +355,25 @@ fn journey_saved_searches() {
     assert_eq!(list.len(), 2);
 
     // 删除
-    tauri::async_runtime::block_on(saved_search_delete(state.clone(), id2.clone())).expect("delete");
+    tauri::async_runtime::block_on(saved_search_delete(state.clone(), id2.clone()))
+        .expect("delete");
     let list = tauri::async_runtime::block_on(saved_search_list(state.clone())).expect("list 3");
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, id1);
 
     // 空名/空查询拒绝
-    assert!(
-        tauri::async_runtime::block_on(saved_search_upsert(state.clone(), "  ".into(), "q".into()))
-            .is_err()
-    );
-    assert!(
-        tauri::async_runtime::block_on(saved_search_upsert(state.clone(), "n".into(), " ".into()))
-            .is_err()
-    );
+    assert!(tauri::async_runtime::block_on(saved_search_upsert(
+        state.clone(),
+        "  ".into(),
+        "q".into()
+    ))
+    .is_err());
+    assert!(tauri::async_runtime::block_on(saved_search_upsert(
+        state.clone(),
+        "n".into(),
+        " ".into()
+    ))
+    .is_err());
 }
 
 /// 旅程 4：搜索按主对话分组 + 会话树内命中步进。
@@ -367,12 +433,9 @@ fn journey_search_grouped_and_tree_hits() {
     }
 
     // search_grouped：子任务命中折叠到主对话 root 之下
-    let groups = tauri::async_runtime::block_on(search_grouped(
-        state.clone(),
-        "WorkManager".into(),
-        None,
-    ))
-    .expect("grouped");
+    let groups =
+        tauri::async_runtime::block_on(search_grouped(state.clone(), "WorkManager".into(), None))
+            .expect("grouped");
     assert!(!groups.is_empty(), "应有分组命中");
     let child_group = groups
         .iter()
@@ -384,10 +447,12 @@ fn journey_search_grouped_and_tree_hits() {
         "子任务命中应折叠到主对话 root"
     );
     assert!(child_group.hit_count >= 1);
-    assert!(groups
-        .iter()
-        .any(|g| g.conversation_id == imported.conversation_id && !g.is_child),
-        "主对话自身命中行应以自己为 root");
+    assert!(
+        groups
+            .iter()
+            .any(|g| g.conversation_id == imported.conversation_id && !g.is_child),
+        "主对话自身命中行应以自己为 root"
+    );
 
     // search_tree_hits：主对话 + 子任务内的命中，主对话在前
     let hits = tauri::async_runtime::block_on(search_tree_hits(

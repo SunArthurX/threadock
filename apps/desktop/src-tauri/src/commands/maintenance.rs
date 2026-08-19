@@ -288,7 +288,10 @@ pub(crate) async fn reset_range_bounds(
     state: tauri::State<'_, DaemonState>,
 ) -> Result<serde_json::Value, String> {
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-    let earliest_ms = repo.reset_range_min_ts().map_err(|e| storage_err(e))?.unwrap_or(0);
+    let earliest_ms = repo
+        .reset_range_min_ts()
+        .map_err(|e| storage_err(e))?
+        .unwrap_or(0);
     let now_ms =
         (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
     Ok(serde_json::json!({
@@ -629,7 +632,8 @@ mod reset_range_tests {
     #[test]
     fn reset_range_min_ts_returns_earliest_across_tables() {
         let (_d, state) = make_state();
-        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let old_conv_ms = now_ms - 30 * 86_400_000;
         let new_conv_ms = now_ms - 86_400_000;
         let usage_ms = now_ms - 60 * 86_400_000; // 应是最小
@@ -682,16 +686,21 @@ mod reset_range_tests {
     #[test]
     fn reset_range_allows_any_past_start_no_31d_cap() {
         let (_d, state) = make_state();
-        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let r = reset_range_inner(&state, now_ms - 365 * 86_400_000);
-        assert!(r.is_ok(), "1 年前的开始时间必须可重置（无 31 天下限）：{r:?}");
+        assert!(
+            r.is_ok(),
+            "1 年前的开始时间必须可重置（无 31 天下限）：{r:?}"
+        );
     }
 
     /// 未来时间必须被拒（防误传）。
     #[test]
     fn reset_range_rejects_future_start() {
         let (_d, state) = make_state();
-        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let r = reset_range_inner(&state, now_ms + 86_400_000);
         assert!(r.is_err(), "未来时间必须被拒");
     }
@@ -700,7 +709,8 @@ mod reset_range_tests {
     #[test]
     fn reset_range_clears_import_state_for_deleted_source_ids() {
         let (_d, state) = make_state();
-        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let recent_ms = now_ms - 3 * 86_400_000;
         let recent_ts = ms_to_ts(recent_ms);
 
@@ -714,10 +724,11 @@ mod reset_range_tests {
         let prov_id = Provider::Generic.as_str();
         repo.record_import_states(prov_id, &[("src-clear-me".into(), Some(recent_ms))])
             .expect("record state");
-        let m = repo
-            .import_state_map(prov_id)
-            .expect("state map");
-        assert!(m.contains_key("src-clear-me"), "import_state 必须有记录才能验证清理");
+        let m = repo.import_state_map(prov_id).expect("state map");
+        assert!(
+            m.contains_key("src-clear-me"),
+            "import_state 必须有记录才能验证清理"
+        );
         drop(repo);
 
         // 重置 7 天前到现在：会命中该会话
@@ -726,9 +737,7 @@ mod reset_range_tests {
 
         // 验证 import_state 已被同步清掉
         let repo = state.repo.lock().expect("mutex poisoned");
-        let m = repo
-            .import_state_map(prov_id)
-            .expect("state map");
+        let m = repo.import_state_map(prov_id).expect("state map");
         assert!(
             !m.contains_key("src-clear-me"),
             "重置后 import_state 必须清掉对应 source_id，否则 autoSync 增量会全 skip 导致数据丢失"
@@ -742,7 +751,8 @@ mod reset_range_tests {
     #[test]
     fn clear_all_clears_import_state() {
         let (_d, state) = make_state();
-        let now_ms = (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
+        let now_ms =
+            (ch_domain::now_utc() - time::OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as i64;
         let recent_ms = now_ms - 3 * 86_400_000;
         let repo = state.repo.lock().expect("mutex poisoned");
         // 写一些 import_state 记录（模拟历史导入状态）
@@ -755,7 +765,9 @@ mod reset_range_tests {
             ],
         )
         .expect("record states");
-        let m = repo.import_state_map(Provider::Generic.as_str()).expect("state map");
+        let m = repo
+            .import_state_map(Provider::Generic.as_str())
+            .expect("state map");
         assert_eq!(m.len(), 3, "前置条件：3 条 import_state 记录");
         drop(repo);
 
@@ -769,8 +781,13 @@ mod reset_range_tests {
 
         // 验证 import_state 已空
         let repo = state.repo.lock().expect("mutex poisoned");
-        let m = repo.import_state_map(Provider::Generic.as_str()).expect("state map");
-        assert!(m.is_empty(), "clear_all 必须清空 import_state，否则 autoSync 会跳过来源全 skip");
+        let m = repo
+            .import_state_map(Provider::Generic.as_str())
+            .expect("state map");
+        assert!(
+            m.is_empty(),
+            "clear_all 必须清空 import_state，否则 autoSync 会跳过来源全 skip"
+        );
     }
 
     #[test]

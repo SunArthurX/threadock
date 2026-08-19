@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# pre-push：推送前跑全量预检（lint + 全部测试 + 构建）。
+# 紧急跳过：git push --no-verify
+"$(dirname "$0")/../scripts/precheck.sh" test

@@ -2,7 +2,6 @@
 
 use ch_domain::Workspace;
 
-
 #[derive(serde::Serialize)]
 pub struct WorkspaceDto {
     pub id: String,

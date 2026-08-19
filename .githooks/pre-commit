@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# pre-commit：跑快档预检（fmt×2 + clippy×2 + tsc + eslint，秒级~1分钟）。
+# 全量测试在 pre-push 钩子。紧急跳过：git commit --no-verify
+"$(dirname "$0")/../scripts/precheck.sh" lint

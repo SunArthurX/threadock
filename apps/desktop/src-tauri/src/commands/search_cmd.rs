@@ -86,7 +86,11 @@ fn engine_search(
     }
     let tantivy_hits = idx.search(&q).ok().map(|hits| {
         hits.into_iter()
-            .filter(|h| db_filter.as_ref().is_none_or(|set| set.contains(&h.conversation_id)))
+            .filter(|h| {
+                db_filter
+                    .as_ref()
+                    .is_none_or(|set| set.contains(&h.conversation_id))
+            })
             .map(|h| EngineHit {
                 message_id: h.message_id,
                 conversation_id: h.conversation_id,
@@ -204,10 +208,9 @@ pub(crate) async fn search_grouped(
         let Some(conv) = convs.get(&h.conversation_id) else {
             continue; // 会话已被硬删（FTS 残留）：跳过
         };
-        let parent = conv
-            .source_parent_id
-            .as_ref()
-            .and_then(|spid| parents.get(&(format!("prov_{}", conv.provider.as_str()), spid.clone())));
+        let parent = conv.source_parent_id.as_ref().and_then(|spid| {
+            parents.get(&(format!("prov_{}", conv.provider.as_str()), spid.clone()))
+        });
         let (root_id, root_title, root_updated_ms, is_child) = match parent {
             Some(p) => (
                 p.id.clone(),
@@ -272,8 +275,7 @@ pub(crate) async fn search_tree_hits(
 
     let hits = engine_search(&state, &query, role.as_deref(), 500)?;
     // 阅读顺序：主对话 0，子任务按更新时间升序 1..n；未知的排最后
-    let mut conv_rank: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut conv_rank: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     conv_rank.insert(root.id.clone(), 0);
     for c in children.iter().rev() {
         // list_child_conversations 返回 updated_at DESC，步进取升序
@@ -285,11 +287,19 @@ pub(crate) async fn search_tree_hits(
         .collect();
     let order = {
         let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-        repo.message_order_by_ids(&filtered.iter().map(|h| h.message_id.clone()).collect::<Vec<_>>())
-            .map_err(|e| storage_err(e))?
+        repo.message_order_by_ids(
+            &filtered
+                .iter()
+                .map(|h| h.message_id.clone())
+                .collect::<Vec<_>>(),
+        )
+        .map_err(|e| storage_err(e))?
     };
     filtered.sort_by_key(|h| {
-        let rank = conv_rank.get(&h.conversation_id).copied().unwrap_or(usize::MAX);
+        let rank = conv_rank
+            .get(&h.conversation_id)
+            .copied()
+            .unwrap_or(usize::MAX);
         let seq = order
             .get(&h.message_id)
             .map(|(_, s)| *s)

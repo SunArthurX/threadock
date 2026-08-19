@@ -67,7 +67,8 @@ pub(crate) async fn workspace_rename(
     new_name: String,
 ) -> Result<(), String> {
     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-    repo.rename_workspace(&id, &new_name).map_err(|e| storage_err(e))
+    repo.rename_workspace(&id, &new_name)
+        .map_err(|e| storage_err(e))
 }
 
 #[tauri::command]
