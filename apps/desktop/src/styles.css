@@ -654,7 +654,7 @@ button {
   gap: 4px;
   padding: 9px 16px 5px;
   cursor: pointer;
-  background: var(--bg-2, rgba(255, 255, 255, 0.03));
+  background: var(--bg-elevated);
   position: sticky;
   top: 0;
   z-index: 2;
@@ -714,18 +714,26 @@ button {
   flex-shrink: 0;
 }
 
-/* 右栏命中步进条（搜索模式，跨主对话/子对话跳转） */
+/* 右栏列：命中步进条（钉在滚动区外，始终可见）+ 详情滚动区 */
+.detail-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* 右栏命中步进条（搜索模式，跨主对话/子对话跳转）：位于 .detail-col 顶部，
+ * 在 ScrollArea 之外 —— 滚动详情内容时始终可见（此前 sticky 在 WKWebView
+ * 内随内容滚走，用户按 ↓ 跳转后按钮出视野） */
 .hit-nav-bar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: var(--bg-2, #1c1c20);
-  border-bottom: 1px solid var(--border, #333);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border-default);
   font-size: 12px;
+  flex-shrink: 0;
 }
 .hit-nav-query {
   font-weight: 600;

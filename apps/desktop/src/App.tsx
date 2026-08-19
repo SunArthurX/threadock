@@ -1095,7 +1095,8 @@ export default function App() {
               onDrag={(dx) => setListWidth((w) => { const n = Math.round(w + dx); const c = Math.max(240, Math.min(540, n)); saveNumber("ch-list-width", c); return c; })}
               title="拖拽调整会话列表宽度"
             />
-            <ScrollArea ref={detailPanelRef}>
+            {/* 右栏：命中步进条钉在滚动区域外（始终可见，不随内容滚走）+ 详情滚动区 */}
+            <div className="detail-col">
               {/* 命中步进条：当前会话树（主对话+子对话）内的全部命中，↑/↓ 跨会话跳转 */}
               {hitNav && (
                 <div className="hit-nav-bar">
@@ -1109,6 +1110,7 @@ export default function App() {
                   <button className="msg-search-btn" onClick={clearSearchMode} title="退出搜索模式（Esc）">✕</button>
                 </div>
               )}
+              <ScrollArea ref={detailPanelRef} style={{ flex: 1 }}>
               {selectedConv
                 ? <ConversationDetail conv={selectedConv} messages={messages} events={events}
                     completenessLabel={completenessLabel}
@@ -1168,7 +1170,8 @@ export default function App() {
                       </>
                     )}
                   </div>}
-            </ScrollArea>
+              </ScrollArea>
+            </div>
           </div>
         )}
         </ErrorBoundary>

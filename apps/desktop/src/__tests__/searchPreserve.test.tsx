@@ -91,6 +91,9 @@ describe("搜索模式：主对话分组 + 命中步进", () => {
     await waitFor(() => expect(container.textContent).toContain("西游记番外 的命中正文"));
     await waitFor(() => expect(container.querySelector(".hit-nav-bar")).toBeTruthy());
     expect(container.querySelector(".hit-nav-count")?.textContent).toContain("2 / 2");
+    // 步进条必须钉在滚动区域外（.detail-col 直接子级）：滚动详情内容时 ↑/↓ 不出视野
+    expect(container.querySelector(".detail-col > .hit-nav-bar")).toBeTruthy();
+    expect(container.querySelector("[data-testid='scroll-area-inner'] .hit-nav-bar")).toBeNull();
     // 左栏分组保留（不被重置）
     expect(container.querySelectorAll(".search-group").length).toBe(1);
 
