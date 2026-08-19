@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.1] - 2026-08-19
+
+依赖安全修复轮（Dependabot 5 项告警清零）。
+
+### Security
+- **vite ^5.4.0 → ^6.4.3**：修复 fs.deny 绕过（high）、launch-editor UNC
+  路径泄漏、优化依赖 .map 路径穿越三条公告（均无 5.x 补丁线）
+- **esbuild 0.21.5 → 0.25.12 / nanoid → 3.3.18**：随 vite 6 升级 +
+  `npm audit fix`；apps/desktop `npm audit` 0 漏洞
+- **glib 告警（unsoundness）**：tauri 2.11.5 直接依赖 gtk ^0.18，当前
+  生态无升级路径；受影响 API（`VariantStrIter` 迭代器）未被 tauri 栈
+  使用且 glib 仅 Linux GUI 目标编译——已在 GitHub 按「受影响代码未使用」
+  处置并留说明，待 tauri 升级 gtk-rs 后重评
+
+### Fixed
+- **vite 6 下 5 个测试套件加载失败**：vite 6 收紧根外文件访问，构建期
+  `?raw` 导入工作区 Cargo.toml（版本号派生）被 Denied——vite/vitest
+  配置增加 `server.fs.allow` 放行仓库根（恢复 vite 5 行为）
+
 ## [1.1.0] - 2026-08-19
 
 搜索体验闭环：结果保留 + 按主对话分组 + 跨子对话命中步进 + 正文精准匹配。
