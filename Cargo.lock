@@ -270,7 +270,7 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "ch-adapter-claude-code"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -284,7 +284,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-codex"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-cursor"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-host"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "cargo_metadata",
  "ch-adapter-sdk",
@@ -329,7 +329,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-jsonl"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -343,7 +343,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-markdown"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-minimax"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -374,7 +374,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-sdk"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "base64",
  "ch-domain",
@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "ch-adapter-zcode"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-sdk",
  "ch-domain",
@@ -405,7 +405,7 @@ dependencies = [
 
 [[package]]
 name = "ch-audit"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "ch-backup"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -440,7 +440,7 @@ dependencies = [
 
 [[package]]
 name = "ch-benchmarks"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-markdown",
  "ch-domain",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "ch-cli"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "anyhow",
  "ch-adapter-claude-code",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "ch-daemon"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-jsonl",
  "ch-adapter-markdown",
@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "ch-domain"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -514,7 +514,7 @@ dependencies = [
 
 [[package]]
 name = "ch-export"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-adapter-markdown",
  "ch-domain",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "ch-identity-resolver"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "thiserror 1.0.69",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "ch-knowledge"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "ch-normalization",
@@ -550,7 +550,7 @@ dependencies = [
 
 [[package]]
 name = "ch-normalization"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -563,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "ch-ops-metrics"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "regex",
@@ -578,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "ch-raw-store"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "blake3",
  "ch-domain",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "ch-search"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "jieba-rs",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "ch-storage"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "ch-domain",
  "rusqlite",

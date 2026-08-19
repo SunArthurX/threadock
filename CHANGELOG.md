@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.1.0] - 2026-08-19
+
+搜索体验闭环：结果保留 + 按主对话分组 + 跨子对话命中步进 + 正文精准匹配。
+
+### Added
+- **搜索结果按主对话分组**（GUI 左栏）：新命令 `search_grouped` 复用双引擎
+  （Tantivy→FTS5 降级统一抽为 `engine_search`）在命令层按主对话聚合，子任务
+  命中经 `source_parent_id` 回溯折叠到主对话之下；左栏搜索模式呈现主对话树
+  （root 行显示总命中数，子对话命中缩进折叠），与普通列表父子心智一致
+- **跨子对话命中步进**（GUI 右栏）：新命令 `search_tree_hits` 返回某主对话及
+  其全部子任务内的命中（按「主对话 → 子任务时间序 → 消息序号」阅读顺序）；
+  详情区顶部步进条 `🎯 关键词 N/M ↑↓` 支持按钮与全局 ↑/↓ 键跳转，跨会话
+  自动切换详情并高亮滚动；关键词经 `searchPreset` 预填详情页 ⌘F 页内搜索
+- storage 批量查询 `conversations_by_ids` / `conversations_by_source_ids` /
+  `message_order_by_ids`（分组与排序一次取齐，避免 N+1）
+
+### Fixed
+- **点击搜索结果后左栏结果被清空**：`jumpToSearchResult` 不再
+  `setSearchResults(null)`，退出搜索统一走 Esc / 顶栏「清除」
+- **命中步进条随内容滚出视野**：步进条移出 ScrollArea 钉在右栏顶部
+  （此前 sticky 在 WKWebView 自绘滚动条场景下失效）
+- **标题命中导致全文搜索噪音**：FTS5/Tantivy/prompt_reuse 三处统一只匹配
+  消息正文（body-only）——此前标题含关键词的会话每条消息都算命中且 snippet
+  无高亮；标题检索走列表既有「搜索标题…」入口
+
+### Changed
+- 搜索角色筛选（全部/仅用户/仅助手）由前端内存过滤升级为服务端重查；
+  移除旧 SearchPanel 的「复制全部命中」（消息级平铺列表已由分组视图取代）
+
 ## [1.0.1] - 2026-08-17
 
 v1.0.0 后的全功能测试轮（CLI 真人 E2E 59 项 + Tauri 命令层 3 旅程 + 浏览器 GUI 真人模拟）发现并修复：
