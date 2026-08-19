@@ -139,8 +139,10 @@ impl Repository {
         limit: usize,
     ) -> StorageResult<Vec<search::PromptReuseHit>> {
         let conn = self.conn.lock().expect("mutex poisoned");
-        let match_expr = search::build_match_expr(query);
-        if match_expr.is_empty() {
+        // 与主搜索一致限定 body 列（方案 A）：找「相似历史提问」应匹配提问正文，
+        // 而非会话标题（标题命中会把整会话的 user 消息都算成相似提问）
+        let match_expr = format!("{{body}} : {}", search::build_match_expr(query));
+        if match_expr == "{body} : " {
             return Ok(Vec::new());
         }
         // FTS5 命中后 JOIN 取会话元数据 + 聚合 cost（按 source_session_id）

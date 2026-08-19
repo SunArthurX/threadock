@@ -384,8 +384,9 @@ impl SearchIndex {
         let searcher = self.reader.searcher();
         let f = &self.fields;
 
-        // 构造查询：title OR body 上做全文，再用 provider/workspace 过滤
-        let query_parser = QueryParser::for_index(&self.index, vec![f.title, f.body]);
+        // 构造查询：全文只在 body 上匹配（方案 A）——title 仍入索引供返回展示，
+        // 但不参与命中：否则标题含关键词的会话每条消息都算命中，结果全是无高亮噪音
+        let query_parser = QueryParser::for_index(&self.index, vec![f.body]);
         // 让用户的裸关键词被当成词组查（更符合直觉）
         let escaped = escape_query(&parsed.text);
 
@@ -660,6 +661,25 @@ mod tests {
             .search(&SearchQuery::new("后台任务"))
             .expect("SQL execution failed");
         assert!(!hits.is_empty());
+    }
+
+    #[test]
+    fn search_body_only_title_match_not_hit() {
+        // 方案 A：消息全文搜索只匹配正文 —— 标题含关键词、正文不含的消息不算命中
+        //（此前 title 参与 OR 匹配：标题含「白板」的会话每条消息都命中，snippet 无高亮）
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        index_samples(
+            &idx,
+            &[
+                msg("m1", "c1", "白板手绘风格", "文件结构清晰，先看看图的风格"),
+                msg("m2", "c1", "无关标题", "我们用白板梳理一下流程"),
+            ],
+        );
+        let hits = idx
+            .search(&SearchQuery::new("白板"))
+            .expect("SQL execution failed");
+        assert_eq!(hits.len(), 1, "只有正文含「白板」的消息应命中");
+        assert_eq!(hits[0].message_id, "m2");
     }
 
     #[test]

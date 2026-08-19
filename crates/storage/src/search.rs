@@ -123,13 +123,14 @@ pub(super) fn search(
     let mut where_clauses: Vec<String> = Vec::new();
     let mut args: Vec<rusqlite::types::Value> = Vec::new();
 
-    // MATCH：在 title 和 body 两列上检索（仅自由文本部分）
+    // MATCH：只在 body 列检索（方案 A）——title 列仍随行存储但不参与命中，
+    // 避免「标题含关键词的会话 → 每条消息都命中」的噪音（snippet 无高亮）
     let match_expr = build_match_expr(&parsed.text);
     if !match_expr.is_empty() {
         where_clauses.push("messages_fts MATCH ?".to_string());
         // MATCH 表达式必须作为整体字符串绑定到虚拟表列；
-        // 这里用 `{title body} : <expr>` 语法限定列范围
-        args.push(format!("{{title body}} : {match_expr}").into());
+        // 这里用 `{body} : <expr>` 语法限定列范围
+        args.push(format!("{{body}} : {match_expr}").into());
     }
     if let Some(p) = q.provider {
         where_clauses.push("provider = ?".to_string());
@@ -387,6 +388,25 @@ mod tests {
             .all(|sr| sr.conversation_id.starts_with("conv")));
         // 第一条命中应来自 Android 那条会话
         assert!(results[0].title.as_deref().unwrap_or("").contains("Tauri"));
+    }
+
+    #[test]
+    fn search_matches_body_only_not_title() {
+        // 方案 A：FTS 只在 body 列匹配 —— 会话标题含关键词但正文没有 → 不算消息命中
+        //（seed 里 c2 标题「Rust 错误处理」，正文只有 thiserror/anyhow）
+        let r = seed();
+        let title_only = r
+            .search(&SearchQuery::new("错误处理"))
+            .expect("SQL execution failed");
+        assert!(
+            title_only.is_empty(),
+            "标题命中不应让消息算命中（body-only）"
+        );
+        // 正文命中的词照常工作
+        let body_hit = r
+            .search(&SearchQuery::new("thiserror"))
+            .expect("SQL execution failed");
+        assert!(!body_hit.is_empty());
     }
 
     #[test]
