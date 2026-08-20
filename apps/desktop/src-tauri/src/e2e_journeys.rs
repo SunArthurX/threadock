@@ -125,6 +125,7 @@ fn journey_conversation_lifecycle() {
     let k = tauri::async_runtime::block_on(extract_knowledge(
         state.clone(),
         imported.conversation_id.clone(),
+        None,
     ))
     .expect("knowledge");
     assert!(!k.summary.is_empty(), "摘要应非空");

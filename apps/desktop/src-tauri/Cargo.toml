@@ -44,6 +44,7 @@ ch-adapter-codex = { path = "../../../crates/adapter-codex" }
 ch-ops-metrics = { path = "../../../crates/ops-metrics" }
 ch-audit = { path = "../../../crates/audit" }
 ch-knowledge = { path = "../../../crates/knowledge" }
+ch-llm = { path = "../../../crates/llm" }
 ch-export = { path = "../../../crates/export" }
 ch-backup = { path = "../../../crates/backup" }
 arboard = "3.6.1"
