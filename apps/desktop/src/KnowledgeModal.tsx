@@ -17,7 +17,8 @@ interface Props {
   /** 当前提取引擎（默认规则；AI 需在设置中启用）。 */
   engine?: KnowledgeEngine;
   onClose: () => void;
-  onReextract: (engine: KnowledgeEngine) => void;
+  /** 以指定引擎重新提取（可异步；无论成败，弹窗都会解除按钮禁用态） */
+  onReextract: (engine: KnowledgeEngine) => void | Promise<void>;
   /** 跳转到其他会话（跨会话引用点击）。 */
   onJumpToConversation?: (conversationId: string) => void;
 }
@@ -90,16 +91,16 @@ export function knowledgeToJson(k: ExtractionResult): string {
 export default function KnowledgeModal({ knowledge, conversationId, convTitle, engine = "rule", onClose, onReextract, onJumpToConversation }: Props) {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
-  /** 引擎切换瞬时的请求中标记（AI 引擎有网络延迟） */
+  /** 引擎切换瞬时的请求中标记（AI 引擎有网络延迟）；
+   * 无论成功失败都要清除——失败路径（未启用/网络错）不会有新结果到达，
+   * 若只依赖「结果引用变化」清除，按钮会永久禁用（功能测试轮发现的回归） */
   const [switching, setSwitching] = useState<KnowledgeEngine | null>(null);
+  const runExtract = (target: KnowledgeEngine) => {
+    setSwitching(target);
+    void Promise.resolve(onReextract(target)).finally(() => setSwitching(null));
+  };
   const isLlmResult = (knowledge.extractor ?? "").startsWith("llm:");
   const llmModel = isLlmResult ? knowledge.extractor.slice(4).split("@")[0] : null;
-  // 新结果到达（引用变化）即解除切换中的禁用态（渲染期调整，见 react.dev「You Might Not Need an Effect」）
-  const [lastKnowledge, setLastKnowledge] = useState(knowledge);
-  if (lastKnowledge !== knowledge) {
-    setLastKnowledge(knowledge);
-    setSwitching(null);
-  }
   /** 导出 dropdown 开关（合并 MD/JSON 后的单按钮） */
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -204,15 +205,15 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, e
               <button
                 className={engine === "rule" ? "active" : ""}
                 disabled={switching !== null}
-                onClick={() => { setSwitching("rule"); onReextract("rule"); }}
+                onClick={() => runExtract("rule")}
               >⚙ 规则</button>
               <button
                 className={engine === "llm" ? "active" : ""}
                 disabled={switching !== null}
-                onClick={() => { setSwitching("llm"); onReextract("llm"); }}
+                onClick={() => runExtract("llm")}
               >{switching === "llm" ? "AI 提取中…" : "✨ AI"}</button>
             </div>
-            <button className="action-btn" onClick={() => onReextract(engine)} disabled={switching !== null}>↻ 重新提取</button>
+            <button className="action-btn" onClick={() => runExtract(engine)} disabled={switching !== null}>↻ 重新提取</button>
             {/* MD/JSON 下载合并为单一 dropdown 按钮：节省顶栏空间 */}
             <div className={`list-dropdown ${downloadOpen ? "open" : ""}`} ref={downloadRef}>
               <button

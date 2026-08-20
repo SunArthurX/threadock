@@ -85,7 +85,7 @@ impl Chat for HttpChat {
 
 impl HttpChat {
     fn build_body(&self, req: &ChatRequest) -> serde_json::Value {
-        serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": [
                 {"role": "system", "content": req.system},
@@ -93,8 +93,13 @@ impl HttpChat {
             ],
             "max_tokens": req.max_tokens,
             "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-        })
+        });
+        // 仅 json_mode 请求携带 response_format（连接探测等自由文本场景不带，
+        // 严格服务端会因此强制 JSON 输出——全链路旅程测试发现的缺陷）
+        if req.json_mode {
+            body["response_format"] = serde_json::json!({"type": "json_object"});
+        }
+        body
     }
 
     fn post(&self, url: &str, body: &serde_json::Value) -> Result<ureq::Response, LlmError> {
@@ -277,6 +282,28 @@ mod tests {
         let body = request_body(&raw);
         assert_eq!(body["response_format"]["type"], "json_object");
         assert_eq!(body["model"], "test-model");
+    }
+
+    #[test]
+    fn json_mode_false_omits_response_format() {
+        // 回归：json_mode=false（连接探测等自由文本场景）不得携带 response_format
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let raw = read_request(&mut stream);
+            write_response(&mut stream, "200 OK", &ok_body());
+            raw
+        });
+        let chat = HttpChat::new(&config(&format!("http://{addr}"), 5), None);
+        let mut probe = req();
+        probe.json_mode = false;
+        let _ = Chat::chat(&chat, &probe).expect("chat ok");
+        let raw = handle.join().expect("server thread");
+        assert!(
+            request_body(&raw).get("response_format").is_none(),
+            "json_mode=false 不应带 response_format"
+        );
     }
 
     #[test]

@@ -609,8 +609,12 @@ export default function App() {
     setExporting(false);
   };
 
-  const extractKnowledge = async (engine: KnowledgeEngine = knowledgeEngine) => {
+  const extractKnowledge = async (engineArg?: unknown) => {
     if (!selectedConv) return;
+    // 防御性归一化：本函数可能被直接挂到 onClick 上（详情页工具栏），
+    // 第一个参数是事件对象而非引擎名——非法值一律回退到当前引擎
+    const engine: KnowledgeEngine =
+      engineArg === "llm" || engineArg === "rule" ? engineArg : knowledgeEngine;
     try {
       const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id, engine });
       setKnowledge(r);
@@ -1148,7 +1152,7 @@ export default function App() {
                       }
                     }}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
-                    onExport={exportCurrent} onExtractKnowledge={extractKnowledge}
+                    onExport={exportCurrent} onExtractKnowledge={() => void extractKnowledge()}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
                 : <div className="empty empty-cta">
                     {!conversations.length && !convsLoading ? (

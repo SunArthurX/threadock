@@ -344,7 +344,7 @@ export default function ConversationDetail({
         <button className="action-btn" onClick={copyResumeCommand} title="复制「恢复原会话」命令（claude-code / codex CLI 来源支持）">
           ⏯ 恢复命令
         </button>
-        <button className="action-btn" onClick={onExtractKnowledge} disabled={loading || messages.length === 0}>
+        <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
           {loading ? "提取中…" : "✨ 知识"}
         </button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>

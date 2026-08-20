@@ -180,6 +180,9 @@ pub fn run() {
 mod e2e_journeys;
 
 #[cfg(test)]
+mod llm_journeys;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
