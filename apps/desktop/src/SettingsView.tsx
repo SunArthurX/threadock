@@ -764,7 +764,7 @@ function LlmSection() {
         {msg && <span className="settings-value">{msg}</span>}
       </div>
       <div className="settings-hint">
-        API Key 以 XChaCha20-Poly1305 加密后存本地数据库，主密钥在操作系统钥匙串（无钥匙串环境回退 0600 密钥文件）；
+        API Key 以 XChaCha20-Poly1305 加密后存本地数据库，主密钥为应用数据目录下 0600 权限的密钥文件（仅本用户可读）；
         明文永不落盘、不出现在日志。测试连接使用已保存的配置。
       </div>
     </>

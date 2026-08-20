@@ -314,7 +314,7 @@ type:tool_call file:package.json          # 涉及 package.json 的工具调用
 **API Key 的本地安全**：
 
 - Key 以 **XChaCha20-Poly1305** 认证加密后存入本地数据库（密文形态，每次随机 nonce）；
-- 加密主密钥保存在**操作系统钥匙串**（macOS Keychain / Windows Credential Manager / Linux Secret Service）；无钥匙串环境自动回退为应用数据目录下 **0600 权限**的密钥文件（可用环境变量 `THREADOCK_NO_KEYCHAIN=1` 强制走文件）；
+- 加密主密钥保存在应用数据目录下的 **0600 权限密钥文件**（`keys/llm-master.key`，仅本用户可读；跨平台统一，不依赖 OS 钥匙串）；
 - 明文 Key 永不落盘、不出现在日志与错误信息；界面只显示打码形态（如 `sk-***1234`）；
 - 数据库被单独拷走/泄露时，没有主密钥无法解出 Key；
 - 非本地端点强制 https（拒绝云端明文 http，防凭据裸奔）。

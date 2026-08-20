@@ -20,15 +20,5 @@ base64 = "0.22"
 # HTTP 客户端（rustls，无 openssl 依赖）
 ureq = { version = "2", features = ["json"] }
 
-# 主密钥的 OS 安全存储按平台启用（无钥匙串平台自动走文件兜底）
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["sync-secret-service"] }
-
 [dev-dependencies]
 tempfile = "3"

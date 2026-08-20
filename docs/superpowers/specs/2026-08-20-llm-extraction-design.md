@@ -163,3 +163,14 @@ pub struct LlmConfig {
 - 流式输出 / 多轮对话式提取。
 - daemon JSON-RPC 的 LLM 引擎。
 - DEK/主密钥轮换 UI（版本字段已预留）。
+
+## 12. 变更记录
+
+- **2026-08-20（用户决策）**：移除 OS 钥匙串层（keyring 依赖及三平台
+  target-specific feature 全部删除；`THREADOCK_NO_KEYCHAIN` 环境开关删除；
+  用户本机钥匙串中测试期创建的 `threadock/llm-master-key` 条目已删除）。
+  主密钥统一为数据目录下 0600 密钥文件，三平台行为一致。加密强度不变：
+  XChaCha20-Poly1305 AEAD + 随机 nonce + AAD + v1 版本前缀，数据库单独
+  泄露仍不可解。动机：用户不希望依赖各平台钥匙串的可用性与授权弹窗
+  （说明：原设计在 Windows 走 Credential Manager，并非不支持，此处按
+  用户明确要求简化为纯文件方案）。

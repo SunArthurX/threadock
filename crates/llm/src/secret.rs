@@ -1,12 +1,9 @@
-//! 本地密钥密封：XChaCha20-Poly1305 AEAD + 主密钥托管。
+//! 本地密钥密封：XChaCha20-Poly1305 AEAD + 0600 密钥文件主密钥。
 //!
-//! ## 威胁模型与设计（plan §14.3）
+//! ## 威胁模型与设计（plan §14.3；2026-08-20 用户决策：不依赖 OS 钥匙串）
 //!
-//! - **主密钥**（32 字节随机）：优先存 OS 安全存储（macOS Keychain /
-//!   Windows Credential Manager / Linux Secret Service）；环境不可用时
-//!   兜底为 `<data_dir>/keys/llm-master.key`（0600，仅本用户可读）并
-//!   `tracing::warn`。设置 `THREADOCK_NO_KEYCHAIN=1` 可强制走文件路径
-//!   （headless/CI/无钥匙串环境）。
+//! - **主密钥**（32 字节随机）：存 `<data_dir>/keys/llm-master.key`，
+//!   Unix 下权限 0600（仅本用户可读），Windows 下位于用户 profile 目录内。
 //! - **密文**（API Key）以 `"v1." + base64(nonce[24] ‖ ciphertext‖tag[16])`
 //!   存放在调用方的数据库里——数据库被单独拷走/泄露时无主密钥不可解。
 //! - 每次密封随机 nonce；固定 AAD `threadock.llm.api_key` 防密文跨用途挪用；
@@ -28,59 +25,21 @@ const MASTER_KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 24;
 /// 密封绑定的 AAD：固定用途串，防密文跨用途挪用。
 const SEALED_AAD: &[u8] = b"threadock.llm.api_key";
-const KEYCHAIN_SERVICE: &str = "threadock";
-const KEYCHAIN_ACCOUNT: &str = "llm-master-key";
-/// 强制文件兜底的环境开关（headless / CI / 无钥匙串环境）。
-const NO_KEYCHAIN_ENV: &str = "THREADOCK_NO_KEYCHAIN";
 
 /// API Key 密封保险库。
 pub struct SecretVault {
     master_key: Zeroizing<[u8; MASTER_KEY_LEN]>,
-    /// 实际使用的主密钥来源（诊断展示）。
-    pub source: MasterKeySource,
-}
-
-/// 主密钥来源。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MasterKeySource {
-    /// OS 安全存储（macOS Keychain / Windows Credential Manager / Linux Secret Service）。
-    OsKeychain,
-    /// 数据目录下 0600 密钥文件（无钥匙串环境兜底）。
-    KeyFile,
 }
 
 impl SecretVault {
-    /// 打开保险库：OS 钥匙串优先，不可用回退密钥文件。
-    ///
-    /// # Errors
-    /// 钥匙串与密钥文件都不可用时返回 [`LlmError::KeyStore`]。
-    pub fn open(data_dir: &Path) -> Result<Self, LlmError> {
-        let force_file = std::env::var_os(NO_KEYCHAIN_ENV).is_some_and(|v| !v.is_empty());
-        if !force_file {
-            match master_key_from_keychain() {
-                Ok(key) => {
-                    return Ok(Self {
-                        master_key: Zeroizing::new(key),
-                        source: MasterKeySource::OsKeychain,
-                    });
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "OS 钥匙串不可用，回退本地密钥文件（0600）");
-                }
-            }
-        }
-        Self::with_file_key(data_dir)
-    }
-
-    /// 仅使用文件主密钥（测试与无钥匙串环境的确定性路径）。
+    /// 打开保险库：读取（不存在则创建）数据目录下的 0600 主密钥文件。
     ///
     /// # Errors
     /// 密钥文件不可创建/损坏时返回 [`LlmError::KeyStore`]。
-    pub fn with_file_key(data_dir: &Path) -> Result<Self, LlmError> {
-        let key = master_key_from_file(data_dir)?;
+    pub fn open(data_dir: &Path) -> Result<Self, LlmError> {
+        let key = load_or_create_master_key(data_dir)?;
         Ok(Self {
             master_key: Zeroizing::new(key),
-            source: MasterKeySource::KeyFile,
         })
     }
 
@@ -150,35 +109,8 @@ pub fn mask_key(key: &str) -> String {
     format!("{head}***{tail}")
 }
 
-/// 从 OS 钥匙串取主密钥；不存在则生成并写入。
-fn master_key_from_keychain() -> Result<[u8; MASTER_KEY_LEN], String> {
-    use keyring::Entry;
-    let entry = Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|e| e.to_string())?;
-    match entry.get_password() {
-        Ok(b64) => {
-            let bytes = B64
-                .decode(b64.trim())
-                .map_err(|e| format!("钥匙串内容损坏：{e}"))?;
-            if bytes.len() != MASTER_KEY_LEN {
-                return Err("钥匙串密钥长度异常".into());
-            }
-            let mut key = [0u8; MASTER_KEY_LEN];
-            key.copy_from_slice(&bytes);
-            Ok(key)
-        }
-        Err(keyring::Error::NoEntry) => {
-            let key = random_master_key();
-            entry
-                .set_password(&B64.encode(key))
-                .map_err(|e| e.to_string())?;
-            Ok(key)
-        }
-        Err(e) => Err(e.to_string()),
-    }
-}
-
 /// 从 `<data_dir>/keys/llm-master.key` 读/建主密钥（0600）。
-fn master_key_from_file(data_dir: &Path) -> Result<[u8; MASTER_KEY_LEN], LlmError> {
+fn load_or_create_master_key(data_dir: &Path) -> Result<[u8; MASTER_KEY_LEN], LlmError> {
     let dir = data_dir.join("keys");
     std::fs::create_dir_all(&dir).map_err(|e| LlmError::KeyStore(e.to_string()))?;
     let path = dir.join("llm-master.key");
@@ -226,12 +158,10 @@ fn set_owner_only_perms(_path: &Path) {}
 mod tests {
     use super::*;
 
-    // 全部走文件主密钥：不污染真实钥匙串、跨环境确定性。
-
     #[test]
     fn seal_open_roundtrip() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let vault = SecretVault::open(dir.path()).expect("vault open");
         let sealed = vault.seal("sk-test-1234567890").expect("seal");
         assert!(sealed.starts_with("v1."), "版本前缀：{sealed}");
         assert_eq!(
@@ -243,7 +173,7 @@ mod tests {
     #[test]
     fn seal_uses_random_nonce() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let vault = SecretVault::open(dir.path()).expect("vault open");
         let a = vault.seal("same-plaintext").expect("seal");
         let b = vault.seal("same-plaintext").expect("seal");
         assert_ne!(a, b, "随机 nonce → 同明文两次密文不同");
@@ -253,7 +183,7 @@ mod tests {
     #[test]
     fn tampered_ciphertext_rejected() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let vault = SecretVault::open(dir.path()).expect("vault open");
         let sealed = vault.seal("sk-abc").expect("seal");
         // 翻转密文末字节（base64 段为 ASCII，可安全按字节重建）
         let flip = |s: &str, idx: usize| {
@@ -271,7 +201,7 @@ mod tests {
     #[test]
     fn malformed_sealed_strings_rejected() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let vault = SecretVault::open(dir.path()).expect("vault open");
         for bad in [
             "",
             "v1",
@@ -289,27 +219,26 @@ mod tests {
 
     #[test]
     fn cross_vault_cannot_decrypt() {
-        // 换设备（不同主密钥）后旧密文不可解——迁移场景预期行为
+        // 主密钥不同（如换设备/删密钥文件）时旧密文不可解——预期行为
         let dir_a = tempfile::tempdir().expect("tempdir creation failed");
         let dir_b = tempfile::tempdir().expect("tempdir creation failed");
-        let a = SecretVault::with_file_key(dir_a.path()).expect("vault open");
-        let b = SecretVault::with_file_key(dir_b.path()).expect("vault open");
+        let a = SecretVault::open(dir_a.path()).expect("vault open");
+        let b = SecretVault::open(dir_b.path()).expect("vault open");
         let sealed = a.seal("sk-cross").expect("seal");
         assert!(matches!(b.open_sealed(&sealed), Err(LlmError::Decrypt)));
     }
 
     #[test]
-    fn file_master_key_persists_across_reopen() {
+    fn master_key_file_persists_across_reopen() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let first = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let first = SecretVault::open(dir.path()).expect("vault open");
         let sealed = first.seal("sk-persist").expect("seal");
-        let second = SecretVault::with_file_key(dir.path()).expect("vault reopen");
+        let second = SecretVault::open(dir.path()).expect("vault reopen");
         assert_eq!(
             second.open_sealed(&sealed).expect("open"),
             "sk-persist",
             "同一目录重开应复用密钥文件"
         );
-        assert_eq!(second.source, MasterKeySource::KeyFile);
     }
 
     #[cfg(unix)]
@@ -317,7 +246,7 @@ mod tests {
     fn key_file_has_owner_only_permissions() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let _vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let _vault = SecretVault::open(dir.path()).expect("vault open");
         let mode = std::fs::metadata(dir.path().join("keys/llm-master.key"))
             .expect("metadata")
             .permissions()
@@ -328,7 +257,7 @@ mod tests {
     #[test]
     fn plaintext_never_in_key_file() {
         let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::with_file_key(dir.path()).expect("vault open");
+        let vault = SecretVault::open(dir.path()).expect("vault open");
         vault.seal("sk-SECRET-plaintext").expect("seal");
         let key_file =
             std::fs::read_to_string(dir.path().join("keys/llm-master.key")).expect("read key file");
@@ -338,29 +267,20 @@ mod tests {
     }
 
     #[test]
+    fn key_file_is_base64_of_32_bytes() {
+        let dir = tempfile::tempdir().expect("tempdir creation failed");
+        let _vault = SecretVault::open(dir.path()).expect("vault open");
+        let raw =
+            std::fs::read_to_string(dir.path().join("keys/llm-master.key")).expect("read key file");
+        let bytes = B64.decode(raw.trim()).expect("valid base64");
+        assert_eq!(bytes.len(), MASTER_KEY_LEN, "主密钥必须 32 字节");
+    }
+
+    #[test]
     fn mask_key_shapes() {
         assert_eq!(mask_key(""), "");
         assert_eq!(mask_key(" short "), "***rt");
         assert_eq!(mask_key("sk-AbCd1234"), "sk-***1234");
         assert_eq!(mask_key("0123456789"), "012***6789");
-    }
-
-    #[test]
-    fn open_prefers_keychain_but_succeeds_anywhere() {
-        // 冒烟：真实环境下 open() 必须可用（钥匙串或文件兜底），不抛 KeyStore
-        let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::open(dir.path()).expect("vault open should succeed");
-        let sealed = vault.seal("sk-smoke").expect("seal");
-        assert_eq!(vault.open_sealed(&sealed).expect("open"), "sk-smoke");
-    }
-
-    #[test]
-    fn open_respects_no_keychain_env() {
-        // 注意：env 是进程级开关；本测试独占使用（其余用例均走 with_file_key）
-        std::env::set_var("THREADOCK_NO_KEYCHAIN", "1");
-        let dir = tempfile::tempdir().expect("tempdir creation failed");
-        let vault = SecretVault::open(dir.path()).expect("vault open");
-        std::env::remove_var("THREADOCK_NO_KEYCHAIN");
-        assert_eq!(vault.source, MasterKeySource::KeyFile);
     }
 }

@@ -12,10 +12,10 @@ AI 知识提取（大模型引擎）+ API Key 本地加密存储。
   （Ollama / LM Studio / llama.cpp server）同一套配置；GUI 提供 4 个预设；
   本地端点自动识别并标记「本地」（允许 http），云端强制 https
 - **API Key 本地加密存储**：XChaCha20-Poly1305 AEAD（随机 nonce + 固定 AAD
-  + `v1` 版本前缀）；主密钥优先 OS 钥匙串（macOS Keychain / Windows
-  Credential Manager / Linux Secret Service），无钥匙串环境回退 0600 密钥
-  文件（`THREADOCK_NO_KEYCHAIN=1` 可强制）；明文永不落盘/不出现在日志与
-  错误信息（plan §14.3）
+  + `v1` 版本前缀）；主密钥为应用数据目录下 **0600 权限密钥文件**
+  （`keys/llm-master.key`，跨平台统一，不依赖 OS 钥匙串——用户决策，
+  避免 macOS/Windows/Linux 钥匙串可用性差异）；明文永不落盘/不出现在
+  日志与错误信息（plan §14.3）
 - **新 crate `ch-llm`**：`LlmConfig`（校验/钳制/本地端点判定）+ `SecretVault`
   （密封保险库，主密钥 Zeroize）+ `HttpChat`（ureq+rustls；`response_format`
   被 400/422 拒绝时降级重试；401/429/5xx 分类）

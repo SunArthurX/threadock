@@ -3,8 +3,8 @@
 //! ## 组成
 //!
 //! - [`config`]：LLM 配置模型（OpenAI 兼容端点；非敏感字段明文 + API Key 密文）。
-//! - [`secret`]：密钥密封保险库（XChaCha20-Poly1305；主密钥优先 OS 钥匙串，
-//!   兜底应用数据目录 0600 密钥文件）。
+//! - [`secret`]：密钥密封保险库（XChaCha20-Poly1305；主密钥为数据目录下
+//!   0600 密钥文件，跨平台统一，不依赖 OS 钥匙串）。
 //! - [`client`]：OpenAI 兼容 `chat/completions` 客户端（ureq + rustls）。
 //!
 //! ## 安全边界
@@ -22,7 +22,7 @@ pub use config::{
     LlmConfig, DEFAULT_MAX_INPUT_CHARS, DEFAULT_TIMEOUT_SECS, MAX_INPUT_CHARS_LIMIT,
     MAX_TIMEOUT_SECS,
 };
-pub use secret::{mask_key, MasterKeySource, SecretVault};
+pub use secret::{mask_key, SecretVault};
 
 /// LLM 域错误：Display 均为面向用户的中文短语，**不含 API Key 等凭据**。
 #[derive(Debug, Clone, thiserror::Error)]

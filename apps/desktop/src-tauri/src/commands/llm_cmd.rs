@@ -2,8 +2,8 @@
 //!
 //! 安全要点：
 //! - 前端只拿 [`LlmConfigView`]（masked 密钥提示，无明文/密文）。
-//! - `api_key_sealed` 密文存 `app_settings.llm_config`；主密钥在 OS 钥匙串
-//!   或 0600 密钥文件（见 [`ch_llm::SecretVault`]），数据库泄露不泄密。
+//! - `api_key_sealed` 密文存 `app_settings.llm_config`；主密钥为数据目录下
+//!   0600 密钥文件（见 [`ch_llm::SecretVault`]），数据库泄露不泄密。
 //! - 加密/解密/网络都在 `run_blocking` 中执行，不占 tokio worker。
 
 use super::*;
@@ -221,8 +221,6 @@ mod tests {
     use tauri::Manager as _;
 
     fn harness() -> (tauri::App<tauri::test::MockRuntime>, DaemonStateGuard) {
-        // 测试统一走文件主密钥：不污染真实钥匙串、跨环境确定性
-        std::env::set_var("THREADOCK_NO_KEYCHAIN", "1");
         let app = tauri::test::mock_app();
         let dir = tempfile::TempDir::new().expect("tempdir");
         let state = ch_daemon::DaemonState::open(ch_daemon::DaemonStateConfig {
