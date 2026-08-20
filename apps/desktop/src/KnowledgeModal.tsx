@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import type { ExtractionResult } from "./types";
+import type { ExtractionResult, KnowledgeEngine } from "./types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
 interface Props {
@@ -14,8 +14,10 @@ interface Props {
   conversationId?: string;
   /** 所属会话标题（弹窗副标题展示）。 */
   convTitle?: string | null;
+  /** 当前提取引擎（默认规则；AI 需在设置中启用）。 */
+  engine?: KnowledgeEngine;
   onClose: () => void;
-  onReextract: () => void;
+  onReextract: (engine: KnowledgeEngine) => void;
   /** 跳转到其他会话（跨会话引用点击）。 */
   onJumpToConversation?: (conversationId: string) => void;
 }
@@ -85,9 +87,19 @@ export function knowledgeToJson(k: ExtractionResult): string {
   }, null, 2);
 }
 
-export default function KnowledgeModal({ knowledge, conversationId, convTitle, onClose, onReextract, onJumpToConversation }: Props) {
+export default function KnowledgeModal({ knowledge, conversationId, convTitle, engine = "rule", onClose, onReextract, onJumpToConversation }: Props) {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
+  /** 引擎切换瞬时的请求中标记（AI 引擎有网络延迟） */
+  const [switching, setSwitching] = useState<KnowledgeEngine | null>(null);
+  const isLlmResult = (knowledge.extractor ?? "").startsWith("llm:");
+  const llmModel = isLlmResult ? knowledge.extractor.slice(4).split("@")[0] : null;
+  // 新结果到达（引用变化）即解除切换中的禁用态（渲染期调整，见 react.dev「You Might Not Need an Effect」）
+  const [lastKnowledge, setLastKnowledge] = useState(knowledge);
+  if (lastKnowledge !== knowledge) {
+    setLastKnowledge(knowledge);
+    setSwitching(null);
+  }
   /** 导出 dropdown 开关（合并 MD/JSON 后的单按钮） */
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -182,9 +194,25 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
           <h2>
             ✨ 知识提取结果
             {convTitle && <span className="knowledge-modal-sub">{convTitle}</span>}
+            {llmModel && (
+              <span className="badge" style={{ marginLeft: 8 }} title={`由 ${llmModel} 提取`}>🤖 {llmModel}</span>
+            )}
           </h2>
           <div className="knowledge-modal-actions">
-            <button className="action-btn" onClick={onReextract}>↻ 重新提取</button>
+            {/* 引擎切换：规则（默认，离线确定性）/ AI（需在设置中启用大模型） */}
+            <div className="settings-segment" title="切换提取引擎并重新提取">
+              <button
+                className={engine === "rule" ? "active" : ""}
+                disabled={switching !== null}
+                onClick={() => { setSwitching("rule"); onReextract("rule"); }}
+              >⚙ 规则</button>
+              <button
+                className={engine === "llm" ? "active" : ""}
+                disabled={switching !== null}
+                onClick={() => { setSwitching("llm"); onReextract("llm"); }}
+              >{switching === "llm" ? "AI 提取中…" : "✨ AI"}</button>
+            </div>
+            <button className="action-btn" onClick={() => onReextract(engine)} disabled={switching !== null}>↻ 重新提取</button>
             {/* MD/JSON 下载合并为单一 dropdown 按钮：节省顶栏空间 */}
             <div className={`list-dropdown ${downloadOpen ? "open" : ""}`} ref={downloadRef}>
               <button

@@ -59,6 +59,25 @@ export interface ExtractionResult {
 }
 export interface ExportOutput { content: string; format: string; filename: string; }
 
+/** LLM 提取配置视图（后端 llm_config_get 返回）：永远不含密钥明文/密文。 */
+export interface LlmConfigView {
+  enabled: boolean;
+  base_url: string;
+  model: string;
+  timeout_secs: number;
+  max_input_chars: number;
+  has_api_key: boolean;
+  /** 打码提示（如 sk-***1234）；密文损坏时为 null。 */
+  api_key_masked: string | null;
+  /** 本地推理端点（数据不出本机）。 */
+  is_local: boolean;
+  /** 密文存在但解不开（如换设备）：提示重新录入。 */
+  api_key_broken: boolean;
+}
+
+/** 知识提取引擎：规则（默认，离线确定性）/ 大模型（需在设置中启用）。 */
+export type KnowledgeEngine = "rule" | "llm";
+
 export const COLLAPSE_THRESHOLD = 600;
 
 export const sourceLabel = (p: string): string => {

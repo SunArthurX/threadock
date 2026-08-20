@@ -28,7 +28,7 @@ import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDat
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import type { ListScope } from "./ConversationList";
-import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, SourceSession, ExtractionResult } from "./types";
+import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, SourceSession, ExtractionResult, KnowledgeEngine } from "./types";
 import { sourceLabel } from "./types";
 
 type View = Page;
@@ -111,6 +111,8 @@ export default function App() {
   const [completenessLabel, setCompletenessLabel] = useState("");
   const [detailTags, setDetailTags] = useState<string[]>([]);
   const [knowledge, setKnowledge] = useState<ExtractionResult | null>(null);
+  // 知识提取引擎：rule 默认（离线确定性）；llm 需在设置中启用大模型
+  const [knowledgeEngine, setKnowledgeEngine] = useState<KnowledgeEngine>("rule");
   const [childConvs, setChildConvs] = useState<Record<string, Conversation[]>>({});
   const [expandedParents, setExpandedParents] = useState<Set<string>>(new Set());
 
@@ -607,11 +609,12 @@ export default function App() {
     setExporting(false);
   };
 
-  const extractKnowledge = async () => {
+  const extractKnowledge = async (engine: KnowledgeEngine = knowledgeEngine) => {
     if (!selectedConv) return;
     try {
-      const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id });
+      const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id, engine });
       setKnowledge(r);
+      setKnowledgeEngine(engine);
       const empty = !r.summary && !(r.decisions ?? []).length && !(r.todos ?? []).length
         && !(r.errors ?? []).length && !(r.commands ?? []).length && !(r.files ?? []).length;
       if (empty) showToast("✨ 本会话未提取到知识要点", "info");
@@ -948,6 +951,7 @@ export default function App() {
             conversationId={selectedConv.id}
             convTitle={selectedConv.user_title ?? selectedConv.title}
             onClose={() => setKnowledge(null)}
+            engine={knowledgeEngine}
             onReextract={extractKnowledge}
             onJumpToConversation={async (cid) => {
               // 跨会话引用跳到其他会话：保留知识弹窗
