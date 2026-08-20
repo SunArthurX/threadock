@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+AI 知识提取（大模型引擎）+ API Key 本地加密存储。
+
+### Added
+- **AI 提取（大模型引擎，可选，默认关闭）**：知识提取支持切换 LLM 引擎，
+  输出与规则引擎同构（摘要/决策/TODO/错误/命令/文件 + 消息级来源引用），
+  `extractor` 记录 `llm:{model}@prompt-v1`（模型 + Prompt 版本，plan §13.5）
+- **OpenAI 兼容端点配置**：云端（OpenAI / DeepSeek / GLM…）与本地推理
+  （Ollama / LM Studio / llama.cpp server）同一套配置；GUI 提供 4 个预设；
+  本地端点自动识别并标记「本地」（允许 http），云端强制 https
+- **API Key 本地加密存储**：XChaCha20-Poly1305 AEAD（随机 nonce + 固定 AAD
+  + `v1` 版本前缀）；主密钥优先 OS 钥匙串（macOS Keychain / Windows
+  Credential Manager / Linux Secret Service），无钥匙串环境回退 0600 密钥
+  文件（`THREADOCK_NO_KEYCHAIN=1` 可强制）；明文永不落盘/不出现在日志与
+  错误信息（plan §14.3）
+- **新 crate `ch-llm`**：`LlmConfig`（校验/钳制/本地端点判定）+ `SecretVault`
+  （密封保险库，主密钥 Zeroize）+ `HttpChat`（ureq+rustls；`response_format`
+  被 400/422 拒绝时降级重试；401/429/5xx 分类）
+- **`LlmExtractor`**（`ch-knowledge`）：编号转录（截断上限）+ 严格 JSON
+  schema prompt + 宽松解析（剥围栏/条目裁剪/source 编号映射回真实消息 id）
+- **GUI**：设置页「AI 提取（大模型）」区（开关/预设/Key 密码框 masked
+  回显/测试连接/密钥破损提示）；知识弹窗 ⚙规则/✨AI 引擎切换 + 模型徽标
+- **新 Tauri 命令**：`llm_config_get` / `llm_config_set` / `llm_test_connection`；
+  `extract_knowledge` 增加 `engine` 参数（None/rule 默认规则引擎）
+
+### Security
+- API Key 视图契约：前端只接收 `has_api_key` + `api_key_masked`
+  （`sk-***1234`），明文/密文均不回传
+- 数据库单独泄露不解密（主密钥不在数据库中）；跨设备迁移检测（密文解不
+  开 → 提示重新录入，不静默失败）
+- 传输输入截断上限 `max_input_chars`（默认 48,000 字符，上限 200,000）
+
 ## [1.1.1] - 2026-08-19
 
 依赖安全修复轮（Dependabot 5 项告警清零）。
