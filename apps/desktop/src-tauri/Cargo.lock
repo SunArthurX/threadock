@@ -4944,6 +4944,8 @@ dependencies = [
  "ch-search",
  "ch-storage",
  "fs_extra",
+ "objc2-app-kit",
+ "objc2-foundation",
  "regex",
  "serde",
  "serde_json",
