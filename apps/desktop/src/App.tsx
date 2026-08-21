@@ -699,7 +699,17 @@ export default function App() {
       setNewCount(null);
       refreshNewCount();
       refreshProviders();
-      window.setTimeout(() => autoSync(true), 1500);
+      window.setTimeout(async () => {
+        // ① 重导会话 → ② 强制重算指标（reset_range 已删 usage_records，30 分钟
+        // 节流会拦住常规 ops_sync，必须 force）→ ③ 概览/成本/红点自动刷新，
+        // 全程无需手动点「立即全量同步指标」
+        await autoSync(true);
+        try {
+          await invoke("ops_sync", { force: true });
+          refreshBudget();
+          refreshNewCount();
+        } catch { /* 指标重算失败不打断：会话已恢复，下次启动/定时会补 */ }
+      }, 1500);
     } finally {
       // 给 reset_range + 1.5s 后台重导留出 4 秒「禁用期」防止误连点；UI 反馈后解除
       window.setTimeout(() => setResetting(false), 4000);
