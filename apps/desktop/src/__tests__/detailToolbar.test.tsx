@@ -137,3 +137,39 @@ describe("provider chips 显隐", () => {
     expect(panel.textContent).toContain("回收站");
   });
 });
+
+describe("执行事件分页（超过 30 条分页展示）", () => {
+  const genEvents = (n: number) => Array.from({ length: n }, (_, i) => ({
+    id: `e${i}`, event_type: "tool_call_started", summary: `事件 ${i}`,
+    sequence_number: i, created_at_ms: i,
+  }));
+
+  it("≤30 条不分页、不渲染翻页器", () => {
+    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(30)} />);
+    expect(container.querySelectorAll(".event").length).toBe(30);
+    expect(container.querySelector(".pager")).toBeNull();
+  });
+
+  it(">30 条每页 30 条，页码信息正确", () => {
+    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(35)} />);
+    expect(container.querySelectorAll(".event").length).toBe(30);
+    expect(container.querySelector(".pager-info")?.textContent).toContain("1 / 2 页 · 共 35 条");
+  });
+
+  it("翻页到最后一条数据齐全，边界按钮禁用正确", () => {
+    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(65)} />);
+    expect(container.querySelector(".pager-info")?.textContent).toContain("1 / 3 页");
+    fireEvent.click(screen.getByText("下一页 ›"));
+    expect(container.querySelectorAll(".event").length).toBe(30);
+    expect(container.querySelector(".pager-info")?.textContent).toContain("2 / 3 页");
+    fireEvent.click(screen.getByText("下一页 ›"));
+    expect(container.querySelectorAll(".event").length).toBe(5);
+    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByText("下一页 ›") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByText("‹ 上一页"));
+    expect(container.querySelectorAll(".event").length).toBe(30);
+    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByText("‹ 上一页"));
+    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
