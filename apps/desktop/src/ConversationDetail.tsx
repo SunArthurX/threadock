@@ -6,7 +6,8 @@ import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
 import { copyToClipboard } from "./clipboard";
 import MessageBlock from "./MessageBlock";
-import { usePager } from "./usePager";
+import MessageEvents from "./MessageEvents";
+import { groupEventsByMessage } from "./eventGrouping";
 import PrivateNoteSection from "./PrivateNoteSection";
 
 interface Props {
@@ -51,8 +52,8 @@ export default function ConversationDetail({
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
-  /** 执行事件分页：超过 30 条分页展示（长会话一次渲染上千事件会卡）。 */
-  const eventPager = usePager(events, 30);
+  // 执行事件归属：按 sequence_number 挂到对应消息名下（早于首条消息的进孤儿组）
+  const eventGroups = useMemo(() => groupEventsByMessage(messages, events), [messages, events]);
   /** 只看用户消息（我的提问）：消息视图与时间线同时生效。 */
   const [onlyUser, setOnlyUser] = useState(false);
   /** 消息内搜索（⌘F 唤起）：实时高亮 + 跳到第 N 个匹配。 */
@@ -458,8 +459,12 @@ export default function ConversationDetail({
           : <pre className="raw-payload-view">{rawContent}</pre>
       )}
       {!rawView && timelineMode && !loading && renderTimeline()}
+      {!rawView && !timelineMode && !loading && eventGroups.orphan.length > 0 && (
+        <MessageEvents events={eventGroups.orphan} label="会话前置事件" />
+      )}
       {!rawView && !timelineMode && visibleMsgs.map((m) => {
         const isMatch = !!search.trim() && currentMatch?.kind === "msg" && currentMatch?.id === m.id;
+        const ownedEvents = eventGroups.byMessageId.get(m.id);
         return (
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
           <div className="role">
@@ -476,25 +481,10 @@ export default function ConversationDetail({
             onCopyMessage={copyMessage}
             onCopyMsgId={copyMsgId}
           />
+          {ownedEvents && ownedEvents.length > 0 && <MessageEvents events={ownedEvents} />}
         </div>
         );
       })}
-      {!rawView && events.length > 0 && (<>
-        <div className="events-header">执行事件 ({events.length})</div>
-        {eventPager.slice.map((e) => (
-          <div key={e.id} className={`event ${e.event_type}`}>
-            <span className="event-type">{eventTypeLabel(e.event_type)}</span>
-            <span className="event-summary">{e.summary ?? ""}</span>
-          </div>
-        ))}
-        {eventPager.needed && (
-          <div className="pager" style={{ justifyContent: "center" }}>
-            <button className="pager-btn" onClick={eventPager.prev} disabled={eventPager.page === 0}>‹ 上一页</button>
-            <span className="pager-info">{eventPager.page + 1} / {eventPager.totalPages} 页 · 共 {eventPager.total} 条</span>
-            <button className="pager-btn" onClick={eventPager.next} disabled={eventPager.page >= eventPager.totalPages - 1}>下一页 ›</button>
-          </div>
-        )}
-      </>)}
       {showJumpBottom && (
         <button className="jump-bottom-btn" onClick={jumpToBottom} title="滚到底部">↓</button>
       )}

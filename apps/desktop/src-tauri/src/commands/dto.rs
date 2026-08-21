@@ -54,6 +54,12 @@ pub struct EventDto {
     pub event_type: String,
     pub summary: Option<String>,
     pub sequence_number: i64,
+    /// 事件状态（completed/failed 等，若有）。
+    pub status: Option<String>,
+    /// 完成时间（Unix 毫秒；命令/工具类事件有，可与 created_at 相减得耗时）。
+    pub completed_at_ms: Option<i64>,
+    /// payload JSON 字符串（事件详情：命令输出、diff 摘要等；超 8KB 截断）。
+    pub payload_json: Option<String>,
 }
 
 /// 会话完整详情：消息 + 事件（plan §6.4 回溯修改过程）。
@@ -191,12 +197,68 @@ pub(crate) fn message_dto(m: ch_domain::Message) -> MessageDto {
     }
 }
 
+/// payload JSON 序列化上限：超出截断并标注（防大 diff/输出把详情弹窗撑爆）。
+const PAYLOAD_MAX_CHARS: usize = 8_192;
+
 pub(crate) fn event_dto(e: ch_domain::Event) -> EventDto {
+    let payload_json = e.payload_json.map(|v| {
+        let s = v.to_string();
+        if s.chars().count() > PAYLOAD_MAX_CHARS {
+            let cut: String = s.chars().take(PAYLOAD_MAX_CHARS).collect();
+            format!("{cut}…（已截断）")
+        } else {
+            s
+        }
+    });
     EventDto {
         created_at_ms: ts_to_ms(e.created_at),
         id: e.id,
         event_type: e.event_type.to_string(),
         summary: e.summary,
         sequence_number: e.sequence_number,
+        status: e.status.map(|s| format!("{s:?}").to_lowercase()),
+        completed_at_ms: ts_to_ms(e.completed_at),
+        payload_json,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ch_domain::{Event, EventType};
+
+    #[test]
+    fn event_dto_maps_detail_fields() {
+        let mut e = Event::new("c1", EventType::CommandStarted, 5);
+        e.summary = Some("cargo build".into());
+        e.status = Some(ch_domain::Status::Completed);
+        e.payload_json = Some(serde_json::json!({"exit_code": 0}));
+        e.created_at = Some(time::OffsetDateTime::from_unix_timestamp(1_000).expect("ts"));
+        e.completed_at = Some(time::OffsetDateTime::from_unix_timestamp(53_000).expect("ts"));
+        let dto = event_dto(e);
+        assert_eq!(dto.status.as_deref(), Some("completed"));
+        assert_eq!(dto.completed_at_ms, Some(53_000_000));
+        assert_eq!(dto.created_at_ms, Some(1_000_000));
+        assert!(dto.payload_json.as_deref().unwrap().contains("exit_code"));
+    }
+
+    #[test]
+    fn event_dto_truncates_huge_payload() {
+        let mut e = Event::new("c1", EventType::DiffGenerated, 1);
+        let big = "x".repeat(20_000);
+        e.payload_json = Some(serde_json::json!({ "diff": big }));
+        let dto = event_dto(e);
+        let p = dto.payload_json.expect("payload");
+        assert!(p.len() < 12_000, "超限 payload 必须截断：{} 字符", p.len());
+        assert!(p.ends_with("（已截断）"));
+    }
+
+    #[test]
+    fn event_dto_none_fields_stay_none() {
+        let e = Event::new("c1", EventType::Error, 1);
+        let dto = event_dto(e);
+        assert!(dto.status.is_none());
+        assert!(dto.completed_at_ms.is_none());
+        assert!(dto.payload_json.is_none());
     }
 }

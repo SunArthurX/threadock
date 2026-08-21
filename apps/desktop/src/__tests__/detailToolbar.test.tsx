@@ -138,38 +138,69 @@ describe("provider chips 显隐", () => {
   });
 });
 
-describe("执行事件分页（超过 30 条分页展示）", () => {
-  const genEvents = (n: number) => Array.from({ length: n }, (_, i) => ({
-    id: `e${i}`, event_type: "tool_call_started", summary: `事件 ${i}`,
-    sequence_number: i, created_at_ms: i,
-  }));
+describe("执行事件挂到对应消息下 + 详情展开", () => {
+  const genEvents = (n: number, startSeq: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `e${startSeq + i}`, event_type: "tool_call_started",
+      summary: `事件 ${startSeq + i}`, sequence_number: startSeq + i,
+      created_at_ms: startSeq + i, status: null, completed_at_ms: null, payload_json: null,
+    }));
+  const msgs = [
+    { id: "m1", role: "user", content_text: "第一问", sequence_number: 10, created_at_ms: 10 },
+    { id: "m2", role: "assistant", content_text: "回答", sequence_number: 20, created_at_ms: 20 },
+  ];
 
-  it("≤30 条不分页、不渲染翻页器", () => {
-    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(30)} />);
-    expect(container.querySelectorAll(".event").length).toBe(30);
-    expect(container.querySelector(".pager")).toBeNull();
+  it("事件渲染在所属消息块内部（seq ≤ 最大消息序号），不再有底部平铺区", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(3, 11)} />,
+    );
+    // 3 个事件 seq 11/12/13 全部归属 m1
+    const m1 = container.querySelector("#msg-m1")!;
+    const m2 = container.querySelector("#msg-m2")!;
+    expect(m1.querySelectorAll(".msg-event-row").length).toBe(3);
+    expect(m2.querySelectorAll(".msg-event-row").length).toBe(0);
+    expect(container.querySelector(".events-header")).toBeNull();
   });
 
-  it(">30 条每页 30 条，页码信息正确", () => {
-    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(35)} />);
-    expect(container.querySelectorAll(".event").length).toBe(30);
-    expect(container.querySelector(".pager-info")?.textContent).toContain("1 / 2 页 · 共 35 条");
+  it("点击事件行展开详情（完整摘要/状态/耗时/payload JSON）", () => {
+    const events = [{
+      id: "e1", event_type: "command_started", summary: "cargo build --release",
+      sequence_number: 11, created_at_ms: 1_000, completed_at_ms: 53_000,
+      status: "completed", payload_json: JSON.stringify({ exit_code: 0, duration_s: 52 }),
+    }];
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={events} />,
+    );
+    expect(container.querySelector(".msg-event-detail")).toBeNull();
+    fireEvent.click(container.querySelector(".msg-event-row")!);
+    const detail = container.querySelector(".msg-event-detail")!;
+    expect(detail.textContent).toContain("cargo build --release");
+    expect(detail.textContent).toContain("状态 completed");
+    expect(detail.textContent).toContain("耗时 52s");
+    expect(detail.textContent).toContain("\"exit_code\": 0");
+    // 再点收起
+    fireEvent.click(container.querySelector(".msg-event-row")!);
+    expect(container.querySelector(".msg-event-detail")).toBeNull();
   });
 
-  it("翻页到最后一条数据齐全，边界按钮禁用正确", () => {
-    const { container } = render(<ConversationDetail {...baseDetail} events={genEvents(65)} />);
-    expect(container.querySelector(".pager-info")?.textContent).toContain("1 / 3 页");
-    fireEvent.click(screen.getByText("下一页 ›"));
-    expect(container.querySelectorAll(".event").length).toBe(30);
-    expect(container.querySelector(".pager-info")?.textContent).toContain("2 / 3 页");
-    fireEvent.click(screen.getByText("下一页 ›"));
-    expect(container.querySelectorAll(".event").length).toBe(5);
-    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByText("下一页 ›") as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByText("‹ 上一页"));
-    expect(container.querySelectorAll(".event").length).toBe(30);
-    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(screen.getByText("‹ 上一页"));
-    expect((screen.getByText("‹ 上一页") as HTMLButtonElement).disabled).toBe(true);
+  it("单条消息超过 4 个事件折叠，「还有 N 条」展开", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(7, 11)} />,
+    );
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(4);
+    expect(screen.getByText("还有 3 条 ▾")).toBeTruthy();
+    fireEvent.click(screen.getByText("还有 3 条 ▾"));
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(7);
+    fireEvent.click(screen.getByText("收起 ▴"));
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(4);
+  });
+
+  it("早于首条消息的事件显示为顶部「会话前置事件」组", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(2, 1)} />,
+    );
+    expect(container.querySelector(".msg-events-label")?.textContent).toContain("会话前置事件");
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(2);
+    expect(container.querySelector("#msg-m1")!.querySelectorAll(".msg-event-row").length).toBe(0);
   });
 });

@@ -43,6 +43,12 @@ export interface SourceSession {
 export interface EventDto {
   created_at_ms?: number | null;
   id: string; event_type: string; summary: string | null; sequence_number: number;
+  /** 事件状态（completed/failed 等，若有）。 */
+  status?: string | null;
+  /** 完成时间（Unix 毫秒；与 created_at_ms 相减得耗时）。 */
+  completed_at_ms?: number | null;
+  /** payload JSON 字符串（事件详情；超 8KB 后端已截断）。 */
+  payload_json?: string | null;
 }
 export interface ConversationDetailDto {
   tags?: string[];
