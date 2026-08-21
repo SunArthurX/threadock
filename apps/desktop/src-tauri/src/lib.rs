@@ -41,17 +41,23 @@ pub fn run() {
                 if let Some(mtm) = MainThreadMarker::new() {
                     let png = include_bytes!("../icons/icon-1024x1024.png");
                     // SAFETY: bytes 指向编译期内嵌的静态 PNG，指针与长度始终有效
-                    unsafe {
+                    let applied = unsafe {
                         let data = NSData::initWithBytes_length(
                             mtm.alloc::<NSData>(),
                             png.as_ptr() as *const _,
                             png.len(),
                         );
-                        if let Some(icon) = NSImage::initWithData(mtm.alloc::<NSImage>(), &data) {
+                        NSImage::initWithData(mtm.alloc::<NSImage>(), &data).map(|icon| {
                             NSApplication::sharedApplication(mtm)
                                 .setApplicationIconImage(Some(&icon));
-                        }
+                        })
+                    };
+                    match applied {
+                        Some(_) => eprintln!("[dock-icon] dev Dock 图标已设置 ({}B)", png.len()),
+                        None => eprintln!("[dock-icon] 设置失败：PNG 解码返回 None"),
                     }
+                } else {
+                    eprintln!("[dock-icon] 设置失败：不在主线程");
                 }
             }
 
