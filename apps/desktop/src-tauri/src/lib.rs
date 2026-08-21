@@ -31,6 +31,36 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            // dev 模式跑裸二进制、无 bundle icns，Dock 只会显示系统通用图标；
+            // 运行时直接设 NSApplication 图标补上（发布包自带 icns，不走这段）
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            {
+                use objc2_app_kit::{NSApplication, NSImage};
+                use objc2_foundation::{MainThreadMarker, NSData};
+
+                if let Some(mtm) = MainThreadMarker::new() {
+                    let png = include_bytes!("../icons/icon-1024x1024.png");
+                    // SAFETY: bytes 指向编译期内嵌的静态 PNG，指针与长度始终有效
+                    let applied = unsafe {
+                        let data = NSData::initWithBytes_length(
+                            mtm.alloc::<NSData>(),
+                            png.as_ptr() as *const _,
+                            png.len(),
+                        );
+                        NSImage::initWithData(mtm.alloc::<NSImage>(), &data).map(|icon| {
+                            NSApplication::sharedApplication(mtm)
+                                .setApplicationIconImage(Some(&icon));
+                        })
+                    };
+                    match applied {
+                        Some(_) => eprintln!("[dock-icon] dev Dock 图标已设置 ({}B)", png.len()),
+                        None => eprintln!("[dock-icon] 设置失败：PNG 解码返回 None"),
+                    }
+                } else {
+                    eprintln!("[dock-icon] 设置失败：不在主线程");
+                }
+            }
+
             // 日志：导入失败等 warn 输出到 stderr（此前静默，事故排查困难）
             tracing_subscriber::fmt()
                 .with_max_level(tracing::Level::INFO)

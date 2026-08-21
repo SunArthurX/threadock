@@ -1,8 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.2.0] - 2026-08-21
 
-AI 知识提取（大模型引擎）+ API Key 本地加密存储。
+13 轮 UI/UX 打磨（默认对话 tab 等）+ AI 知识提取（大模型引擎）+ API Key 本地加密存储 + 四家来源事件采集修复 + 应用图标重做。
 
 ### Fixed
 - **Codex 执行事件「获取不了」**（用户实例：西游记立绘 /goal 会话）：新版
@@ -86,6 +86,16 @@ AI 知识提取（大模型引擎）+ API Key 本地加密存储。
 - 数据库单独泄露不解密（主密钥不在数据库中）；跨设备迁移检测（密文解不
   开 → 提示重新录入，不静默失败）
 - 传输输入截断上限 `max_input_chars`（默认 48,000 字符，上限 200,000）
+
+### Changed
+- **应用图标重做**：Apple Blue 渐变（#0071E3 → #4F8CFF，135°）+ 缩放 logo；
+  v2 源图去圆角交由各平台自加 superellipse / circular mask，logo 60% /
+  底面 84% 下调 Dock 视觉占比；全套平台图标重生成（icns/ico/ios/android/store）
+- **dev 模式 Dock 图标**：`npx tauri dev` 裸二进制无 bundle icns，启动时
+  `NSApplication` 运行时直设应用图标（debug 构建 + 设置结果日志），
+  发布包继续用内置 icns 不受影响
+- 清理 11 个无引用旧版 `icon-NxN.png` 图标；Dock 预览图归档至
+  `docs/optimization-rounds/`
 
 ## [1.1.1] - 2026-08-19
 

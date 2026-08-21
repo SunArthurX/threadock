@@ -1,20 +1,28 @@
 # Threadock
 
 > 跨 AI IDE 的统一会话归档、检索、知识提取与治理平台——把 ZCode / Claude Code / Cursor / MiniMax Code / Codex 等工具里的会话、工具调用、命令、Diff、Artifact 统一收集、标准化、全文检索、知识化，并对用量/成本/安全做持续治理。
->
-> 配套方案：[`docs/ai-ide-conversation-hub-enterprise-plan.md`](./docs/ai-ide-conversation-hub-enterprise-plan.md)
-> 落地清单：[`docs/conversation-hub-execution-plan.md`](./docs/conversation-hub-execution-plan.md)
-> 治理平台方案：[`docs/codeagent-ops-plan.md`](./docs/codeagent-ops-plan.md)
-> Tauri API 文档：[`docs/api.md`](./docs/api.md)（自动生成）
-> 用户指南：[`docs/user-guide.md`](./docs/user-guide.md) · 隐私声明：[`docs/privacy.md`](./docs/privacy.md)
-> 性能基准：[`docs/benchmark-report-v1.0.0.md`](./docs/benchmark-report-v1.0.0.md)
 
-## 当前状态：v1.0.0（2026-08-17）
+![概览](docs/optimization-rounds/scan-light-overview.png)
 
-首个正式版本。端到端数据闭环 + 桌面 GUI + 常驻服务 + CodeAgentOps 治理平台（M1–M15 全量），
-执行计划 Phase 2（MVP / Gate 1）验收线全部达标（见 CHANGELOG 1.0.0 与性能基准报告）。
+| | |
+|---|---|
+| 当前版本 | **v1.2.0**（2026-08-21） |
+| 安装包 | [GitHub Releases](https://github.com/SunArthurX/threadock/releases)：macOS（dmg arm64/x64）· Windows（nsis+msi）· Linux（appimage+deb），附四平台 CLI 与 SHA256SUMS |
+| 文档 | [用户指南](./docs/user-guide.md) · [隐私声明](./docs/privacy.md) · [Tauri API](./docs/api.md)（自动生成）· [性能基准](./docs/benchmark-report-v1.0.0.md) |
+| 方案 | [总体方案](./docs/ai-ide-conversation-hub-enterprise-plan.md) · [执行计划](./docs/conversation-hub-execution-plan.md) · [治理平台](./docs/codeagent-ops-plan.md) |
 
-### 架构
+**安装包当前未签名**（证书待接入）：macOS 首次打开右键 → 打开（或 `xattr -dr com.apple.quarantine <app>`）；Windows SmartScreen 选「仍可运行」；下载后请比对 SHA256SUMS。
+
+## v1.2.0 一览
+
+- **13 轮 UI/UX 打磨**：默认对话 tab、执行事件挂到消息气泡下（可展开详情）、消息内联本机图片、会话详情回到顶部、恢复会话直接在系统终端执行、重置数据后指标自动重算
+- **AI 知识提取（大模型引擎）**：OpenAI 兼容端点（云端 / 本地 Ollama 等），API Key 本地 AEAD 加密存储，输出与规则引擎同构
+- **四家来源事件采集修复**：Codex JS 工具桥 / ZCode schema 漂移 / MiniMax 零采集 / Claude Code 摘要增强（真实库验证：0 → 465/747 条事件）
+- **应用图标重做**：Apple Blue 渐变，源图去圆角交由系统平台自加 mask；`npx tauri dev` 开发模式 Dock 同样显示真实图标
+
+测试基线：Rust 475（workspace）+ 35（桌面）· 前端 353，全部通过。完整明细见 [CHANGELOG](./CHANGELOG.md)。
+
+## 架构
 
 ```
 ┌─────────────┐   ┌─────────────┐   ┌──────────────┐
@@ -36,7 +44,7 @@
         └───────────────┘
 ```
 
-### 能力清单（已实现）
+## 能力清单（已实现）
 
 会话中枢：
 
@@ -57,7 +65,7 @@
 | **保存搜索**（V14 表，跨会话持久） | `crates/storage` + GUI | §13.2 |
 | **Workspace 治理**：手动合并/拆分/重命名 + 置信度警示 | `crates/storage` + GUI | §4.3 / P2-2 |
 | **原始视图 ↔ 统一视图切换**（Raw Store 只读展示） | GUI | P2-3 |
-| **一键打开来源应用 / 恢复命令**（claude/codex resume） | GUI | P2-3 |
+| **一键打开来源应用 / 恢复会话**（系统终端直开 + 失败回退复制） | GUI | P2-3 |
 | **jieba 可插拔分词器**（`--features jieba`，默认 N-gram 兜底） | `crates/search` | §13.1 |
 | 导出（Markdown/JSON/批量 + 敏感信息脱敏 + 自定义规则） | `crates/export` | §6.6, §14.6 |
 | 加密备份/恢复（XChaCha20-Poly1305 + Argon2id） | `crates/backup` | §6.6, §14.3 |
@@ -84,19 +92,17 @@ CodeAgentOps 治理平台（M1–M15，见 `docs/codeagent-ops-plan.md`）：
 | 数据生命周期（存储看板 / 孤儿 blob GC / 保留策略 / 索引重建） | `apps/desktop` SettingsView |
 | 治理审计轨迹（audit_logs，敏感操作全记录） | `crates/storage` |
 
-桌面 GUI 视图：概览 / 会话（时间线 + 右键菜单 + 批量操作）/ 知识（跨会话引用 + 筛选导出）/ 活动（GitHub 风格热力图）/ 项目 / 治理（成本·资产·安全·自动化）/ 设置；含 Command Palette、首次启动引导、暗色/亮色主题、私人笔记、启动更新日志。
-
-### 尚未实现（1.1+ 路线）
-
-- AI 提取走真实 LLM（当前规则引擎，接口已留好）
-- OpenCode Adapter（第 6 来源）
-- Daemon UDS/Named Pipe IPC + 本地认证 Token（当前仅 stdio）
-- Adapter Host 资源配额（内存/CPU 限制、文件白名单、禁网）
-- Tauri Updater 自动更新、安装包签名公证（待证书）
-- Android 移动端浏览（Phase 4 PoC）
-- 企业能力：SSO / RBAC / KMS / 加密同步（Phase 5）
+桌面 GUI 视图：概览 / 会话（时间线 + 右键菜单 + 批量操作）/ 知识（跨会话引用 + 筛选导出 + AI/规则双引擎）/ 活动（GitHub 风格热力图）/ 项目 / 治理（成本·资产·安全·自动化）/ 设置；含 Command Palette、首次启动引导、暗色/亮色主题、私人笔记、启动更新日志。
 
 ## 快速开始
+
+### 桌面应用开发模式
+
+```bash
+cd apps/desktop
+npm install
+npx tauri dev        # dev 模式 Dock 同样显示真实应用图标
+```
 
 ### 构建
 
@@ -109,13 +115,9 @@ cd apps/desktop && npm install && npm run build
 cd src-tauri && cargo build --release
 ```
 
-### 安装（v1.0.0 起）
+### 安装包
 
-推 `v*` tag 后由 [Release 流水线](./.github/workflows/release.yml) 自动构建并发布：
-macOS（dmg，arm64/x64）、Windows（nsis + msi）、Linux（appimage + deb）安装包，
-以及四平台 CLI 二进制与 SHA256SUMS。
-**安装包当前未签名**（证书待接入）：macOS 首次打开右键 → 打开；Windows SmartScreen 选「仍要运行」；
-下载后请比对 SHA256SUMS。
+推 `v*` tag 后由 [Release 流水线](./.github/workflows/release.yml) 自动构建发布（三平台安装包 + CLI 二进制 + SHA256SUMS），见 [Releases](https://github.com/SunArthurX/threadock/releases)。
 
 ### CLI 使用
 
@@ -200,13 +202,12 @@ scripts/precheck.sh all               # 再加 cargo audit + MSRV 1.88 check（�
 ## 运行测试
 
 ```bash
-cargo test --workspace                                  # 421 个测试
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml   # 13 个测试
-cd apps/desktop && npm test                             # 344 个前端测试
-cd apps/desktop && npm run lint && npm run build        # ESLint（0 error / 0 warning）+ 构建
-cargo clippy --workspace --all-targets                  # pedantic 级 0 warning
-cargo test -p ch-search --features jieba                # jieba 分词器（22 个测试）
-cargo test --release -p ch-benchmarks --test perf -- --ignored --nocapture  # 性能基准
+cargo test --workspace                                          # 475 个测试
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml   # 35 个测试
+cd apps/desktop && npm test                                     # 353 个前端测试
+cargo clippy --workspace --all-targets                          # pedantic 级 0 warning
+cargo test -p ch-search --features jieba                        # jieba 分词器
+cargo test --release -p ch-benchmarks --test perf -- --ignored --nocapture        # 性能基准
 cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --nocapture  # Gate 1 十万会话门禁
 ```
 
@@ -223,8 +224,8 @@ threadock/
 │   ├── normalization/       标准化流水线（hash + 幂等 + 完整度）
 │   ├── export/              导出（Markdown/JSON + 脱敏）
 │   ├── backup/              加密备份/恢复（XChaCha20 + Argon2id）
-│   ├── knowledge/           知识提取（规则引擎，plan §13.5）
-│   ├── llm/                LLM 客户端 + 密钥密封（OpenAI 兼容端点，plan §13.5/§14.3）
+│   ├── knowledge/           知识提取（规则 + LLM 双引擎，plan §13.5）
+│   ├── llm/                 LLM 客户端 + 密钥密封（OpenAI 兼容端点）
 │   ├── adapter-sdk/         Adapter trait + stdio JSON-RPC 协议
 │   ├── adapter-host/        进程隔离（spawn + 超时 + 崩溃检测）
 │   ├── adapter-markdown/    Markdown Adapter（独立进程二进制）
@@ -243,8 +244,7 @@ threadock/
 │   ├── src/                 前端（概览/会话/知识/活动/项目/治理/设置）
 │   └── src-tauri/           Rust 后端（101 个 Tauri 命令，嵌入 DaemonState）
 ├── docs/                    方案、执行计划、治理计划、API 文档
-│   └── *.md                 示例会话（tauri-android.md / rust-errors.md）
-└── .github/workflows/       CI（3 OS 测试矩阵 + MSRV + cargo-audit + CodeQL）
+└── .github/workflows/       CI（3 OS 测试矩阵 + MSRV + cargo-audit + CodeQL）+ Release
 ```
 
 ## 关键设计决策
@@ -262,53 +262,24 @@ threadock/
 | Raw + Normalized 双存储 | ✅ |
 | 第三方只读 | ✅ |
 
-## Roadmap：v1.0.0 完成情况
+## 里程碑
 
-以执行计划 Phase 2（MVP，Gate 1）为验收基线。原差距清单（19 项）的处置结果：
-
-### P0 发布工程 — 全部完成
-
-| # | 事项 | 状态 |
+| 版本 | 日期 | 要点 |
 |---|---|---|
-| 1 | 版本号统一（三处不一致 → 单一版本流） | ✅ 0.4.0 起统一，1.0.0 收口 |
-| 2 | CHANGELOG 补记 26 轮迭代 | ✅ [0.4.0] 条目 |
-| 3 | Release 流水线（tag → 三平台安装包 + CLI + SHA256SUMS） | ✅ `.github/workflows/release.yml` |
-| 4 | 签名与公证 | ⏸ 未签名发布（证书待接入，Release 说明已声明验证方式） |
-| 5 | 用户文档（用户指南 + 隐私声明） | ✅ `docs/user-guide.md` + `docs/privacy.md` |
-| 6 | Tauri Updater | ⏭ 移出 1.0，规划 1.1 |
+| v1.0.0 | 2026-08-17 | 首个正式版：端到端数据闭环 + 桌面 GUI + CodeAgentOps M1–M15；Gate 1 验收达标（100k 会话搜索 P95 实测 50.9ms） |
+| v1.0.1 | 2026-08-17 | 全功能测试轮修复版 |
+| v1.1.0 | 2026-08-19 | 搜索体验闭环：结果保留 + 主对话分组 + 命中步进 + 正文精准匹配 |
+| v1.1.1 | 2026-08-19 | 依赖安全修复（vite / esbuild / nanoid，npm audit 清零） |
+| v1.2.0 | 2026-08-21 | 13 轮 UI/UX 打磨 + AI 大模型知识提取 + 四家来源事件采集修复 + 应用图标重做 |
 
-### P1 MVP 功能缺口 — 全部完成（裁剪项除外）
+## 路线图（未实现）
 
-| # | 事项 | 状态 |
-|---|---|---|
-| 7 | 搜索查询语法（8 个前缀，双引擎三集成层） | ✅ |
-| 8 | Workspace 合并人工交互（合并/拆分/重命名 + 置信度警示） | ✅ |
-| 9 | 保存搜索条件 | ✅ |
-| 10 | 一键打开来源应用 / 恢复命令 | ✅ |
-| 11 | 原始视图 ↔ 统一视图切换 | ✅ |
-| 12 | jieba 可插拔分词器 | ✅（feature 门控 + CI 独立 job） |
-| 13 | Daemon UDS IPC + 认证 Token | ⏭ 移出 1.0（1.1） |
-| 14 | Adapter Host 配额 | ⏭ 移出 1.0（1.1） |
-| 15 | OpenCode Adapter | ⏭ 移出 1.0（1.1） |
-
-### P2 验收证据 — 全部完成
-
-| # | 事项 | 状态 |
-|---|---|---|
-| 16 | 100k 会话搜索 P95 < 300ms 基准报告 | ✅ 实测 50.9ms，`docs/benchmark-report-v1.0.0.md` |
-| 17 | Workspace 合并准确率 ≥95% 统计 | ✅ 11 例标注样本 100%，错误 AutoMerge = 0 |
-| 18 | 真实脱敏 Fixture 集（Golden Fixture Kit） | ✅ `fixtures/` + 4 个 golden tests |
-| 19 | ESLint 57 warning 清零 | ✅ 0 error / 0 warning |
-
-明确不算 v1.0.0 缺口（plan 本就排在 Phase 4/5）：真实 LLM 提取、Android 端、SSO/RBAC/KMS/加密同步、语义向量检索 Hybrid。
-
-## 开发模式（桌面端）
-
-```bash
-lsof -nP -i :1420 -sTCP:LISTEN -t | xargs kill -9   # 清理残留 dev server
-cd apps/desktop
-npx tauri dev
-```
+- OpenCode Adapter（第 6 来源）
+- Daemon UDS/Named Pipe IPC + 本地认证 Token（当前仅 stdio）
+- Adapter Host 资源配额（内存/CPU 限制、文件白名单、禁网）
+- Tauri Updater 自动更新、安装包签名公证（待证书）
+- Android 移动端浏览（Phase 4 PoC）
+- 企业能力：SSO / RBAC / KMS / 加密同步（Phase 5）
 
 ## License
 
