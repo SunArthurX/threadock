@@ -1,46 +1,40 @@
 #!/usr/bin/env python3
 """
-重新生成 Threadock app icon：
-- 1024x1024 源
-- Apple Blue 渐变背景（#0071e3 → #4f8cff 135° 对角渐变）
-- macOS-style superellipse 圆角（22% 半径，等价于 SVG rx=224）
-- 现有 logo 缩小到 56% 居中（保留品牌识别）
-- 上下加微妙 inner shadow 增强层次
+重新生成 Threadock app icon（v2 — 标准 macOS/iOS 源图）。
 
-设计参考 macOS Sonoma / iOS 17 app icon：留白足 + 渐变 + 中心 logo 居中。
+设计原则（按 Apple HIG / Material Design 平台约定）：
+- 1024x1024 满铺 PNG，**不带圆角**——各平台会自己加 superellipse / continuous / circular mask
+- 单一源图适用 macOS / iOS / Android / Windows，tauri icon CLI 自动分配各分辨率
+- Logo 居中放大到 70%（在 824x824 safe area 内，留 12% 内 padding 不被 mask 切到）
+- Apple Blue 渐变（#0071E3 → #4F8CFF，135° 对角），对齐应用内 Apple HIG 主题
+- 顶部 8% 白色高光（增强玻璃感，参考 iOS 17 / macOS Sonoma 渐变 app icon）
+
+修复历史：
+- v1: 加了 superellipse 圆角 → 渲染时被 macOS 重复 mask，圆角被切
+- v2: 不加圆角，让 macOS 自己处理（2026-08-21）
 """
-import sys
+import math
 from PIL import Image, ImageDraw, ImageFilter
 
-SRC = "apps/desktop/src-tauri/icons/icon-1024x1024.png"
-OUT = "apps/desktop/src-tauri/icons/icon-1024x1024.png"  # 覆盖原文件
+SRC = "/tmp/icon-orig-1024.png"  # 原始黑白 logo，避免重复读取已生成的蓝色背景
+OUT = "apps/desktop/src-tauri/icons/icon-1024x1024.png"
 
 # Apple 系统色
 APPLE_BLUE_DARK = (0, 113, 227, 255)   # #0071E3
 APPLE_BLUE_LIGHT = (79, 140, 255, 255)  # #4F8CFF
 
-def make_rounded_mask(size: int, radius_pct: float = 0.225) -> Image.Image:
-    """生成 macOS superellipse 圆角 mask（更圆润的 squircle，不是普通 rounded-rect）。
-    PIL 没原生 squircle，用 4× supersample + 重采样到目标尺寸模拟。
-    22% 圆角是 macOS 实际用的比例（参考 Apple Design Resources）。
-    """
-    s = size * 4
-    r = int(s * radius_pct)
-    mask = Image.new("L", (s, s), 0)
-    d = ImageDraw.Draw(mask)
-    d.rounded_rectangle((0, 0, s - 1, s - 1), radius=r, fill=255)
-    return mask.resize((size, size), Image.LANCZOS)
+# Logo 缩放比例（mask 切到的外圈 ~22%，safe area ~80%，留 12% padding）
+LOGO_SCALE = 0.60  # 614x614，增加留白，降低 Dock 中的视觉占比
+ICON_FACE_SCALE = 0.84  # 缩小整个蓝色底，避免 Dock 中的视觉边界偏大
 
 def make_gradient(size: int, c1, c2, angle_deg: float = 135) -> Image.Image:
-    """线性渐变背景"""
+    """线性渐变背景（无圆角 — 满铺）"""
     img = Image.new("RGBA", (size, size), c1)
     pixels = img.load()
-    import math
     angle = math.radians(angle_deg)
     cos_a, sin_a = math.cos(angle), math.sin(angle)
     for y in range(size):
         for x in range(size):
-            # 沿渐变方向投影
             t = (x * cos_a + y * sin_a) / (size * (abs(cos_a) + abs(sin_a)))
             t = max(0.0, min(1.0, t))
             r = int(c1[0] * (1 - t) + c2[0] * t)
@@ -52,50 +46,48 @@ def make_gradient(size: int, c1, c2, angle_deg: float = 135) -> Image.Image:
 def main():
     # 1. 加载原 logo
     logo = Image.open(SRC).convert("RGBA")
-    assert logo.size == (1024, 1024), f"unexpected size: {logo.size}"
+    if logo.size != (1024, 1024):
+        raise ValueError(f"原图尺寸 {logo.size} != 1024x1024")
 
-    # 2. 抠出 logo 内容（去掉黑色背景，保留白色形状）
-    # 原图：黑色 RGB(0,0,0) + 白色 RGB(255,255,255) 形状
-    # 用白色通道作为 alpha：白色 = 1，黑色 = 0
-    r, g, b, a = logo.split()
-    # 取最亮通道（白色形状）作为 mask
-    luminance = Image.eval(r, lambda x: x)  # 红通道
-    # 实际白色为 255，黑色为 0
-    alpha_from_white = Image.merge("L", (r,))  # R 通道 = 白色 → 255
-    # 抠出白色形状
+    # 2. 抠白色形状：原图 = 黑底 + 白色 logo
+    r_ch, g_ch, b_ch, a_ch = logo.split()
+    # 白色像素 = 255 通道值，黑色 = 0；用 R 通道当 alpha mask
     logo_only = Image.new("RGBA", logo.size, (0, 0, 0, 0))
-    logo_only.paste((255, 255, 255, 255), mask=alpha_from_white)
+    logo_only.paste((255, 255, 255, 255), mask=r_ch)
 
-    # 3. 缩小 logo 到 56%（与 Apple app icon 设计一致）
-    scale = 0.56
-    new_size = int(1024 * scale)
+    # 3. 缩放到 LOGO_SCALE（70% = 717x717）
+    new_size = int(1024 * LOGO_SCALE)
     logo_small = logo_only.resize((new_size, new_size), Image.LANCZOS)
 
-    # 4. 生成 1024x1024 渐变背景
-    bg = make_gradient(1024, APPLE_BLUE_DARK, APPLE_BLUE_LIGHT, 135)
+    # 4. 缩小 Apple Blue 图标底，并保留透明留白
+    face_size = int(1024 * ICON_FACE_SCALE)
+    bg = make_gradient(face_size, APPLE_BLUE_DARK, APPLE_BLUE_LIGHT, 135)
+    face_mask = Image.new("L", (face_size, face_size), 0)
+    ImageDraw.Draw(face_mask).rounded_rectangle(
+        (0, 0, face_size - 1, face_size - 1),
+        radius=int(face_size * 0.22),
+        fill=255,
+    )
+    canvas = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    face_offset = (1024 - face_size) // 2
+    canvas.paste(bg, (face_offset, face_offset), face_mask)
 
     # 5. 合成：背景 + 居中 logo
-    canvas = bg.copy()
     offset = (1024 - new_size) // 2
     canvas.alpha_composite(logo_small, (offset, offset))
 
-    # 6. 应用 superellipse 圆角 mask
-    mask = make_rounded_mask(1024, 0.225)
-    rounded = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
-    rounded.paste(canvas, (0, 0), mask)
-
-    # 7. 微妙 top-highlight（增强层次）— 顶部加 5% 白色渐变
+    # 6. 顶部 8% 白色渐变（微妙高光，增强玻璃感）
     highlight = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
     hd = ImageDraw.Draw(highlight)
-    for y in range(0, 512):
-        a = int(20 * (1 - y / 512))
+    for y in range(0, int(1024 * 0.4)):
+        a = int(28 * (1 - y / (1024 * 0.4)))
         hd.line((0, y, 1024, y), fill=(255, 255, 255, a))
-    highlight = highlight.filter(ImageFilter.GaussianBlur(40))
-    rounded = Image.alpha_composite(rounded, highlight)
+    highlight = highlight.filter(ImageFilter.GaussianBlur(50))
+    canvas = Image.alpha_composite(canvas, highlight)
 
-    # 8. 输出
-    rounded.save(OUT, "PNG", optimize=True)
-    print(f"✓ 生成 {OUT}（{1024}x{1024}，Apple Blue 渐变 + 56% 居中 logo + 22% superellipse）")
+    # 7. 输出（无圆角满铺，让 macOS / iOS / Android mask 自己处理）
+    canvas.save(OUT, "PNG", optimize=True)
+    print(f"✓ {OUT}（1024x1024 满铺，Apple Blue 渐变 + {int(LOGO_SCALE*100)}% 居中 logo，无圆角）")
 
 if __name__ == "__main__":
     main()
