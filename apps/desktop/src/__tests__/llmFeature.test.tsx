@@ -39,41 +39,41 @@ beforeEach(() => {
 });
 
 describe("KnowledgeModal 引擎切换", () => {
-  it("点 ✨AI / ⚙规则 以对应引擎重提取；重新提取用当前引擎", async () => {
+  it("点 AI 引擎 / 规则 以对应引擎重提取；重新提取用当前引擎", async () => {
     const onReextract = vi.fn(async () => {});
     render(<KnowledgeModal knowledge={knowledge} onClose={() => {}} onReextract={onReextract} />);
-    fireEvent.click(screen.getByText("✨ AI"));
+    fireEvent.click(screen.getByText("AI 引擎"));
     expect(onReextract).toHaveBeenCalledWith("llm");
     // 提取完成后按钮恢复，再切规则（真实时序：两次点击间隔一次完整请求）
-    await waitFor(() => expect(screen.getByText("⚙ 规则").closest("button")).not.toBeDisabled());
-    fireEvent.click(screen.getByText("⚙ 规则"));
+    await waitFor(() => expect(screen.getByText("规则").closest("button")).not.toBeDisabled());
+    fireEvent.click(screen.getByText("规则"));
     expect(onReextract).toHaveBeenCalledWith("rule");
-    await waitFor(() => expect(screen.getByText("↻ 重新提取").closest("button")).not.toBeDisabled());
-    fireEvent.click(screen.getByText("↻ 重新提取"));
+    await waitFor(() => expect(screen.getByText("重新提取").closest("button")).not.toBeDisabled());
+    fireEvent.click(screen.getByText("重新提取"));
     expect(onReextract).toHaveBeenLastCalledWith("rule"); // 默认引擎 = rule（prop 缺省）
   });
 
   it("提取失败（onReextract 不更新结果）后按钮恢复可用，不得永久禁用", async () => {
     const onReextract = vi.fn(async () => { /* 模拟失败：内部 catch、不更新 knowledge */ });
     render(<KnowledgeModal knowledge={knowledge} onClose={() => {}} onReextract={onReextract} />);
-    fireEvent.click(screen.getByText("✨ AI"));
+    fireEvent.click(screen.getByText("AI 引擎"));
     await waitFor(() => {
-      const ai = screen.getByText("✨ AI").closest("button") as HTMLButtonElement;
+      const ai = screen.getByText("AI 引擎").closest("button") as HTMLButtonElement;
       expect(ai).not.toBeDisabled();
-      const rule = screen.getByText("⚙ 规则").closest("button") as HTMLButtonElement;
+      const rule = screen.getByText("规则").closest("button") as HTMLButtonElement;
       expect(rule).not.toBeDisabled();
-      const re = screen.getByText("↻ 重新提取").closest("button") as HTMLButtonElement;
+      const re = screen.getByText("重新提取").closest("button") as HTMLButtonElement;
       expect(re).not.toBeDisabled();
     });
   });
 
   it("llm: 结果显示模型徽标", () => {
     render(<KnowledgeModal knowledge={knowledge} onClose={() => {}} onReextract={() => {}} />);
-    expect(screen.getByText("🤖 mock-1")).toBeTruthy();
+    expect(screen.getByText("mock-1")).toBeTruthy();
   });
 });
 
-describe("详情页 ✨知识 按钮", () => {
+describe("详情页 知识 按钮", () => {
   const conv = {
     id: "c1", provider: "zcode", source_conversation_id: "s", title: "标题", user_title: null,
     status: null, model: null, completeness_score: null, workspace_id: null,
@@ -98,7 +98,7 @@ describe("详情页 ✨知识 按钮", () => {
         }}
       />,
     );
-    fireEvent.click(screen.getByText("✨ 知识"));
+    fireEvent.click(screen.getByText("知识"));
     // 必须无参调用：onClick 直通会把 SyntheticEvent 传成 engine → invoke invalid args
     expect(onExtractKnowledge).toHaveBeenCalledTimes(1);
     expect(onExtractKnowledge).toHaveBeenCalledWith();
@@ -108,6 +108,7 @@ describe("详情页 ✨知识 按钮", () => {
 describe("设置页 AI 提取（大模型）配置区", () => {
   const base = {
     theme: "dark" as const, onThemeChange: vi.fn(),
+    textSize: "sm" as const, onTextSizeChange: vi.fn(),
     syncIntervalMin: 10, onSyncIntervalChange: vi.fn(),
     retentionDays: 0, onRetentionDaysChange: vi.fn(),
     notifyOnExceed: false, onNotifyOnExceedChange: vi.fn(),

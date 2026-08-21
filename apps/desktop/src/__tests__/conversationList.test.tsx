@@ -111,7 +111,7 @@ describe("ConversationList 日期快筛（dropdown）", () => {
     const { container } = render(<ConversationList {...makeProps(convs)} />);
     await pickDropdownItem(container, 1, "近 7 天");
     await waitFor(() => {
-      expect(container.querySelector(".empty")?.textContent).toMatch(/当前日期范围无会话/);
+      expect(container.querySelector(".empty-state")?.textContent).toMatch(/当前日期范围无会话/);
     });
   });
 

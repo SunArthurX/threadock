@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ExtractionResult, KnowledgeEngine } from "./types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
+import { Icon } from "./Icon";
 interface Props {
   knowledge: ExtractionResult;
   /** 所属会话 ID（用于跨会话引用排除自身）。 */
@@ -193,10 +194,10 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, e
       <div className="settings-modal knowledge-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h2>
-            ✨ 知识提取结果
+            <Icon name="sparkle" size={15} /> 知识提取结果
             {convTitle && <span className="knowledge-modal-sub">{convTitle}</span>}
             {llmModel && (
-              <span className="badge" style={{ marginLeft: 8 }} title={`由 ${llmModel} 提取`}>🤖 {llmModel}</span>
+              <span className="badge" style={{ marginLeft: 8 }} title={`由 ${llmModel} 提取`}><Icon name="cpu" size={10} /> {llmModel}</span>
             )}
           </h2>
           <div className="knowledge-modal-actions">
@@ -206,14 +207,14 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, e
                 className={engine === "rule" ? "active" : ""}
                 disabled={switching !== null}
                 onClick={() => runExtract("rule")}
-              >⚙ 规则</button>
+              ><Icon name="settings" size={11} /> 规则</button>
               <button
                 className={engine === "llm" ? "active" : ""}
                 disabled={switching !== null}
                 onClick={() => runExtract("llm")}
-              >{switching === "llm" ? "AI 提取中…" : "✨ AI"}</button>
+              >{switching === "llm" ? "AI 提取中…" : <><Icon name="sparkle" size={11} /> AI 引擎</>}</button>
             </div>
-            <button className="action-btn" onClick={() => runExtract(engine)} disabled={switching !== null}>↻ 重新提取</button>
+            <button className="action-btn" onClick={() => runExtract(engine)} disabled={switching !== null}><Icon name="sync" size={11} /> 重新提取</button>
             {/* MD/JSON 下载合并为单一 dropdown 按钮：节省顶栏空间 */}
             <div className={`list-dropdown ${downloadOpen ? "open" : ""}`} ref={downloadRef}>
               <button
@@ -245,7 +246,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, e
             >
               {copied ? "✓ 已复制" : "⧉ 复制为纪要"}
             </button>
-            <button className="settings-close" onClick={onClose}>✕</button>
+            <button className="settings-close" onClick={onClose} aria-label="关闭"><Icon name="close" size={14} /></button>
           </div>
         </div>
         {/* 类型筛选 tabs（带计数徽标） */}

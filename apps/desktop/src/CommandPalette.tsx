@@ -5,18 +5,19 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
 import ScrollArea from "./ScrollArea";
+import { Icon, type IconName } from "./Icon";
 
 export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
 
-const PAGES: { key: Page; icon: string; label: string; hint: string }[] = [
-  { key: "chat", icon: "💬", label: "对话", hint: "会话列表 / 搜索" },
-  { key: "overview", icon: "📊", label: "概览", hint: "治理总览" },
-  { key: "cost", icon: "💰", label: "成本", hint: "成本 / 预算" },
-  { key: "security", icon: "🛡", label: "安全", hint: "审计 / 风险" },
-  { key: "assets", icon: "🧩", label: "资产", hint: "技能 / 插件 / MCP" },
-  { key: "knowledge", icon: "📚", label: "知识库", hint: "决策 / TODO / 提示词" },
-  { key: "activity", icon: "📆", label: "活动", hint: "热力图 / 时段 / 工具" },
-  { key: "projects", icon: "📁", label: "项目", hint: "按 source_dir 归并" },
+const PAGES: { key: Page; icon: IconName; label: string; hint: string }[] = [
+  { key: "chat", icon: "chat", label: "对话", hint: "会话列表 / 搜索" },
+  { key: "overview", icon: "overview", label: "概览", hint: "治理总览" },
+  { key: "cost", icon: "cost", label: "成本", hint: "成本 / 预算" },
+  { key: "security", icon: "shield", label: "安全", hint: "审计 / 风险" },
+  { key: "assets", icon: "package", label: "资产", hint: "技能 / 插件 / MCP" },
+  { key: "knowledge", icon: "library", label: "知识库", hint: "决策 / TODO / 提示词" },
+  { key: "activity", icon: "calendar", label: "活动", hint: "热力图 / 时段 / 工具" },
+  { key: "projects", icon: "folder", label: "项目", hint: "按 source_dir 归并" },
 ];
 
 // 内置动作：触发外部副作用（开关弹窗 / 跑同步 / 切主题等），由 App 层通过 onAction 实际处理。
@@ -29,13 +30,13 @@ export type CommandActionId =
   | "open_reports"
   | "show_changelog";
 
-const ACTIONS: { id: CommandActionId; icon: string; label: string; hint: string }[] = [
-  { id: "open_settings", icon: "⚙", label: "打开设置", hint: "主题 / 同步 / 预算 / 重置" },
-  { id: "trigger_sync", icon: "⟳", label: "触发同步", hint: "立即从来源拉取最新会话" },
-  { id: "toggle_theme", icon: "🌓", label: "切换主题 深/浅", hint: "深色 ⇄ 浅色" },
-  { id: "show_shortcuts", icon: "?", label: "显示快捷键", hint: "列出所有全局快捷键" },
-  { id: "open_reports", icon: "📄", label: "打开周报中心", hint: "历史周报列表" },
-  { id: "show_changelog", icon: "📝", label: "查看更新日志", hint: "本版本的变更说明" },
+const ACTIONS: { id: CommandActionId; icon: IconName; label: string; hint: string }[] = [
+  { id: "open_settings", icon: "settings", label: "打开设置", hint: "主题 / 同步 / 预算 / 重置" },
+  { id: "trigger_sync", icon: "sync", label: "触发同步", hint: "立即从来源拉取最新会话" },
+  { id: "toggle_theme", icon: "moon", label: "切换主题 深/浅", hint: "深色 ⇄ 浅色" },
+  { id: "show_shortcuts", icon: "keyboard", label: "显示快捷键", hint: "列出所有全局快捷键" },
+  { id: "open_reports", icon: "file", label: "打开周报中心", hint: "历史周报列表" },
+  { id: "show_changelog", icon: "sparkle", label: "查看更新日志", hint: "本版本的变更说明" },
 ];
 
 // 列表项的判别联合（P1-E3）
@@ -262,7 +263,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
                   onMouseEnter={() => setActive(i)}
                   onClick={() => { onJumpPage(it.page.key); onClose(); }}
                 >
-                  <span className="cmd-row-icon">{it.page.icon}</span>
+                  <span className="cmd-row-icon"><Icon name={it.page.icon} size={15} /></span>
                   <span className="cmd-row-label">{it.page.label}</span>
                   <span className="cmd-row-hint">{it.page.hint}</span>
                 </div>
@@ -281,7 +282,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
                   onClick={() => { if (onAction) onAction(it.action.id); onClose(); }}
                   data-testid="cmd-action"
                 >
-                  <span className="cmd-row-icon">{it.action.icon}</span>
+                  <span className="cmd-row-icon"><Icon name={it.action.icon} size={15} /></span>
                   <span className="cmd-row-label">{it.action.label}</span>
                   <span className="cmd-row-hint">{it.action.hint}</span>
                 </div>
@@ -321,7 +322,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
           {/* Prompt 复用组 */}
           {items.some((i) => i.kind === "reuse") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">💡 你之前问过类似问题（Prompt 复用）</div>
+              <div className="cmd-group-title">你之前问过类似问题（Prompt 复用）</div>
               {items.map((it, i) => it.kind === "reuse" ? (
                 <div
                   key={`r-${it.hit.message_id}`}

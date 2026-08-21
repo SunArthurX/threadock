@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
+import { Icon } from "./Icon";
 import ScrollArea from "./ScrollArea";
 import { copyToClipboard } from "./clipboard";
 import MessageBlock from "./MessageBlock";
@@ -374,7 +375,7 @@ export default function ConversationDetail({
           ⏯ 恢复会话
         </button>
         <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
-          {loading ? "提取中…" : "✨ 知识"}
+          {loading ? "提取中…" : <><Icon name="sparkle" size={12} /> 知识</>}
         </button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
         <button

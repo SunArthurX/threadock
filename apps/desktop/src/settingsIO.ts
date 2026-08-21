@@ -10,7 +10,7 @@
 const EXPORT_VERSION = 1;
 const ALL_KEYS = [
   // 偏好
-  "ch-theme", "ch-pref-number", "ch-pref-currency", "ch-pref-date",
+  "ch-theme", "ch-text-size", "ch-pref-number", "ch-pref-currency", "ch-pref-date",
   "ch-sync-interval", "ch-retention-days", "ch-budget-notify",
   // 视图
   "ch-view", "ch-sidebar", "ch-sort-by", "ch-ops-range",

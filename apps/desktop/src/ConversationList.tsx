@@ -7,6 +7,8 @@ import { Conversation, sourceLabel } from "./types";
 import { showToast } from "./toast";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
 import ConvItem from "./ConvItem";
+import { EmptyState } from "./EmptyState";
+import { Icon } from "./Icon";
 
 /** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
 export type ListScope = "all" | "favorite" | "archived" | "deleted";
@@ -416,7 +418,7 @@ export default function ConversationList({
         <input
           className="list-search-input"
           type="search"
-          placeholder="🔍 搜索标题…"
+          placeholder="搜索标题…"
           value={listSearch}
           onChange={(e) => setListSearch(e.target.value)}
         />
@@ -581,17 +583,18 @@ export default function ConversationList({
         </div>
       )}
       {!loading && conversations.length === 0 && (
-        <div className="empty empty-cta">
-          <div className="empty-icon">📥</div>
-          <div className="empty-title">还没有任何会话</div>
-          <div className="empty-hint">点上方「⬇ 导入」按钮把 Cursor / Claude Code / ZCode 里的历史对话同步进来</div>
-        </div>
+        <EmptyState
+          icon="mailbox"
+          size="md"
+          title="还没有任何会话"
+          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} /> 同步</span> 按钮把 Cursor / Claude Code / ZCode / Codex 里的历史对话拉进来</>}
+        />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length === 0 && (
-        <div className="empty">当前日期范围无会话（试试「全部时间」）</div>
+        <EmptyState icon="calendar" size="sm" title="当前日期范围无会话" desc="试试「全部时间」" />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length > 0 && searchFiltered.length === 0 && (
-        <div className="empty">无匹配「{listSearch}」的会话（清空搜索试试）</div>
+        <EmptyState icon="search" size="sm" title={`无匹配「${listSearch}」的会话`} desc="清空搜索试试" />
       )}
 
       {ctxMenu && (

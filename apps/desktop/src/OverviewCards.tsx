@@ -1,5 +1,6 @@
 // 概览 tab 的纯展示卡片组件
 import { BarChart, DonutChart, formatTokens, formatCost, useCountUp } from "./charts";
+import { Icon, type IconName } from "./Icon";
 export interface OpsOverview { total_requests:number; total_tokens:number; input_tokens:number; output_tokens:number; cost_usd:number; avg_duration_ms:number; error_count:number; session_count:number; destructive_calls:number; total_tool_calls:number; }
 export interface ProviderUsage { provider:string; requests:number; total_tokens:number; output_tokens:number; errors:number; }
 export interface DailyUsage { day:string; total_tokens:number; requests:number; }
@@ -13,8 +14,8 @@ export const PROVIDER_META: Record<string, { label: string; color: string }> = {
 };
 export const meta = (p: string) => PROVIDER_META[p] ?? { label: p, color: "#8b96ad" };
 
-export function AnimatedKpi({ label, num, fmt, sub, danger, onClick }: {
-  label: string; num: number; fmt: (v: number) => string; sub: string; danger?: boolean; onClick?: () => void;
+export function AnimatedKpi({ label, num, fmt, sub, danger, icon, onClick }: {
+  label: string; num: number; fmt: (v: number) => string; sub: string; danger?: boolean; icon?: IconName; onClick?: () => void;
 }) {
   const v = useCountUp(num);
   const interactive = !!onClick;
@@ -26,6 +27,7 @@ export function AnimatedKpi({ label, num, fmt, sub, danger, onClick }: {
       tabIndex={interactive ? 0 : undefined}
       onKeyDown={interactive ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}
     >
+      {icon && <span className="ops-kpi-icon"><Icon name={icon} size={14} /></span>}
       <div className="ops-kpi-value">{fmt(v)}</div>
       <div className="ops-kpi-label">{label}</div>
       <div className="ops-kpi-sub">{sub}</div>
@@ -36,10 +38,10 @@ export function AnimatedKpi({ label, num, fmt, sub, danger, onClick }: {
 export function KpiRow({ overview }: { overview: OpsOverview | null }) {
   if (!overview) return null;
   const kpis = [
-    { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话` },
-    { label: "总 Tokens", num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}` },
-    { label: "估算成本", num: overview.cost_usd, fmt: formatCost, sub: "按 pricing.json 定价" },
-    { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 次工具调用`, danger: overview.destructive_calls > 0 },
+    { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话`, icon: "send" as IconName },
+    { label: "总 Tokens", num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}`, icon: "token" as IconName },
+    { label: "估算成本", num: overview.cost_usd, fmt: formatCost, sub: "按 pricing.json 定价", icon: "dollar" as IconName },
+    { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 次工具调用`, danger: overview.destructive_calls > 0, icon: "alert" as IconName },
   ];
   return <div className="ops-kpis">{kpis.map((k, i) => <AnimatedKpi key={i} {...k} />)}</div>;
 }
@@ -51,7 +53,7 @@ export function ChartsRow({ byProvider, timeseries }: { byProvider: ProviderUsag
   return (
     <div className="ops-charts">
       <div className="ops-card">
-        <div className="ops-card-title">Agent 用量分布</div>
+        <div className="ops-card-title"><span className="card-icon"><Icon name="globe" size={13} /></span><span className="card-title-text">Agent 用量分布</span></div>
         <div className="ops-donut-wrap">
           <DonutChart slices={slices} />
           <div className="ops-legend">
@@ -67,7 +69,7 @@ export function ChartsRow({ byProvider, timeseries }: { byProvider: ProviderUsag
         </div>
       </div>
       <div className="ops-card ops-card-wide">
-        <div className="ops-card-title">每日 Tokens 趋势</div>
+        <div className="ops-card-title"><span className="card-icon"><Icon name="trend-up" size={13} /></span><span className="card-title-text">每日 Tokens 趋势</span></div>
         <BarChart data={barData} />
       </div>
     </div>

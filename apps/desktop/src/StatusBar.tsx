@@ -1,6 +1,7 @@
 // 底部状态栏：当前页 + 同步状态 + 实时时间 + 快捷键提示。
 // 独立组件：自管 1s 时间刷新，避免整个 App 树每秒重渲染（P1-D3）。
 import { useEffect, useState } from "react";
+import { Icon } from "./Icon";
 
 export interface StatusBarProps {
   syncResult: string | null;
@@ -20,12 +21,23 @@ export default function StatusBar({ syncResult, syncing, viewLabel }: StatusBarP
   const time = new Date(nowMs).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   return (
     <div className="status-bar">
-      <span className="status-cell">📍 {viewLabel}</span>
+      <span className="status-cell status-view">
+        <span className="status-dot" />
+        {viewLabel}
+      </span>
       <span className={`status-cell status-sync ${syncing ? "syncing" : syncResult ? "done" : ""}`}>
-        {syncing ? "⟳ 同步中…" : (syncResult ?? "○ 待同步")}
+        {syncing ? (
+          <><Icon name="sync" size={11} /> 同步中…</>
+        ) : syncResult ? (
+          <><Icon name="check" size={11} /> {syncResult.replace(/^✓\s*/, "")}</>
+        ) : (
+          <><Icon name="circle-dot" size={11} /> 待同步</>
+        )}
       </span>
       <span className="status-cell status-spacer" />
-      <span className="status-cell status-hint">{mod}K 命令 · {mod}? 速查 · {mod}F 搜索 · {mod}R 刷新</span>
+      <span className="status-cell status-hint">
+        <kbd>{mod}K</kbd> 命令 · <kbd>{mod}?</kbd> 速查 · <kbd>{mod}F</kbd> 搜索 · <kbd>{mod}R</kbd> 刷新
+      </span>
       <span className="status-cell status-time">{time}</span>
     </div>
   );

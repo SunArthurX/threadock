@@ -2,6 +2,9 @@
 // 增强：bulk 处置（全部忽略/全部误报）+ 策略规则 export/import JSON
 import { formatDuration } from "./charts";
 import { usePager } from "./usePager";
+import { CardTitle } from "./CardTitle";
+import { InlineEmpty } from "./EmptyState";
+import { Icon } from "./Icon";
 import type { AnomalyRow, AuditReport, AuditFinding, PolicyRule, RiskyCall } from "./ops-types";
 import { meta, SEV_LABEL } from "./ops-types";
 import { showToast } from "./toast";
@@ -90,9 +93,9 @@ export default function SecuritySection(p: Props) {
   return (
     <>
       <div className="ops-card">
-        <div className="ops-card-title">🚨 异常检测（{p.anomalies.length}）</div>
+        <CardTitle icon="alert" sub={`${p.anomalies.length} 项`}>异常检测</CardTitle>
         {p.anomalies.length === 0 ? (
-          p.loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">未检测到异常 🎉</div>
+          p.loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">未检测到异常</div>
         ) : (
           <>
           <div className="ops-risky">
@@ -115,23 +118,19 @@ export default function SecuritySection(p: Props) {
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">
-          🛡 安全审计
-          {p.audit ? (
-            <>
-              <span className="audit-stats">
-                扫描 {p.audit.scanned_messages.toLocaleString()} 消息 / {p.audit.scanned_tool_calls.toLocaleString()} 命令 ·
-                <b className="text-danger"> 高危 {p.audit.high}</b> · <b>中危 {p.audit.medium}</b>
-              </span>
-              {/* P1-B2: 审计新鲜度（与 OpsView 同步按钮风格一致） */}
-              <span className="ops-freshness" style={{ marginLeft: "auto" }} title={`扫描时间：${p.audit.generated_at}`}>· 扫描于 {relativeTime(p.audit.generated_at)}</span>
-            </>
-          ) : null}
-        </div>
+        <CardTitle icon="shield-check" trailing={p.audit ? (
+          <>
+            <span className="audit-stats">
+              扫描 {p.audit.scanned_messages.toLocaleString()} 消息 / {p.audit.scanned_tool_calls.toLocaleString()} 命令 ·
+              <b className="text-danger"> 高危 {p.audit.high}</b> · <b>中危 {p.audit.medium}</b>
+            </span>
+            <span className="ops-freshness" title={`扫描时间：${p.audit.generated_at}`}>扫描于 {relativeTime(p.audit.generated_at)}</span>
+          </>
+        ) : null}>安全审计</CardTitle>
         {/* P2-4: 首次访问引导 — 突出主操作 + 背景说明（无 audit 时显示） */}
         {p.audit == null && !p.auditing && (
           <div className="audit-hero">
-            <div className="audit-hero-icon" aria-hidden>🔍</div>
+            <div className="audit-hero-icon" aria-hidden><Icon name="scan" size={22} /></div>
             <div className="audit-hero-body">
               <div className="audit-hero-title">首次访问？点此开始全库扫描</div>
               <div className="audit-hero-sub">
@@ -180,15 +179,16 @@ export default function SecuritySection(p: Props) {
         )}
         {p.audit && p.audit.findings.length === 0 && (
           <div className="ops-table-empty">
-            扫描完成，未发现未处置风险 🎉（已忽略/误报的不再显示，可在下方处置列表管理）
+            扫描完成，未发现未处置风险（已忽略/误报的不再显示，可在下方处置列表管理）
           </div>
         )}
 
         <div className="policy-section">
-          <div className="budget-label">
+          <div className="section-subhead">
+            <Icon name="bookmark" size={12} />
             自定义策略规则（正则）
-            <button className="kb-copy" style={{ marginLeft: "auto" }} onClick={exportPolicies} title="把当前规则复制为 JSON 粘贴到剪贴板">⤓ 导出</button>
-            <button className="kb-copy" onClick={importPolicies} title="粘贴 JSON 批量导入（同名规则覆盖）">⤒ 导入</button>
+            <button className="kb-copy" style={{ marginLeft: "auto" }} onClick={exportPolicies} title="把当前规则复制为 JSON 粘贴到剪贴板">导出</button>
+            <button className="kb-copy" onClick={importPolicies} title="粘贴 JSON 批量导入（同名规则覆盖）">导入</button>
           </div>
           <div className="policy-add">
             <input placeholder="规则名" value={p.newPolicy.name} onChange={(e) => p.onPolicyInput("name", e.target.value)} />
@@ -223,7 +223,7 @@ export default function SecuritySection(p: Props) {
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">风险调用（{p.risky.length}）</div>
+        <CardTitle icon="bug" sub={`${p.risky.length} 次`}>风险调用</CardTitle>
         <div className="ops-risky">
           {riskyPager.slice.map((r) => {
             const open = p.expandedRisk.has(r.id);
@@ -253,7 +253,7 @@ export default function SecuritySection(p: Props) {
               </div>
             );
           })}
-          {p.risky.length === 0 && <div className="ops-table-empty">无风险调用 🎉</div>}
+          {p.risky.length === 0 && <InlineEmpty message="无风险调用" hint="扫描时未发现 rm -rf / sudo 等危险命令" />}
         </div>
         {pagerBar(riskyPager)}
       </div>

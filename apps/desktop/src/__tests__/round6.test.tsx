@@ -338,10 +338,11 @@ describe("ChangelogModal 启动检测", () => {
 });
 
 describe("ActivityView 工具维度筛选", () => {
-  it("有 tool_daily 时显示「指定工具」select", async () => {
+  it("有 tool_daily 时显示「指定工具」select（ListToolbar）", async () => {
     const { container } = render(<ActivityView />);
     await waitFor(() => {
-      const sel = container.querySelector(".heat-tool-select");
+      // ListToolbar 把 heat-tool-select 替换为 .list-toolbar-select
+      const sel = container.querySelector(".list-toolbar-select");
       expect(sel).toBeInTheDocument();
     });
   });

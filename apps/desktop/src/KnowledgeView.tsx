@@ -6,6 +6,8 @@ import { formatTime } from "./types";
 import { usePager } from "./usePager";
 import { MiniProgressShim } from "./progress";
 import { showToast } from "./toast";
+import { CardTitle } from "./CardTitle";
+import { LoadingText } from "./EmptyState";
 
 interface KbItem {
   text?: string;
@@ -299,48 +301,44 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
   return (
     <div className="knowledge-page">
       <div className="ops-card">
-        <div className="ops-card-title">
-          📚 知识库
-          <span className="ops-card-sub">
-            {kb ? (
-              <>
-                <button
-                  className="link-like"
-                  style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
-                  onClick={() => setModalKind("versions")}
-                  title="查看已提取会话的版本历史"
-                >已提取 {kb.extracted}</button>
-                {" / "}
-                <span>{kb.total_conversations} 会话</span>
-                {" · 未提取 "}
-                <button
-                  className="link-like"
-                  style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
-                  onClick={() => setModalKind("pending")}
-                  title="查看尚未提取的会话清单"
-                >{(kb.pending ?? []).length}</button>
-                {" · 上次 "}{relativeTime(kb.last_extract_ms)}
-              </>
-            ) : "加载中…"}
-          </span>
-          <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} disabled={extracting}
+        <CardTitle icon="library" sub={kb ? (
+          <>
+            <button
+              className="link-like"
+              style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => setModalKind("versions")}
+              title="查看已提取会话的版本历史"
+            >已提取 {kb.extracted}</button>
+            {" / "}
+            <span>{kb.total_conversations} 会话</span>
+            {" · 未提取 "}
+            <button
+              className="link-like"
+              style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => setModalKind("pending")}
+              title="查看尚未提取的会话清单"
+            >{(kb.pending ?? []).length}</button>
+            {" · 上次 "}{relativeTime(kb.last_extract_ms)}
+          </>
+        ) : <LoadingText text="正在加载知识库…" />} trailing={<>
+          <button className="action-btn" disabled={extracting}
             onClick={() => runExtract(false)}>
             {extracting ? "提取中…" : kb && kb.extracted > 0 ? "↻ 提取新会话" : "▶ 首次提取全部"}
           </button>
           {kb && kb.extracted > 0 && kb.extracted < kb.total_conversations && (
-            <button className="action-btn" style={{ fontSize: 11 }} disabled={extracting}
+            <button className="action-btn" disabled={extracting}
               onClick={() => runExtract(true)} title="重新提取全部（含已提取）">重提全部</button>
           )}
           {kb && kb.extracted > 0 && (
-            <button className="action-btn" style={{ fontSize: 11 }}
+            <button className="action-btn"
               onClick={async () => {
                 try {
                   await navigator.clipboard.writeText(knowledgeBaseToMarkdown(kb));
                   showToast("✓ 知识库纪要已复制到剪贴板", "info");
                 } catch { showToast("剪贴板不可用", "error"); }
-              }} title="全部知识导出为 Markdown 纪要（含 TODO 完成状态）">⧉ 导出纪要</button>
+              }} title="全部知识导出为 Markdown 纪要（含 TODO 完成状态）">导出纪要</button>
           )}
-        </div>
+        </>}>知识库</CardTitle>
         <MiniProgressShim show={extracting} label="知识提取" />
         {empty && (
           <div className="ops-table-empty">
@@ -443,7 +441,7 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             {tab === "prompts" && (
               <div className="kb-list">
                 {favPrompts.length === 0 && (
-                  <div className="ops-table-empty">⭐ 还没有收藏的提问 —— 在下方点 ☆ 把好用的 prompt 沉淀下来</div>
+                  <div className="ops-table-empty">还没有收藏的提问 —— 在下方点 ☆ 把好用的 prompt 沉淀下来</div>
                 )}
                 {favPrompts.map((p) => (
                   <div key={`fav-${p.message_id}`} className="kb-item">
@@ -481,8 +479,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           </div>
 
           <div className="ops-card">
-            <div className="ops-card-title">⚙ 常用命令 Top 20</div>
-            {filtered.topCommands.length === 0 ? <div className="ops-table-empty">{search ? "🔍 无匹配" : "无数据"}</div> : (
+            <CardTitle icon="terminal">常用命令 Top 20</CardTitle>
+            {filtered.topCommands.length === 0 ? <div className="ops-table-empty">{search ? "无匹配" : "无数据"}</div> : (
               <div className="kb-list">
                 {filtered.topCommands.map((c, i) => (
                   <div key={i} className="kb-item">
@@ -504,8 +502,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           </div>
 
           <div className="ops-card">
-            <div className="ops-card-title">📄 高频文件 Top 20</div>
-            {filtered.topFiles.length === 0 ? <div className="ops-table-empty">{search ? "🔍 无匹配" : "无数据"}</div> : (
+            <CardTitle icon="file">高频文件 Top 20</CardTitle>
+            {filtered.topFiles.length === 0 ? <div className="ops-table-empty">{search ? "无匹配" : "无数据"}</div> : (
               <div className="kb-list">
                 {filtered.topFiles.map((f, i) => (
                   <div key={i} className="kb-item">
@@ -546,7 +544,7 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             <div className="settings-body" style={{ padding: 12 }}>
               {modalKind === "pending" && (
                 (kb.pending ?? []).length === 0
-                  ? <div className="ops-table-empty">所有会话都已提取 🎉</div>
+                  ? <div className="ops-table-empty">所有会话都已提取</div>
                   : (kb.pending ?? []).map((p) => (
                       <div key={p.id} className="kb-item">
                         <span className="badge source">{p.provider}</span>

@@ -2,6 +2,7 @@
 // 列出所有全局快捷键及作用域，便于用户快速记忆与发现隐藏功能。
 import { useEffect } from "react";
 import ScrollArea from "./ScrollArea";
+import { Icon } from "./Icon";
 interface ShortcutItem {
   keys: string;
   desc: string;
@@ -26,9 +27,9 @@ const GROUPS: Group[] = [
       { keys: `${MOD} 2`, desc: "跳到「概览」", scope: "global" },
       { keys: `${MOD} 3`, desc: "跳到「成本」", scope: "global" },
       { keys: `${MOD} 4`, desc: "跳到「安全」", scope: "global" },
-      { keys: `${MOD} 5`, desc: "跳到「资产」", scope: "global" },
+      { keys: `${MOD} 5`, desc: "跳到「活动」", scope: "global" },
       { keys: `${MOD} 6`, desc: "跳到「知识库」", scope: "global" },
-      { keys: `${MOD} 7`, desc: "跳到「活动」", scope: "global" },
+      { keys: `${MOD} 7`, desc: "跳到「资产」", scope: "global" },
       { keys: `${MOD} 8`, desc: "跳到「项目」", scope: "global" },
       { keys: `${MOD} R`, desc: "手动刷新（重新拉取会话 + 指标）", scope: "global" },
       { keys: "Esc", desc: "关闭弹窗 / 取消选择", scope: "global" },
@@ -78,10 +79,10 @@ export default function HelpShortcuts({ onClose }: { onClose: () => void }) {
     <div className="settings-backdrop" onClick={onClose}>
       <div className="settings-modal help-shortcuts-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
-          <h2>⌨ 快捷键速查</h2>
+          <h2><Icon name="keyboard" size={15} /> 快捷键速查</h2>
           <div className="knowledge-modal-actions">
             <span className="settings-hint" style={{ fontSize: 11 }}>{isMac ? "macOS" : "Windows / Linux"} 平台</span>
-            <button className="settings-close" onClick={onClose}>✕</button>
+            <button className="settings-close" onClick={onClose}><Icon name="close" size={14} /></button>
           </div>
         </div>
         <ScrollArea className="settings-body help-shortcuts-body">

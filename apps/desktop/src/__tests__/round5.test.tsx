@@ -347,7 +347,7 @@ describe("SecuritySection 批量处置 + 策略导入导出", () => {
     const onImport = vi.fn();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue('[{"id":"p3","name":"x","pattern":"y","kind":"dangerous_command","severity":"high","enabled":true}]');
     const { container } = render(<SecuritySection {...baseProps({ onImportPolicies: onImport })} />);
-    const btn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "⤒ 导入") as HTMLButtonElement;
+    const btn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("导入")) as HTMLButtonElement;
     fireEvent.click(btn);
     expect(promptSpy).toHaveBeenCalled();
     expect(onImport).toHaveBeenCalledWith(expect.stringContaining("p3"));
@@ -357,7 +357,7 @@ describe("SecuritySection 批量处置 + 策略导入导出", () => {
     const onImport = vi.fn();
     const promptSpy = vi.spyOn(window, "prompt").mockReturnValue(null);
     const { container } = render(<SecuritySection {...baseProps({ onImportPolicies: onImport })} />);
-    const btn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "⤒ 导入") as HTMLButtonElement;
+    const btn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent?.includes("导入")) as HTMLButtonElement;
     fireEvent.click(btn);
     expect(promptSpy).toHaveBeenCalled();
     expect(onImport).not.toHaveBeenCalled();

@@ -7,6 +7,10 @@ import { usePager } from "./usePager";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
 import type { Conversation } from "./types";
+import { CardTitle } from "./CardTitle";
+import { LoadingText } from "./EmptyState";
+import { ListToolbar } from "./ListToolbar";
+import { Icon } from "./Icon";
 
 export interface ProjectRow {
   dir: string;
@@ -116,12 +120,7 @@ export default function ProjectsView({
   const maxCost = Math.max(...(projects ?? []).map((p) => p.cost_usd), 0.0001);
   const isEmpty = projects !== null && projects.length === 0;
 
-  /** 排序键：点击同一键切换升降序（同时回到第 1 页）。 */
-  const clickSort = (k: SortKey) => {
-    if (sortKey === k) setSortDir(sortDir === "desc" ? "asc" : "desc");
-    else { setSortKey(k); setSortDir("desc"); }
-    pager.reset();
-  };
+  /** 排序键：点击同一键切换升降序。已迁移到 ListToolbar onSortChange。 */
 
   /** 导出当前过滤后的列表为 CSV。 */
   const exportCsv = async () => {
@@ -152,48 +151,36 @@ export default function ProjectsView({
   return (
     <ScrollArea className="projects-page">
       <div className="ops-card">
-        <div className="ops-card-title">
-          📁 项目中心
-          <span className="ops-card-sub">
-            {projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : "加载中…"}
-          </span>
-          {projects && projects.length > 0 && (
-            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={exportCsv}
+        <CardTitle icon="folder" sub={projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : <LoadingText text="正在加载项目…" />}>项目中心</CardTitle>
+        <ListToolbar
+          leading={projects && projects.length > 0 ? (
+            <button className="action-btn" onClick={exportCsv}
               title="把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）">
-              ⧉ 导出 CSV
+              <Icon name="copy" size={12} /> 导出 CSV
             </button>
-          )}
-        </div>
-        <div className="scope-bar" style={{ alignItems: "center" }}>
-          <span style={{ fontSize: 11.5, opacity: 0.6 }}>排序</span>
-          {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => {
-            const active = sortKey === k;
-            return (
-              <button
-                key={k}
-                className={`scope-chip ${active ? "active" : ""}`}
-                onClick={() => clickSort(k)}
-                title={active ? `再次点击切换为${sortDir === "desc" ? "升序" : "降序"}` : "点击按此字段排序"}
-              >
-                {SORT_LABELS[k]}{active ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
-              </button>
-            );
-          })}
-          <input
-            className="settings-confirm-input"
-            style={{ marginLeft: "auto", width: 180, fontSize: 12 }}
-            placeholder="🔍 搜索项目 / Agent…"
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); pager.reset(); }}
-          />
-        </div>
+          ) : null}
+          sortLabel="排序"
+          sort={sortKey}
+          onSortChange={(v) => {
+            if (sortKey === v) setSortDir(sortDir === "desc" ? "asc" : "desc");
+            else { setSortKey(v as SortKey); setSortDir("desc"); }
+          }}
+          sortOptions={(Object.keys(SORT_LABELS) as SortKey[]).map((k) => ({
+            value: k, label: `${SORT_LABELS[k]}${sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}`
+          }))}
+          count={totals.count}
+          countLabel="个项目"
+          search={search}
+          onSearch={(v) => { setSearch(v); pager.reset(); }}
+          searchPlaceholder="搜索项目 / Agent…"
+        />
         {isEmpty && (
           <div className="ops-table-empty">
             📂 暂无项目用量数据 — 导入会话并同步指标后，按 source_dir 自动归并为项目卡片
           </div>
         )}
         {projects && projects.length > 0 && processed.length === 0 && (
-          <div className="ops-table-empty">🔍 无匹配项目（试试清空搜索或换个关键词）</div>
+          <div className="ops-table-empty">无匹配项目（试试清空搜索或换个关键词）</div>
         )}
       </div>
       <div className="project-grid">
@@ -221,7 +208,7 @@ export default function ProjectsView({
             {openDir === p.dir && (
               <div className="project-conv-list" onClick={(e) => e.stopPropagation()}>
                 <div className="project-conv-title">
-                  {dirLoading ? "加载中…" : dirConvs && `${dirConvs.length} 条会话`}
+                  {dirLoading ? <LoadingText text="加载中" /> : dirConvs && `${dirConvs.length} 条会话`}
                 </div>
                 {dirConvs && dirConvs.length === 0 && (
                   <div className="project-conv-empty">该项目下没有主任务会话</div>

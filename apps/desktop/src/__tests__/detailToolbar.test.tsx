@@ -72,7 +72,7 @@ describe("详情页按钮清单", () => {
 
   it("无消息时知识按钮禁用", () => {
     render(<ConversationDetail {...baseDetail} />);
-    const btn = screen.getByText("✨ 知识") as HTMLButtonElement;
+    const btn = screen.getByText("知识") as HTMLButtonElement;
     expect(btn).toBeDisabled();
   });
 

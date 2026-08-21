@@ -6,6 +6,11 @@ import { usePager } from "./usePager";
 import { meta } from "./ops-types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
+import { CardTitle } from "./CardTitle";
+import { Skeleton } from "./Skeleton";
+import { InlineEmpty } from "./EmptyState";
+import { ListToolbar } from "./ListToolbar";
+import { Icon } from "./Icon";
 
 interface Props {
   assets: AssetRow[];
@@ -86,21 +91,21 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
   return (
     <>
       <div className="ops-card">
-        <div className="ops-card-title">
-          🧩 资产清单（{filteredAssets.length}{filteredAssets.length !== assets.length ? `/${assets.length}` : ""}）
-          <span className="ops-card-sub">skills / plugins / 内置技能</span>
-          <input
-            className="settings-confirm-input"
-            style={{ marginLeft: "auto", width: 200, fontSize: 12 }}
-            placeholder="🔍 搜索资产名 / 路径 / 说明…"
-            value={assetQuery}
-            onChange={(e) => setAssetQuery(e.target.value)}
+        <CardTitle icon="package" sub="skills / plugins / 内置技能" trailing={
+          <ListToolbar
+            dense
+            search={assetQuery}
+            onSearch={setAssetQuery}
+            searchPlaceholder="搜索资产名 / 路径 / 说明…"
+            count={filteredAssets.length}
+            countTotal={assets.length}
+            countLabel="项"
           />
-        </div>
+        }>资产清单</CardTitle>
         {filteredAssets.length === 0 ? (
           assets.length === 0
-            ? (loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">后台同步中…</div>)
-            : <div className="ops-table-empty">🔍 无匹配资产</div>
+            ? (loading ? <Skeleton variant="list" count={4} /> : <InlineEmpty message="后台同步中…" hint="首次启动会扫描各 Agent 源" />)
+            : <InlineEmpty message="无匹配资产" hint="试试清空搜索或换关键词" />
         ) : (
           Object.entries(
             filteredAssets.reduce<Record<string, AssetRow[]>>((g, a) => {
@@ -136,12 +141,9 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">
-          ⏱ 自动化任务（{automations.length}）
-          <span className="ops-card-sub">cron / workflow / 后台任务</span>
-        </div>
+        <CardTitle icon="stopwatch" sub={`${automations.length} 个 · cron / workflow / 后台任务`}>自动化任务</CardTitle>
         {automations.length === 0 ? (
-          loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+          loading ? <Skeleton variant="list" count={3} /> : <InlineEmpty message="暂无自动化任务" hint="cron / workflow / 后台任务" />
         ) : (<>
           <div className="ops-risky">
             {activeSorted.length > 0 && <div className="automation-sub">进行中（{activeSorted.length}）</div>}
@@ -169,12 +171,12 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
           <div className="settings-modal asset-detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
               <h2>
-                🧩 资产详情
+                <Icon name="package" size={18} /> 资产详情
                 <span className={`asset-kind-chip kind-${detail.kind}`} style={{ marginLeft: 8 }}>
                   {detail.kind === "builtin_skill" ? "内置" : detail.kind === "plugin" ? "插件" : detail.kind === "mcp" ? "MCP" : "技能"}
                 </span>
               </h2>
-              <button className="settings-close" onClick={() => setDetail(null)}>✕</button>
+              <button className="settings-close" onClick={() => setDetail(null)}><Icon name="close" size={14} /></button>
             </div>
             <ScrollArea className="settings-body">
               <div className="asset-detail-row">

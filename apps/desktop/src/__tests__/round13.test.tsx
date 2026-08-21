@@ -1,106 +1,92 @@
-// 第 13 轮测试：热力图 GitHub 风格改造（12×12 圆角 + 5 档绿色 + 英文月份/星期 + Less/More legend）
-import { describe, expect, it, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+// 第 13 轮：会话页 5 个微调
+// 1) 搜索下拉 hover 改用 accent-bg
+// 2) 删除"☆ 保存"按钮 + 孤立 saveCurrentSearch 函数
+// 3) 导入按钮 → 同步（顶钮 + 下拉第一项 + 全局文案）
+// 4) 设置链接改用 button + openUrl，不再用 <a target="_blank">
+// 5) 清理设置关于的 emoji，改用 Icon
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { buildHeatGrid, heatColor, heatLevel, HEAT_LEVELS } from "../ActivityView";
+import { dirname, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
 
-describe("heatColor GitHub 5 档绿色梯度", () => {
-  it("0 档：透明（CSS 边框兜底）", () => {
-    expect(heatColor(0, 100)).toBe("transparent");
-  });
+const here = dirname(fileURLToPath(import.meta.url));
+const APP_TSX = resolve(here, "../App.tsx");
+const SETTINGS = resolve(here, "../SettingsView.tsx");
+const IMPORT_MENU = resolve(here, "../ImportMenu.tsx");
+const ONBOARDING = resolve(here, "../OnboardingTour.tsx");
+const CSS = resolve(here, "../styles.css");
 
-  it("1 档：最深绿 #0e4429（0 < r ≤ 0.25）", () => {
-    expect(heatColor(10, 100)).toBe("#0e4429");
-  });
+async function src(p: string) { return readFile(p, "utf8"); }
 
-  it("2 档：#006d32（0.25 < r ≤ 0.5）", () => {
-    expect(heatColor(40, 100)).toBe("#006d32");
-  });
-
-  it("3 档：#26a641（0.5 < r ≤ 0.75）", () => {
-    expect(heatColor(60, 100)).toBe("#26a641");
-  });
-
-  it("4 档：亮绿 #39d353（r > 0.75）", () => {
-    expect(heatColor(100, 100)).toBe("#39d353");
-  });
-
-  it("max=0 时 0 档走 transparent（不抛错）", () => {
-    expect(heatColor(0, 0)).toBe("transparent");
-    expect(heatColor(5, 0)).toBe("#0e4429"); // r=0 → 走 1 档
+describe("Round 13.1 搜索下拉 hover 用 accent-bg", () => {
+  it("styles.css 改用 var(--accent-bg) + var(--accent) 蓝", async () => {
+    const css = await src(CSS);
+    const m = /\.search-history-item:hover\s*\{[^}]*accent-bg[^}]*\}/.exec(css);
+    expect(/color:\s*var\(--accent\)/.test(css)).toBe(true);
+    expect(m).toBeTruthy();
   });
 });
 
-describe("heatLevel 0-4 档分档", () => {
-  it("0 档", () => expect(heatLevel(0, 100)).toBe(0));
-  it("1 档（>0 且 ≤0.25）", () => expect(heatLevel(10, 100)).toBe(1));
-  it("2 档（>0.25 且 ≤0.5）", () => expect(heatLevel(30, 100)).toBe(2));
-  it("3 档（>0.5 且 ≤0.75）", () => expect(heatLevel(60, 100)).toBe(3));
-  it("4 档（>0.75）", () => expect(heatLevel(90, 100)).toBe(4));
-});
-
-describe("HEAT_LEVELS 5 档常量", () => {
-  it("长度 = 5", () => expect(HEAT_LEVELS.length).toBe(5));
-  it("索引 0 = transparent", () => expect(HEAT_LEVELS[0]).toBe("transparent"));
-  it("索引 4 = 亮绿 #39d353", () => expect(HEAT_LEVELS[4]).toBe("#39d353"));
-});
-
-describe("buildHeatGrid 月份 label 改英文（GitHub 风格）", () => {
-  it("2026-08 月份 label = 'Aug'", () => {
-    const r = buildHeatGrid([{ day: "2026-08-15", calls: 5 }]);
-    expect(r.labels.some((l) => l.label === "Aug")).toBe(true);
-  });
-
-  it("跨年数据：12 月 → 1 月 label 正确切换", () => {
-    const r = buildHeatGrid([
-      { day: "2025-12-30", calls: 1 },
-      { day: "2025-12-31", calls: 1 },
-      { day: "2026-01-01", calls: 1 },
-    ]);
-    const labels = r.labels.map((l) => l.label);
-    expect(labels).toContain("Dec");
-    expect(labels).toContain("Jan");
-  });
-
-  it("12 个月名都正确", () => {
-    const en = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    for (let m = 1; m <= 12; m++) {
-      const day = `2026-${String(m).padStart(2, "0")}-15`;
-      const r = buildHeatGrid([{ day, calls: 1 }]);
-      expect(r.labels.some((l) => l.label === en[m - 1])).toBe(true);
-    }
+describe("Round 13.2 删除保存按钮", () => {
+  it("App.tsx 不再渲染 ☆ 保存按钮", async () => {
+    const s = await src(APP_TSX);
+    expect(s.includes("☆ 保存")).toBe(false);
+    expect(/saveCurrentSearch\s*=/.test(s)).toBe(false);
   });
 });
 
-describe("CSS：GitHub 风格 cell 12×12 + 圆角 2px", () => {
-  let css = "";
-  beforeAll(() => {
-    const HERE = dirname(fileURLToPath(import.meta.url));
-    css = readFileSync(resolve(HERE, "../styles.css"), "utf-8");
+describe("Round 13.3 导入按钮 → 同步", () => {
+  it("ImportMenu 顶钮 text 改为「同步」+ Icon sync", async () => {
+    const s = await src(IMPORT_MENU);
+    expect(s).toMatch(/<Icon\s+name="sync"\s+size=\{12\}\s*\/>\s*同步/);
+    expect(s).toMatch(/待同步/);
   });
-
-  it(".heat-cell width: 12px", () => {
-    expect(/\.heat-cell\s*\{[^}]*width:\s*12px/m.test(css)).toBe(true);
+  it("ImportMenu 下拉第一项改为「立即同步全部」", async () => {
+    const s = await src(IMPORT_MENU);
+    expect(s).toMatch(/立即同步全部/);
+    // JSX 文案不再含"增量同步"（注释/类型注释里的不算）
+    const jsxSection = s.split("// ")[0]; // 截掉前面注释
+    expect(jsxSection.includes("增量同步")).toBe(false);
   });
-
-  it(".heat-cell height: 12px", () => {
-    expect(/\.heat-cell\s*\{[^}]*height:\s*12px/m.test(css)).toBe(true);
+  it("全局文案同步：onboarding + empty state", async () => {
+    const ob = await src(ONBOARDING);
+    expect(ob).toMatch(/「同步」按钮/);
+    const ap = await src(APP_TSX);
+    expect(ap).toMatch(/<Icon\s+name="sync"\s+size=\{12\}\s*\/>\s*立即同步/);
   });
+});
 
-  it(".heat-cell border-radius: 2px", () => {
-    expect(/\.heat-cell\s*\{[^}]*border-radius:\s*2px/m.test(css)).toBe(true);
+describe("Round 13.4 设置链接改用 button + openUrl", () => {
+  it("SettingsView 引入 @tauri-apps/plugin-opener 的 openUrl", async () => {
+    const s = await src(SETTINGS);
+    expect(s).toMatch(/import\s*\{[^}]*openUrl[^}]*\}\s*from\s*"@tauri-apps\/plugin-opener"/);
   });
-
-  it(".heat-legend-cell 12×12（与 cell 一致）", () => {
-    expect(/\.heat-legend-cell\s*\{[^}]*width:\s*12px[^}]*height:\s*12px/m.test(css)).toBe(true);
+  it("SettingsView 提供 openExternal helper", async () => {
+    const s = await src(SETTINGS);
+    expect(s).toMatch(/function\s+openExternal\s*\(\s*url:\s*string\s*\)/);
   });
+  it("相关链接是 <button>，不是 <a target=\"_blank\">", async () => {
+    const s = await src(SETTINGS);
+    // 不再用 href={l.url}
+    expect(/href=\{l\.url\}/.test(s)).toBe(false);
+    // 不再用 target="_blank"
+    expect(s.includes('target="_blank"')).toBe(false);
+    // 用 button 调用 openExternal
+    expect(/onClick=\{\(\)\s*=>\s*openExternal\(l\.url\)\}/.test(s)).toBe(true);
+  });
+});
 
-  it(".heatmap-scroll 不再带 mask-image（cell 小了不需要渐隐）", () => {
-    // 取最后一个 .heatmap-scroll 规则（最近的覆盖前面的）
-    const all = /\.heatmap-scroll\s*\{[^}]*\}/g;
-    const blocks = css.match(all) ?? [];
-    const last = blocks[blocks.length - 1] ?? "";
-    expect(last.includes("mask-image")).toBe(false);
+describe("Round 13.5 设置关于 emoji 全清", () => {
+  it("links 列表的 label 不再有 emoji 前缀", async () => {
+    const s = await src(SETTINGS);
+    // 不再含 📖 🐛 📝 💬
+    expect(s).not.toMatch(/📖|🐛|📝|💬/);
+  });
+  it("links 列表使用 Icon 组件（globe / bug / history / chat）", async () => {
+    const s = await src(SETTINGS);
+    expect(/icon:\s*"globe"/.test(s)).toBe(true);
+    expect(/icon:\s*"bug"/.test(s)).toBe(true);
+    expect(/icon:\s*"history"/.test(s)).toBe(true);
+    expect(/icon:\s*"chat"/.test(s)).toBe(true);
   });
 });

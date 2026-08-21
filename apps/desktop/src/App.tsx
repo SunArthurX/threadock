@@ -1,10 +1,10 @@
 // App 主组件：布局 + 状态管理 + 导航（组件已拆分到独立文件）
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { copyToClipboard } from "./clipboard";
 import OpsView from "./OpsView";
-import SourcePanel from "./SourcePanel";
 import ConversationList from "./ConversationList";
 import ConversationDetail from "./ConversationDetail";
 import SearchResultsPanel from "./SearchResultsPanel";
@@ -28,16 +28,23 @@ import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDat
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import type { ListScope } from "./ConversationList";
-import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, SourceSession, ExtractionResult, KnowledgeEngine } from "./types";
-import { sourceLabel } from "./types";
+import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, KnowledgeEngine } from "./types";
+import { Icon, type IconName } from "./Icon";
+import { EmptyState } from "./EmptyState";
 
 type View = Page;
-type SourceKey = "zcode" | "claude-code" | "cursor" | "minimax" | "codex";
 
-const NAV_ITEMS = [
-  ["chat", "💬", "对话"], ["overview", "📊", "概览"], ["cost", "💰", "成本"],
-  ["security", "🛡", "安全"], ["assets", "🧩", "资产"],
-  ["knowledge", "📚", "知识库"], ["activity", "📆", "活动"], ["projects", "📁", "项目"],
+// 侧栏分组：对话 / 治理 / 资料 — 每项带 SVG 图标名 + ⌘1..N 快捷键
+type NavItem = { view: View; icon: IconName; label: string; section: "primary" | "ops" | "library"; shortcut: string };
+const NAV_ITEMS: readonly NavItem[] = [
+  { view: "chat",      icon: "chat",      label: "对话",   section: "primary", shortcut: "⌘1" },
+  { view: "overview",  icon: "overview",  label: "概览",   section: "ops",     shortcut: "⌘2" },
+  { view: "cost",      icon: "cost",      label: "成本",   section: "ops",     shortcut: "⌘3" },
+  { view: "security",  icon: "shield",    label: "安全",   section: "ops",     shortcut: "⌘4" },
+  { view: "activity",  icon: "calendar",  label: "活动",   section: "ops",     shortcut: "⌘5" },
+  { view: "knowledge", icon: "library",   label: "知识库", section: "library", shortcut: "⌘6" },
+  { view: "assets",    icon: "package",   label: "资产",   section: "library", shortcut: "⌘7" },
+  { view: "projects",  icon: "folder",    label: "项目",   section: "library", shortcut: "⌘8" },
 ] as const;
 
 /** 视图标签（用于 window.title 反映当前页）。 */
@@ -46,48 +53,12 @@ const VIEW_LABEL: Record<View, string> = {
   knowledge: "知识库", activity: "活动", projects: "项目",
 };
 
-/** 数据新鲜度徽标：拉 last_ops_sync_ms / last_conv_sync_ms，按时间窗口分绿/黄/橙。 */
-function FreshnessBadge() {
-  const [ms, setMs] = useState<number | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    const fetch_ = async () => {
-      try {
-        const v = await invoke<string | null>("app_setting_get", { key: "last_conv_sync_ms" });
-        if (cancelled) return;
-        setMs(v ? Number(v) : null);
-      } catch { /* 静默 */ }
-    };
-    fetch_();
-    const id = window.setInterval(fetch_, 30_000);
-    return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
-  if (ms == null || ms === 0) {
-    return <span className="freshness-badge freshness-missing" title="尚无同步记录（点击导入会话）">⚪ 未同步</span>;
-  }
-  // Date.now() 是有意的：本组件每 30s 通过父级 setInterval 重渲染，
-  // 每次 render 取最新时间戳显示「X 分钟前」。React 19 的 react-hooks/purity
-  // 默认禁止 render 里的 impure 调用，但对「当前时间显示」类组件是误报。
-  // eslint-disable-next-line react-hooks/purity
-  const ageMs = Date.now() - ms;
-  const min = Math.floor(ageMs / 60_000);
-  const fmt = (n: number) => n < 60 ? `${n} 分钟前` : n < 1440 ? `${Math.floor(n / 60)} 小时前` : `${Math.floor(n / 1440)} 天前`;
-  if (ageMs < 5 * 60_000) {
-    return <span className="freshness-badge freshness-fresh" title={`上次同步：${fmt(min)}`}>🟢 {fmt(min)}</span>;
-  }
-  if (ageMs < 30 * 60_000) {
-    return <span className="freshness-badge freshness-warn" title={`上次同步：${fmt(min)} — 建议点导入重新同步`}>🟡 {fmt(min)}</span>;
-  }
-  return <span className="freshness-badge freshness-stale" title={`上次同步：${fmt(min)} — 数据可能过期，点导入刷新`}>🟠 {fmt(min)}</span>;
-}
-
 /** 底部状态栏已拆为独立组件 ./StatusBar.tsx（自管 1s 刷新，避免整树重渲染）。 */
 
 export default function App() {
-  const [view, setView] = useState<View>(() => {
-    const v = localStorage.getItem("ch-view");
-    return (["overview","cost","security","assets","knowledge","activity","projects","chat"] as const).includes(v as View) ? v as View : "chat";
-  });
+  // 默认始终进入「对话」tab（chat 是主操作页；其他页通过 ⌘1..8 / 侧栏 / ⌘K 跳转）
+  // 之前从 ch-view 持久化恢复，但用户重启 app 时通常想从主操作开始
+  const [view, setView] = useState<View>("chat");
   // Command Palette（⌘K 全局搜索 + 跳转）
   const [cmdOpen, setCmdOpen] = useState(false);
   // 快捷键速查（⌘? 唤起）
@@ -97,7 +68,11 @@ export default function App() {
   // 首次启动引导：未看过时自动显示；走完后通过设置「重新查看新手引导」唤起
   // （round 25：原右下角 ? 浮动按钮移到设置中，避免遮挡主内容）
   const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingSeen());
-  const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "dark");
+  const [theme, setTheme] = useState<"dark"|"light">(() => (localStorage.getItem("ch-theme") as "dark"|"light") || "light");
+  const [textSize, setTextSize] = useState<"sm"|"md"|"lg"|"xl">(() => {
+    const v = localStorage.getItem("ch-text-size");
+    return v === "md" || v === "lg" || v === "xl" ? v : "sm";
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("ch-sidebar") === "1");
   // 侧边栏 / 会话列表 宽度（可拖拽，localStorage 持久化）
   const [sidebarWidth, setSidebarWidth] = useState(() => loadClampedNumber("ch-sidebar-width", 160, 48, 320));
@@ -180,11 +155,8 @@ export default function App() {
   const changeDateFormat = (f: DateFormat) => { setDateFormat(f); saveDateFormat(f); invoke("app_setting_set", { key: "pref_date_format", value: f }).catch(() => {}); };
   const changeTheme = (t: "dark" | "light") => { setTheme(t); invoke("app_setting_set", { key: "pref_theme", value: t }).catch(() => {}); };
 
-  // source panel
-  const [sourcePanel, setSourcePanel] = useState<SourceKey | null>(null);
-  const [sourceSessions, setSourceSessions] = useState<SourceSession[]>([]);
-  const [importing, setImporting] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{done:number;total:number}|null>(null);
+  // 来源面板 + 单 IDE 导入已下线（统一走「增量同步」 + 「从文件导入」）；
+  // 相关 state / SourceSession 类型 / SourcePanel 组件 import 都已清理。
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const detailPanelRef = useRef<ScrollAreaRef>(null);
@@ -207,6 +179,29 @@ export default function App() {
     return () => { un.then((f) => f()); };
   }, []);
   const showError = (e: unknown) => setError(typeof e === "string" ? e : (e as {message?:string}).message ?? String(e));
+
+  /** 把后端 / Tauri 抛出的英文错误翻成简短中文，
+   *  避免在顶栏暴露出 "Cannot read properties of undefined (reading 'invoke')" 这种开发态堆栈。 */
+  function friendlyError(raw: string): string {
+    const lower = raw.toLowerCase();
+    if (lower.includes("reading 'invoke'") || lower.includes("reading \"invoke\"")) {
+      return "桌面运行时未就绪（请在 Tauri 桌面里打开 Webview，或检查应用启动是否完成）";
+    }
+    if (lower.includes("network") || lower.includes("fetch")) {
+      return "网络异常，请检查连接后重试";
+    }
+    if (lower.includes("permission") || lower.includes("denied")) {
+      return "权限不足，请检查文件 / 系统权限";
+    }
+    if (lower.includes("not found") || lower.includes("未找到")) {
+      return "未找到资源（可能已被删除）";
+    }
+    if (lower.includes("数据库") || lower.includes("database") || lower.includes("sql")) {
+      return "数据库异常，建议重试或重启应用";
+    }
+    // 其它错误：截断到 120 字符，避免超长堆栈
+    return raw.length > 120 ? raw.slice(0, 117) + "…" : raw;
+  }
 
   // ── data loading ──
   // （声明需位于下方 effects 之前：避免 effect 引用「未提升的 const」触发 immutability 检查）
@@ -317,6 +312,24 @@ export default function App() {
     void stepToHit(hitNav.hits[next], next);
   };
 
+  // j / k 列表导航（vim 风格）：在 conversations 数组里步进，自动加载详情并滚动到可见
+  const navigateConv = useCallback((dir: 1 | -1 | 0, jump?: "first" | "last") => {
+    if (conversations.length === 0) return;
+    const curIdx = selectedConv ? conversations.findIndex((c) => c.id === selectedConv.id) : -1;
+    let nextIdx: number;
+    if (jump === "first") nextIdx = 0;
+    else if (jump === "last") nextIdx = conversations.length - 1;
+    else nextIdx = Math.max(0, Math.min(conversations.length - 1, curIdx + dir));
+    const next = conversations[nextIdx];
+    if (!next) return;
+    void selectConversation(next);
+    // 滚动列表容器让该行可见
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-conv-row="${CSS.escape(next.id)}"]`) as HTMLElement | null;
+      el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }, [conversations, selectedConv]);
+
   // 退出搜索模式：清分组 + 步进 + 关键词
   const clearSearchMode = () => {
     setSearchGroups(null);
@@ -325,7 +338,24 @@ export default function App() {
   };
 
   // ── effects ──
-  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem("ch-theme", theme); }, [theme]);
+  useEffect(() => {
+    // 主题切换淡入：先加 fading 标记 → 等 220ms 后清掉（让 transition 走完）
+    const html = document.documentElement;
+    html.dataset.theme = theme;
+    html.dataset.themeFading = "1";
+    localStorage.setItem("ch-theme", theme);
+    const t = window.setTimeout(() => { delete html.dataset.themeFading; }, 240);
+    return () => window.clearTimeout(t);
+  }, [theme]);
+
+  useEffect(() => {
+    const html = document.documentElement;
+    html.dataset.textSize = textSize;
+    html.dataset.textSizeFading = "1";
+    localStorage.setItem("ch-text-size", textSize);
+    const t = window.setTimeout(() => { delete html.dataset.textSizeFading; }, 240);
+    return () => window.clearTimeout(t);
+  }, [textSize]);
   useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
   useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
   // Window title 反映当前页（OS 任务栏/活动指示友好）
@@ -413,6 +443,24 @@ export default function App() {
         setHelpOpen((v) => !v);
         return;
       }
+      // ⌘, / Ctrl+, 打开设置（macOS 标准：Preferences 快捷键）
+      if ((e.metaKey || e.ctrlKey) && e.key === "," && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setSettingsOpen((v) => !v);
+        return;
+      }
+      // ⌘D / Ctrl+D 复制当前会话 ID（macOS Finder 风格：⌘D 在列表场景里常用于「duplicate / 复制标识」）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d" && !e.shiftKey && !e.altKey) {
+        if (selectedConv) {
+          e.preventDefault();
+          const id = selectedConv.source_conversation_id || selectedConv.id;
+          void copyToClipboard(id).then((r) => {
+            if (r.ok) showToast(`✓ 已复制会话 ID：${id}`, "info", 1800);
+            else showToast(`✗ 复制失败：${r.error ?? "未知错误"}`, "error", 2500);
+          });
+          return;
+        }
+      }
       // ⌘F / Ctrl+F 焦点搜索框（preventDefault 屏蔽浏览器默认页内查找）
       // 当前在「对话」详情页时让 ConversationDetail 自己处理（详情内搜索），
       // 顶栏搜索框在该场景不存在（P1-C2 双抢焦点）。
@@ -433,7 +481,9 @@ export default function App() {
       // ⌘1..8 直接跳页
       if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
         e.preventDefault();
-        const order: Page[] = ["chat", "overview", "cost", "security", "assets", "knowledge", "activity", "projects"];
+        // ⌘1..8 顺序与侧栏分组展示顺序保持一致：
+        // 对话(1) → 概览(2) → 成本(3) → 安全(4) → 活动(5) → 知识库(6) → 资产(7) → 项目(8)
+        const order: Page[] = ["chat", "overview", "cost", "security", "activity", "knowledge", "assets", "projects"];
         const idx = Number(e.key) - 1;
         if (order[idx]) {
           setView(order[idx]);
@@ -450,10 +500,47 @@ export default function App() {
         stepHits(e.key === "ArrowDown" ? 1 : -1);
         return;
       }
+      // ⌘G / ⌘⇧G：跳到下一处 / 上一处搜索命中（macOS 标准）
+      if (hitNav && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "g") {
+        const tag = (document.activeElement as HTMLElement | null)?.tagName ?? "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        stepHits(e.shiftKey ? -1 : 1);
+        return;
+      }
+      // j / k vim 风格列表导航（仅对话页 + 无浮层 + 无修饰键 + 不在输入框）
+      // 复用 selectConversation 自动加载详情；⌘J / ⌘K 跳到首 / 尾
+      if (view === "chat" && !cmdOpen && !helpOpen && !settingsOpen && !changelogOpen) {
+        const tag = (document.activeElement as HTMLElement | null)?.tagName ?? "";
+        const inField = tag === "INPUT" || tag === "TEXTAREA" || (document.activeElement as HTMLElement | null)?.isContentEditable;
+        if (!inField && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          if (e.key === "j" || e.key === "J") {
+            e.preventDefault();
+            navigateConv(1);
+            return;
+          }
+          if (e.key === "k" || e.key === "K") {
+            e.preventDefault();
+            navigateConv(-1);
+            return;
+          }
+        }
+        if ((e.metaKey || e.ctrlKey) && (e.key === "j" || e.key === "J")) {
+          e.preventDefault();
+          navigateConv(0, "first");
+          return;
+        }
+        if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+          e.preventDefault();
+          navigateConv(0, "last");
+          return;
+        }
+      }
       if (e.key === "Escape") {
         if (helpOpen) setHelpOpen(false);
+        else if (settingsOpen) setSettingsOpen(false);
+        else if (changelogOpen) setChangelogOpen(false);
         else if (cmdOpen) setCmdOpen(false);
-        else if (sourcePanel) setSourcePanel(null);
         else if (searchGroups) clearSearchMode();
       }
     };
@@ -462,7 +549,7 @@ export default function App() {
     // runManualSync 每次渲染重建，加入依赖会让全局 keydown 监听器每渲染重挂一次；
     // 处理器所需的状态已尽数列入，有意省略该函数依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourcePanel, searchGroups, hitNav, helpOpen, cmdOpen, view, selectedConv]);
+  }, [searchGroups, hitNav, helpOpen, cmdOpen, settingsOpen, changelogOpen, view, selectedConv]);
 
   // 筛选/范围变化且不在搜索结果模式时重载列表；searchGroups/loadConversations
   // 加入依赖会导致每次渲染重载（loadConversations 每次渲染重建），有意省略；
@@ -566,18 +653,6 @@ export default function App() {
   // 挂载时拉一次保存搜索列表（数据加载模式，setState 在异步回调里）
   // eslint-disable-next-line react-hooks/set-state-in-effect -- 数据加载 effect：加载完成后才 setState，非同步级联
   useEffect(() => { void loadSavedSearches(); }, []);
-  const saveCurrentSearch = async () => {
-    const q = searchQuery.trim();
-    if (!q) return;
-    const name = window.prompt("给这条搜索起个名字：", q.slice(0, 24));
-    if (name === null) return;
-    if (!name.trim()) { showToast("名称不能为空", "error"); return; }
-    try {
-      await invoke("saved_search_upsert", { name: name.trim(), query: q });
-      showToast("✓ 已保存搜索", "info");
-      await loadSavedSearches();
-    } catch (e) { showError(e); }
-  };
   const deleteSavedSearch = async (id: string) => {
     try {
       await invoke("saved_search_delete", { id });
@@ -621,7 +696,7 @@ export default function App() {
       setKnowledgeEngine(engine);
       const empty = !r.summary && !(r.decisions ?? []).length && !(r.todos ?? []).length
         && !(r.errors ?? []).length && !(r.commands ?? []).length && !(r.files ?? []).length;
-      if (empty) showToast("✨ 本会话未提取到知识要点", "info");
+      if (empty) showToast("本会话未提取到知识要点（摘要/决策/TODO/错误/命令/文件 都为空）", "info");
     } catch (e) {
       // 提取失败不打断浏览：toast 呈现原因（此前弹 error-banner 会被误认为页面异常）
       showToast(`知识提取失败：${typeof e === "string" ? e : (e as { message?: string }).message ?? String(e)}`, "error");
@@ -638,54 +713,10 @@ export default function App() {
       alert(`✓ 导入成功\n消息 ${result.messages} 条 · 完整度 ${result.completeness}`);
     } catch (e) { showError(e); }
   };
+  // ↑ 单 IDE 导入（按 ZCode/Claude/Cursor/MiniMax/Codex 单独 list + 选择性 import）已下线。
+  //   现在导入只有两条入口：「增量同步」一次拉全部 + 「从文件导入」指定文件。
+  //   importAllFromSource / loadSourceSessions / importFromSource 全部移除 —— sourcePanel 状态也清空。
 
-  const loadSourceSessions = async (source: SourceKey) => {
-    setSourcePanel(source); setSourceSessions([]);
-    try {
-      const cmd = { "zcode":"list_zcode_sessions","claude-code":"list_claude_code_sessions","cursor":"list_cursor_sessions","minimax":"list_minimax_sessions","codex":"list_codex_sessions" }[source];
-      setSourceSessions(await invoke<SourceSession[]>(cmd));
-    } catch (e) { showError(e); }
-  };
-
-  const importFromSource = async (sessionId: string) => {
-    // 已导入也允许重导：导入幂等（upsert 覆盖），用于修正历史数据
-    const target = sourceSessions.find((s) => s.session_id === sessionId);
-    const wasImported = target?.imported ?? false;
-    setImporting(true);
-    try {
-      const cmd = { "zcode":"import_from_zcode","claude-code":"import_from_claude_code","cursor":"import_from_cursor","minimax":"import_from_minimax","codex":"import_from_codex" }[sourcePanel!]!;
-      const result = await invoke<ImportResultDto>(cmd, { sessionId });
-      await loadConversations(); setImporting(false); setSourcePanel(null);
-      setSyncResult(`✓ 已同步 · ${result.messages} 条消息已导入`);
-      refreshNewCount();
-      window.setTimeout(() => setSyncResult(null), 15000);
-      alert(`✓ ${wasImported ? "重新导入" : "导入"}成功\n消息 ${result.messages} 条 · 事件 ${result.events} 个 · 完整度 ${result.completeness}`);
-      try {
-        const prov = sourcePanel === "minimax" ? "minimax-code" : sourcePanel;
-        const conv = await invoke<Conversation | null>("get_conversation_by_source", { provider: prov, sourceConversationId: sessionId });
-        if (conv) { setView("chat"); await selectConversation(conv); }
-      } catch { /* 失败静默：后台/可选操作 */ }
-    } catch (e) { setImporting(false); showError(e); }
-  };
-
-  const importAllFromSource = async () => {
-    if (!sourcePanel) return;
-    setImporting(true);
-    const pending = sourceSessions.filter((s) => !s.imported);
-    const cmd = { "zcode":"import_from_zcode","claude-code":"import_from_claude_code","cursor":"import_from_cursor","minimax":"import_from_minimax","codex":"import_from_codex" }[sourcePanel]!;
-    let ok = 0, fail = 0;
-    for (let i = 0; i < pending.length; i++) {
-      setBatchProgress({ done: i, total: pending.length });
-      try { await invoke<ImportResultDto>(cmd, { sessionId: pending[i].session_id }); ok++; } catch { fail++; }
-    }
-    await loadConversations();
-    setImporting(false); setBatchProgress(null); setSourcePanel(null);
-    setSyncResult(`✓ 已同步 · 批量新增 ${ok} 条`);
-    refreshNewCount();
-    window.setTimeout(() => setSyncResult(null), 15000);
-    const skipped = sourceSessions.length - pending.length;
-    alert(`批量增量导入\n新增 ${ok} 条${fail > 0 ? ` · 失败 ${fail} 条` : ""}${skipped > 0 ? ` · 已最新 ${skipped} 条` : ""}`);
-  };
 
   /** 重置后的统一刷新（实际删除由设置弹窗的 reset_range 命令完成）。 */
   const [resetting, setResetting] = useState(false);
@@ -829,15 +860,35 @@ export default function App() {
   // ── render ──
   return (
     <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
-      <nav className="sidebar" style={{ width: sidebarCollapsed ? 48 : sidebarWidth }}>
-        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>
-          {sidebarCollapsed ? "»" : "«"}
+      {/* 无障碍：跳到主内容（Tab 1 可见，其它隐藏） */}
+      <a href="#main-content" className="skip-to-content">跳到主内容</a>
+      <nav className="sidebar" style={{ width: sidebarCollapsed ? 56 : sidebarWidth }}>
+        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}>
+          <Icon name={sidebarCollapsed ? "chevron-right" : "chevron-left"} size={12} />
         </button>
-        {NAV_ITEMS.map(([v, icon, label]) => (
-          <button key={v} className={`nav-item ${view === v ? "active" : ""}`} onClick={() => setView(v)} title={label}>
-            <span className="nav-icon">{icon}</span>
-            {!sidebarCollapsed && <span className="nav-label">{label}</span>}
-          </button>
+        {(["primary", "ops", "library"] as const).map((section, i) => (
+          <div key={section} className="sidebar-section">
+            {!sidebarCollapsed && (
+              <div className="sidebar-section-label">
+                {section === "primary" ? "对话" : section === "ops" ? "治理" : "资料"}
+              </div>
+            )}
+            {i > 0 && <div className="sidebar-divider" />}
+            {NAV_ITEMS.filter((it) => it.section === section).map((it) => (
+              <button
+                key={it.view}
+                className={`nav-item ${view === it.view ? "active" : ""}`}
+                onClick={() => setView(it.view)}
+                title={sidebarCollapsed ? `${it.label} · ${it.shortcut}` : it.label}
+              >
+                <span className="nav-icon"><Icon name={it.icon} size={16} /></span>
+                {!sidebarCollapsed && <>
+                  <span className="nav-label">{it.label}</span>
+                  <span className="nav-shortcut">{it.shortcut}</span>
+                </>}
+              </button>
+            ))}
+          </div>
         ))}
       </nav>
       {!sidebarCollapsed && (
@@ -848,31 +899,63 @@ export default function App() {
         />
       )}
 
-      <div className="app-body">
-        {error && <div className="error-banner" onClick={() => setError(null)}>{error} (点击关闭)</div>}
+      <div className="app-body" id="main-content" tabIndex={-1}>
+        {error && (
+          <div className="error-banner" onClick={() => setError(null)} role="alert">
+            <span className="error-banner-icon"><Icon name="alert" size={14} /></span>
+            <span className="error-banner-text">{friendlyError(error)}</span>
+            <button
+              className="error-banner-retry"
+              onClick={(e) => {
+                e.stopPropagation();
+                setError(null);
+                // 重连核心：刷新会话 + 重置 newCount
+                void loadConversations();
+                refreshNewCount();
+              }}
+              title="重新尝试当前操作"
+            >
+              <Icon name="sync" size={11} /> 重试
+            </button>
+            <button
+              className="error-banner-close"
+              onClick={(e) => { e.stopPropagation(); setError(null); }}
+              title="关闭（点击 banner 任意处也可关闭）"
+              aria-label="关闭错误提示"
+            >
+              <Icon name="close" size={12} />
+            </button>
+          </div>
+        )}
         <ErrorBoundary>
 
         <div className="topbar">
-          <h1>Threadock</h1>
+          <button className="brand" onClick={() => setView("overview")} title="Threadock · 回到概览">
+            <span className="brand-mark"><Icon name="logo" size={14} /></span>
+            <span className="brand-name">Threadock</span>
+            <span className="brand-tag">v1.1.1</span>
+          </button>
           {view === "chat" && (<>
             {syncing ? (
               <span className="sync-status syncing-chip">
-                ⟳ {syncProgress && syncProgress.total > 0
+                <span className="dot" />
+                {syncProgress && syncProgress.total > 0
                   ? `导入中 ${syncProgress.current}/${syncProgress.total}${syncProgress.detail && syncProgress.detail !== "done" ? ` · ${syncProgress.detail}` : ""}`
                   : "数据更新中…"}
                 <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button>
               </span>
-            ) : syncResult && <span className="sync-status done">{syncResult}</span>}
+            ) : syncResult && <span className="sync-status done"><span className="dot" />{syncResult}</span>}
 
             <div className="search-box">
-              <input ref={searchInputRef} type="text" placeholder="搜索所有会话… 支持 provider:/workspace:/type:/status:/file:/model:/after:/before: 前缀"
+              <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
                 value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doSearch()}
                 onFocus={() => setHistoryOpen(true)}
                 onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
-              <button onClick={() => doSearch()}>搜索</button>
-              <button className="kb-copy" title="保存当前搜索条件（可再次一键执行）" disabled={!searchQuery.trim()}
-                onClick={saveCurrentSearch}>☆ 保存</button>
+              <Icon name="search" size={14} className="search-icon" />
+              <div className="search-actions">
+                <button onClick={() => doSearch()}>搜索</button>
+              </div>
               {searchGroups && <button onClick={clearSearchMode}>清除</button>}
               {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchGroups && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
@@ -904,7 +987,7 @@ export default function App() {
               )}
             </div>
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
-              onSelect={(s) => { setImportMenu(false); if (s === "file") importHandler(); else loadSourceSessions(s as SourceKey); }} />
+              onSelect={() => { setImportMenu(false); importHandler(); }} />
           </>)}
           {syncProgress && syncProgress.total > 0 && (
             <div className={`sync-progress ${syncProgress.finished ? "done" : ""}`} title={`${syncProgress.detail} ${syncProgress.current}/${syncProgress.total}`}>
@@ -921,16 +1004,24 @@ export default function App() {
               costLimit={budgetInfo.costLimit} tokenLimit={budgetInfo.tokenLimit}
             />
           )}
-          {/* 数据新鲜度：5 分内绿 / 30 分内黄 / 超期橙（悬停看精确时间） */}
-          <FreshnessBadge />
-          {/* 主题 / 备份 / 命令面板按钮已移至设置面板（避免顶栏拥挤，参考 macOS 设计） */}
-          <button
-            className="settings-toggle"
-            title="快捷键速查 (⌘?)"
-            onClick={() => setHelpOpen(true)}
-            style={{ fontSize: 13 }}
-          >?</button>
-          <button className="settings-toggle" title="设置" onClick={() => setSettingsOpen(true)}>⚙</button>
+          {/* 顶栏右移：原 FreshnessBadge 已下线（导入按钮自带红点提示新内容） */}
+          <div className="topbar-actions">
+            <button
+              className="icon-btn"
+              title="命令面板 (⌘K)"
+              onClick={() => setCmdOpen(true)}
+              aria-label="命令面板"
+            ><Icon name="command" size={15} /></button>
+            <button
+              className="icon-btn"
+              title="快捷键速查 (⌘?)"
+              onClick={() => setHelpOpen(true)}
+              aria-label="快捷键速查"
+            ><Icon name="help" size={15} /></button>
+            <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)} aria-label="设置">
+              <Icon name="settings" size={15} />
+            </button>
+          </div>
         </div>
 
         <Toasts toasts={toastList} onDismiss={dismissToast} />
@@ -993,6 +1084,7 @@ export default function App() {
 
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={changeTheme}
+            textSize={textSize} onTextSizeChange={setTextSize}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
             retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
             notifyOnExceed={notifyOnExceed} onNotifyOnExceedChange={changeNotifyOnExceed}
@@ -1015,13 +1107,6 @@ export default function App() {
               const df = localStorage.getItem("ch-pref-date");
               if (df === "relative" || df === "absolute" || df === "iso") setDateFormat(df);
             }} />
-        )}
-
-        {sourcePanel && (
-          <SourcePanel panel={sourcePanel === "minimax" ? "minimax-code" : sourcePanel}
-            sessions={sourceSessions} importing={importing} progress={batchProgress}
-            onImport={importFromSource} onImportAll={importAllFromSource}
-            onClose={() => setSourcePanel(null)} sourceLabel={sourceLabel} />
         )}
 
         {view === "knowledge" ? (
@@ -1164,30 +1249,30 @@ export default function App() {
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={() => void extractKnowledge()}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
-                : <div className="empty empty-cta">
-                    {!conversations.length && !convsLoading ? (
+                : !conversations.length && !convsLoading ? (
+                  <EmptyState
+                    icon="mailbox"
+                    size="lg"
+                    title="还没有任何会话"
+                    desc={<>把 Cursor / Claude Code / ZCode / Codex 里的历史对话同步进来，统一管理。</>}
+                    action={
                       <>
-                        <div className="empty-icon">📥</div>
-                        <div className="empty-title">还没有任何会话</div>
-                        <div className="empty-hint">
-                          点
-                          <button className="action-btn" style={{ margin: "0 6px" }} onClick={() => setImportMenu(true)}>⬇ 导入会话</button>
-                          把 Cursor / Claude Code / ZCode / Codex 里的历史对话同步进来
-                        </div>
-                        <div className="empty-hint" style={{ marginTop: 8, opacity: 0.7 }}>或按 <kbd>⌘K</kbd> 唤起命令面板</div>
+                        <button className="action-btn primary" onClick={() => setImportMenu(true)}>
+                          <Icon name="sync" size={12} /> 立即同步
+                        </button>
+                        <span className="empty-hint-muted">或按 <kbd>⌘K</kbd> 唤起命令面板</span>
                       </>
-                    ) : (
-                      <>
-                        <div className="empty-icon">💬</div>
-                        <div className="empty-title">选择一条会话查看详情</div>
-                        <div className="empty-hint">
-                          {convsLoading ? "加载中…" : (
-                            <>试试按 <kbd>⌘K</kbd> 搜索会话，或 <kbd>⌘1</kbd> 跳到本视图</>
-                          )}
-                        </div>
-                      </>
-                    )}
-                  </div>}
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon="chat"
+                    size="lg"
+                    state={convsLoading ? "loading" : "default"}
+                    title={convsLoading ? "正在拉取会话列表" : "选择一条会话查看详情"}
+                    desc={convsLoading ? undefined : <>试试按 <kbd>⌘K</kbd> 搜索会话，或 <kbd>⌘1</kbd> 跳到本视图</>}
+                  />
+                )}
               </ScrollArea>
             </div>
           </div>

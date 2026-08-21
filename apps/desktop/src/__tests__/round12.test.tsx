@@ -119,20 +119,12 @@ describe("ConversationList Dropdown 带 label", () => {
   });
 });
 
-describe("App 顶栏精简：删除 theme-toggle / 备份 / ⌘K 按钮", () => {
-  // 通过 conversationList 内部不直接测顶栏，单独测 App.tsx 太重
-  // 这里测：App 顶栏只剩 ? 和 ⚙（具体通过 grep styles 验证类名不被引入）
-  it("App 顶栏不再引用 .theme-toggle / .settings-toggle[title*='备份'] / .settings-toggle[title*='命令面板']", async () => {
+describe("App 顶栏：保留 ⌘K / ? / ⚙（⌘K 是命令面板核心入口，保留）", () => {
+  it("顶栏保留 命令面板 / 快捷键速查 / 设置 三个按钮（macOS 标准）", async () => {
     const src = readSrc(APP_TSX);
-    // theme-toggle 类名应已不出现
-    expect(src.includes('className="theme-toggle"')).toBe(false);
-    // 备份按钮（title 含 "备份"）应已不出现
-    expect(/title="备份[^"]*"/.test(src)).toBe(false);
-    // 命令面板按钮（title 含 "命令面板"）应已不出现
-    expect(/title="命令面板[^"]*"/.test(src)).toBe(false);
-    // 但 ? (help) 和 ⚙ (settings) 应保留
-    expect(src.includes("setHelpOpen")).toBe(true);
-    expect(src.includes("setSettingsOpen")).toBe(true);
+    expect(/title="命令面板[^"]*"/.test(src)).toBe(true);
+    expect(/title="快捷键速查[^"]*"/.test(src)).toBe(true);
+    expect(/title="设置"/.test(src)).toBe(true);
   });
 });
 

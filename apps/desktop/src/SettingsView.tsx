@@ -12,12 +12,14 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { showToast } from "./toast";
 import { formatTime } from "./types";
 import type { LlmConfigView } from "./types";
 import { exportAllSettings, importAllSettings, defaultSettingsFilename } from "./settingsIO";
 import ScrollArea from "./ScrollArea";
 import WorkspaceSection from "./WorkspaceSection";
+import { Icon } from "./Icon";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
 
@@ -65,6 +67,8 @@ type GovernanceView = "overview" | "cost" | "security";
 interface Props {
   theme: "dark" | "light";
   onThemeChange: (t: "dark" | "light") => void;
+  textSize: "sm" | "md" | "lg" | "xl";
+  onTextSizeChange: (s: "sm" | "md" | "lg" | "xl") => void;
   syncIntervalMin: number;
   onSyncIntervalChange: (min: number) => void;
   retentionDays: number;
@@ -106,6 +110,15 @@ function MiniProgress({ p }: { p: { current: number; total: number; detail: stri
   );
 }
 
+/** 在系统默认浏览器里打开 URL（Tauri WebView 的 target=_blank 不工作，必须走 plugin-opener）。 */
+function openExternal(url: string) {
+  openUrl(url).catch((e) => {
+    // 非 Tauri 环境（纯 web dev server）走兜底
+    try { window.open(url, "_blank", "noopener,noreferrer"); }
+    catch { showToast(`✗ 无法打开链接：${String(e)}`, "error", 3000); }
+  });
+}
+
 /** 字节数人性化。 */
 export function formatBytes(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
@@ -128,7 +141,7 @@ export const GOVERNANCE_LABELS: Record<string, string> = {
 };
 
 export default function SettingsView({
-  theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
+  theme, onThemeChange, textSize, onTextSizeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
   onNavigate, onReset, resetting, onClose, onShowChangelog, onShowOnboarding, onReapplyImportedPrefs,
@@ -223,10 +236,34 @@ export default function SettingsView({
           <section className="settings-section">
             <h3>外观</h3>
             <div className="settings-row">
-              <span>主题</span>
+              <span>外观</span>
               <div className="settings-segment">
-                <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>☾ 深色</button>
-                <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>☀ 浅色</button>
+                <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>浅色</button>
+                <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>深色</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>
+                字号
+                <small style={{ display: "block", fontSize: 11, color: "var(--text-faint)", fontWeight: 400, marginTop: 2 }}>
+                  macOS "Larger Text" 体验
+                </small>
+              </span>
+              <div className="text-size-control" role="radiogroup" aria-label="字号">
+                {(["sm", "md", "lg", "xl"] as const).map((s, i) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="radio"
+                    aria-checked={textSize === s}
+                    className={`text-size-btn ${textSize === s ? "active" : ""}`}
+                    onClick={() => onTextSizeChange(s)}
+                    title={["默认 (13.5px)", "稍大 (14.5px)", "大 (15.5px)", "特大 (16.5px)"][i]}
+                  >
+                    <span className="text-size-letter">A</span>
+                    <span className="text-size-letter-size" style={{ fontSize: 8 + i * 1.5 }}>A</span>
+                  </button>
+                ))}
               </div>
             </div>
           </section>
@@ -276,7 +313,7 @@ export default function SettingsView({
               </select>
             </div>
             <div className="settings-hint">
-              手动入口在「⬇ 导入 → 增量同步」；指标采集另有 30 分钟节流（防止重复全量扫描）。
+              手动入口在「同步 → 立即同步全部」；指标采集另有 30 分钟节流（防止重复全量扫描）。
             </div>
             <div className="settings-row">
               <span>上次会话同步</span>
@@ -488,11 +525,11 @@ function AboutSection({
     { name: "vitest", version: "3.2.7", role: "前端测试" },
     { name: "Rust 工具链", version: "stable", role: "后端运行时" },
   ];
-  const links: { label: string; url: string; hint: string }[] = [
-    { label: "📖 项目主页", url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图" },
-    { label: "🐛 报告问题", url: "https://github.com/sunqingguang/threadock/issues", hint: "Bug 反馈与功能建议" },
-    { label: "📝 更新日志", url: "https://github.com/sunqingguang/threadock/releases", hint: "各版本变更说明" },
-    { label: "💬 讨论", url: "https://github.com/sunqingguang/threadock/discussions", hint: "使用交流与最佳实践" },
+  const links: { label: string; url: string; hint: string; icon: "globe" | "bug" | "history" | "chat" }[] = [
+    { label: "项目主页", url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图", icon: "globe" },
+    { label: "报告问题", url: "https://github.com/sunqingguang/threadock/issues", hint: "Bug 反馈与功能建议", icon: "bug" },
+    { label: "更新日志", url: "https://github.com/sunqingguang/threadock/releases", hint: "各版本变更说明", icon: "history" },
+    { label: "讨论", url: "https://github.com/sunqingguang/threadock/discussions", hint: "使用交流与最佳实践", icon: "chat" },
   ];
   return (
     <section className="settings-section">
@@ -522,9 +559,17 @@ function AboutSection({
       <div className="settings-hint">相关链接：</div>
       <div className="about-links">
         {links.map((l) => (
-          <a key={l.url} className="about-link" href={l.url} target="_blank" rel="noreferrer" title={l.hint}>
-            {l.label}
-          </a>
+          <button
+            key={l.url}
+            type="button"
+            className="about-link"
+            onClick={() => openExternal(l.url)}
+            title={l.hint}
+          >
+            <Icon name={l.icon} size={12} />
+            <span>{l.label}</span>
+            <Icon name="external" size={10} className="about-link-ext" />
+          </button>
         ))}
       </div>
       <div className="settings-row" style={{ marginTop: 8 }}>

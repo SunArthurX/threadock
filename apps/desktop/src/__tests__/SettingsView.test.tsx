@@ -24,6 +24,8 @@ import SettingsView, { RESET_CONFIRM_TEXT } from "../SettingsView";
 const base = {
   theme: "dark" as const,
   onThemeChange: vi.fn(),
+  textSize: "sm" as const,
+  onTextSizeChange: vi.fn(),
   syncIntervalMin: 10,
   onSyncIntervalChange: vi.fn(),
   retentionDays: 0,
@@ -48,7 +50,7 @@ const openSettings = () => render(<SettingsView {...base} />);
 describe("SettingsView 外观与同步", () => {
   it("主题切换按钮触发回调", () => {
     openSettings();
-    fireEvent.click(screen.getByText("☀ 浅色"));
+    fireEvent.click(screen.getByText("浅色"));
     expect(base.onThemeChange).toHaveBeenCalledWith("light");
   });
 
