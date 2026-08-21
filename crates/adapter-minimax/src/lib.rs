@@ -18,8 +18,8 @@
 //! - `discover_sessions`：列出所有会话（按 `updated_at_ms` 降序）
 //! - `parse_session`：读取单条会话的所有消息行，解析为 `RawConversation`
 
-use ch_domain::{Provider, Role};
-use ch_normalization::{RawConversation, RawMessage};
+use ch_domain::{EventType, Provider, Role};
+use ch_normalization::{RawConversation, RawEvent, RawMessage};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use thiserror::Error;
@@ -260,6 +260,7 @@ pub fn parse_session(
     })?;
 
     let mut messages = Vec::new();
+    let mut events = Vec::new();
     for row in rows {
         let (msg_id, role_str, created_at_ms, data_json) = row?;
         let data: serde_json::Value = serde_json::from_str(&data_json).unwrap_or_default();
@@ -291,10 +292,12 @@ pub fn parse_session(
                 role,
                 text: Some(text),
                 content_json: None,
-                source_message_id: Some(msg_id),
+                source_message_id: Some(msg_id.clone()),
                 created_at,
             });
         }
+
+        events.extend(tool_calls_to_events(data.get("tool_calls"), created_at));
     }
 
     if messages.is_empty() {
@@ -308,9 +311,113 @@ pub fn parse_session(
         model: Some(agent_name.to_string()),
         started_at: created_at_ms,
         messages,
-        events: Vec::new(),
+        events,
         source_parent_id,
     })
+}
+
+/// tool_calls[] → 事件（真实形态实测：{tool_name, tool_call_id,
+/// tool_call_status, tool_call_args(JSON 字符串), tool_call_result_data(JSON 字符串)}）。
+fn tool_calls_to_events(
+    calls: Option<&serde_json::Value>,
+    created_at: Option<time::OffsetDateTime>,
+) -> Vec<RawEvent> {
+    let mut events = Vec::new();
+    let Some(calls) = calls.and_then(|v| v.as_array()) else {
+        return events;
+    };
+    for call in calls {
+        let tool_name = call
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tool");
+        let args: serde_json::Value = call
+            .get("tool_call_args")
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(serde_json::Value::Null);
+        let arg = |k: &str| args.get(k).and_then(|v| v.as_str());
+        let mut payload = serde_json::json!({
+            "tool": tool_name,
+            "args": args,
+        });
+        // 结果：{"content":[{"type":"text","text":…}]}（JSON 字符串）
+        if let Some(result) = call
+            .get("tool_call_result_data")
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        {
+            let text = result
+                .get("content")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|i| i.get("text").and_then(|t| t.as_str()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            payload["output"] = serde_json::json!(truncate_chars(&text, 4096));
+        }
+        let completed = call
+            .get("tool_call_status")
+            .and_then(serde_json::Value::as_i64)
+            == Some(2);
+        let (event_type, summary) = match tool_name {
+            "bash" | "shell" => {
+                let cmd = arg("command").unwrap_or("");
+                let s = if cmd.is_empty() {
+                    "bash".to_string()
+                } else {
+                    truncate_chars(cmd.lines().next().unwrap_or("").trim(), 120)
+                };
+                (
+                    if completed {
+                        EventType::CommandCompleted
+                    } else {
+                        EventType::CommandStarted
+                    },
+                    s,
+                )
+            }
+            "read" => (EventType::FileRead, file_summary("读取", arg("path"))),
+            "write" => (EventType::FileCreated, file_summary("写入", arg("path"))),
+            "edit" | "apply" => (EventType::FileUpdated, file_summary("修改", arg("path"))),
+            _ => (EventType::ToolCallStarted, format!("工具 {tool_name}")),
+        };
+        events.push(RawEvent {
+            event_type,
+            summary: Some(summary),
+            payload_json: Some(payload),
+            source_event_id: call
+                .get("tool_call_id")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            created_at,
+        });
+    }
+    events
+}
+
+/// `读取 main.rs`（路径取 basename，防超长）。
+fn file_summary(verb: &str, path: Option<&str>) -> String {
+    match path {
+        Some(p) if !p.is_empty() => {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            format!("{verb} {}", truncate_chars(name, 80))
+        }
+        _ => verb.to_string(),
+    }
+}
+
+/// 按字符截断（中文安全），超长加省略号。
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max).collect();
+        format!("{cut}…")
+    }
 }
 
 /// 清理 `MiniMax` 消息正文里的装饰标签（如 `<greeting-message />`、`<done />`）。
@@ -479,6 +586,72 @@ mod tests {
             .contains("快速排序"));
         assert!(raw.started_at.is_some());
         assert!(raw.messages[0].created_at.is_some());
+    }
+
+    #[test]
+    fn parse_extracts_tool_calls_as_events() {
+        // 真实形态（2026-08 实测）：assistant 消息带 tool_calls[]，含
+        // args（JSON 字符串）与 result_data（JSON 字符串）
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = make_test_db(dir.path());
+        let conn = Connection::open(&db).expect("database connection failed");
+        let args = serde_json::json!({
+            "command": "printf 'Prompt entries: '; rg -c '^([0-9]+)\\\\.' prompts.md\nfind png -name '*.png' | wc -l"
+        }).to_string();
+        let result = serde_json::json!({
+            "content": [{"type": "text", "text": "Prompt entries: 520\nPNG count: 520"}]
+        })
+        .to_string();
+        let m = serde_json::json!({
+            "msg_id": "msg-3",
+            "timestamp": 1_784_560_920_000_i64,
+            "role": "assistant",
+            "msg_type": 2,
+            "msg_content": "",
+            "tool_calls": [
+                {"tool_name": "bash", "tool_call_id": "call_1", "tool_call_status": 2,
+                 "tool_call_args": args, "tool_call_result_data": result},
+                {"tool_name": "read", "tool_call_id": "call_2", "tool_call_status": 2,
+                 "tool_call_args": "{\"path\":\"/tmp/分布式事务.md\"}",
+                 "tool_call_result_data": "{\"content\":[{\"type\":\"text\",\"text\":\"     1→# 分布式事务\"}]}"},
+                {"tool_name": "edit", "tool_call_id": "call_3", "tool_call_status": 1,
+                 "tool_call_args": "{\"path\":\"/tmp/a.rs\"}"}
+            ]
+        });
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('mvs_test1', 'msg-3', 'assistant', 1784560920000, ?1)",
+            params![m.to_string()],
+        )
+        .expect("unexpected None");
+        drop(conn);
+
+        let raw = parse_session(&db, "mvs_test1").expect("parse failed");
+        assert_eq!(raw.events.len(), 3, "三个 tool_calls 应各成一个事件");
+        let bash = &raw.events[0];
+        assert_eq!(bash.event_type, EventType::CommandCompleted);
+        assert!(bash
+            .summary
+            .as_deref()
+            .is_some_and(|s| s.starts_with("printf 'Prompt entries")));
+        assert!(bash
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("output"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("520")));
+        assert_eq!(raw.events[1].event_type, EventType::FileRead);
+        assert!(raw.events[1]
+            .summary
+            .as_deref()
+            .is_some_and(|s| s.contains("分布式事务.md")));
+        // status=1（未完成）的 edit → FileUpdated（无输出）
+        assert_eq!(raw.events[2].event_type, EventType::FileUpdated);
+        assert!(raw.events[2]
+            .payload_json
+            .as_ref()
+            .is_some_and(|p| p.get("output").is_none()));
+        assert_eq!(raw.events[0].source_event_id.as_deref(), Some("call_1"));
     }
 
     #[test]

@@ -4,6 +4,31 @@
 
 AI 知识提取（大模型引擎）+ API Key 本地加密存储。
 
+### Fixed
+- **Codex 执行事件「获取不了」**（用户实例：西游记立绘 /goal 会话）：新版
+  Codex 把 shell/生图/看图/计划更新全封装为 `custom_tool_call` 的 JS 工具桥
+  （命令在 `input` 字段的 `tools.xxx({...})` 里，`arguments` 恒空）——新增
+  `js_bridge` 模块解析 JS（括号配平 + 无引号键扫描 + 转义还原），命令/生图/
+  看图/补丁/计划/目标映射为可读事件（`printf 'Prompt entries…`、`生成图片…`、
+  `查看图片 …`）；`*_output` 按 `call_id` 配对合并输出（截断 4KB）；
+  `wait` 轮询与 `get_goal` 降噪。真实会话验证：683 条噪音/空事件 →
+  474 条可读事件
+- **ZCode 事件采集为零（schema 漂移）**：真实 part 类型已变为 `tool`
+  （`state.{status,input,output,time}`），Adapter 仍按旧 `tool_use`/`command`
+  匹配——新增 `tool` 处理（Bash→命令、Read/Write/Edit→文件事件，输出并入
+  payload）。真实库验证：0 → 465 条事件；旧类型保留兼容
+- **MiniMax 事件采集为零**：`tool_calls[]`（含 `tool_call_args` 与
+  `tool_call_result_data`）完全未解析——现映射为命令/文件事件并带输出。
+  真实库验证：0 → 747 条事件
+- **Claude Code 事件摘要无内容**：`Tool: Bash`/`Tool result` → 命令本身、
+  `读取/写入/修改 文件名`、结果内容预览
+- **事件→消息归属错乱**：消息/事件序号是两条独立流（曾按序号跨流比较），
+  改为按时间戳归属；Claude Code/ZCode 事件补父消息时间戳；无时间戳事件
+  归最后一条消息（近似）
+- 测试：js_bridge 9 项矩阵 + 四家 Adapter 新 schema 用例 + 命令层集成旅程
+  （解析→入库→详情→提取）+ 归属回归（独立序号流不再错挂）；前端 377 /
+  桌面 33 / Adapter 43 项全过
+
 ### Added
 - **执行事件挂到对应消息下 + 详情展开**：事件按 `sequence_number` 归属到
   「序号 ≤ 事件序号的最大消息」，以紧凑行挂在消息气泡下（≤4 条，超出折叠

@@ -184,6 +184,9 @@ mod e2e_journeys;
 mod llm_journeys;
 
 #[cfg(test)]
+mod adapter_journeys;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
