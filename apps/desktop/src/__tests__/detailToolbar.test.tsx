@@ -1,5 +1,6 @@
 // 详情页按钮清单 / provider chips 显隐
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationDetail from "../ConversationDetail";
 import ConversationList from "../ConversationList";
@@ -202,5 +203,62 @@ describe("执行事件挂到对应消息下 + 详情展开", () => {
     expect(container.querySelector(".msg-events-label")?.textContent).toContain("会话前置事件");
     expect(container.querySelectorAll(".msg-event-row").length).toBe(2);
     expect(container.querySelector("#msg-m1")!.querySelectorAll(".msg-event-row").length).toBe(0);
+  });
+});
+
+describe("快速上/下浮动按钮", () => {
+  /** 伪造滚动容器：jsdom 无布局，手动喂 scrollHeight/clientHeight/scrollTop。 */
+  function fakeScrollRef() {
+    const listeners: ((e: unknown) => void)[] = [];
+    const el = {
+      scrollHeight: 3000, clientHeight: 600, scrollTop: 0,
+      addEventListener: (_t: string, fn: (e: unknown) => void) => { listeners.push(fn); },
+      removeEventListener: () => {},
+      scrollTo: vi.fn(),
+    } as unknown as HTMLElement;
+    const ref = { current: { inner: el } } as unknown as RefObject<
+      { inner: HTMLElement | null } | HTMLElement | null
+    >;
+    const setScroll = (top: number) => {
+      el.scrollTop = top;
+      listeners.forEach((fn) => fn({}));
+    };
+    return { ref, el, setScroll };
+  }
+
+  const manyMsgs = Array.from({ length: 30 }, (_, i) => ({
+    id: `m${i}`, role: i % 2 ? "assistant" : "user",
+    content_text: `消息 ${i}`, sequence_number: i + 1, created_at_ms: i + 1,
+  }));
+
+  it("顶部时两按钮都不显示；中部仅 ↑；底部仅 ↓", async () => {
+    const { ref, setScroll } = fakeScrollRef();
+    const { container, rerender } = render(
+      <ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />,
+    );
+    // 初始 scrollTop=0：都在顶部，两个按钮都不出现
+    expect(container.querySelector(".jump-top-btn")).toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).not.toBeNull();
+    // 滚到中部（scrollTop=1500，距底 900、距顶 1500）：↑ 出现、↓ 仍在
+    setScroll(1500);
+    rerender(<ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />);
+    expect(container.querySelector(".jump-top-btn")).not.toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).not.toBeNull();
+    // 滚到底部（scrollTop=2400，距底 0）：↑ 在、↓ 消失
+    setScroll(2400);
+    rerender(<ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />);
+    expect(container.querySelector(".jump-top-btn")).not.toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).toBeNull();
+  });
+
+  it("点 ↑ 平滑回到顶部", async () => {
+    const { ref, el, setScroll } = fakeScrollRef();
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />,
+    );
+    setScroll(1500);
+    await waitFor(() => expect(container.querySelector(".jump-top-btn")).not.toBeNull());
+    fireEvent.click(container.querySelector(".jump-top-btn")!);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 });

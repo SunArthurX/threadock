@@ -3562,6 +3562,8 @@ button {
 /* 滚到底部浮动按钮（详情页） */
 .jump-bottom-btn { position: sticky; bottom: 12px; margin: 10px auto 4px; display: block; width: 36px; height: 36px; border-radius: 50%; background: var(--accent, #4f8cff); color: #fff; border: none; font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 5; }
 .jump-bottom-btn:hover { filter: brightness(1.15); transform: translateY(-1px); }
+.jump-top-btn { position: sticky; top: 8px; margin: 0 auto 6px; display: block; width: 36px; height: 36px; border-radius: 50%; background: var(--accent, #4f8cff); color: #fff; border: none; font-size: 18px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 5; }
+.jump-top-btn:hover { filter: brightness(1.15); transform: translateY(1px); }
 
 /* BarChart 横向网格线 */
 .barchart { position: relative; }

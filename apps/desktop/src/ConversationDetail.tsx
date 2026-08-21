@@ -79,6 +79,8 @@ export default function ConversationDetail({
 
   // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
   const [showJumpBottom, setShowJumpBottom] = useState(false);
+  // 「回到顶部」浮动按钮：用户向下滚超过 400px 时显示
+  const [showJumpTop, setShowJumpTop] = useState(false);
 
   // ── 原始视图 / 来源应用 / 恢复命令（plan P2-3，v1.0.0）──────────────
   const [rawView, setRawView] = useState(false);
@@ -127,8 +129,9 @@ export default function ConversationDetail({
     const el = scrollEl();
     if (!el) return;
     const onScroll = () => {
-      const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
-      setShowJumpBottom(dist > 200);
+      const distBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+      setShowJumpBottom(distBottom > 200);
+      setShowJumpTop(el.scrollTop > 400);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
@@ -138,6 +141,11 @@ export default function ConversationDetail({
     const el = scrollEl();
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+  const jumpToTop = () => {
+    const el = scrollEl();
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // ⌘F / Ctrl+F 唤起消息内搜索
@@ -452,6 +460,10 @@ export default function ConversationDetail({
         <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
+      {/* 回到顶部：向下滚超过 400px 出现（与底部 ↓ 按钮对称） */}
+      {showJumpTop && (
+        <button className="jump-top-btn" onClick={jumpToTop} title="回到顶部">↑</button>
+      )}
       {/* 原始视图（plan P2-3）：Raw Store 未标准化归档，只读展示 */}
       {rawView && !loading && (
         rawContent === null
