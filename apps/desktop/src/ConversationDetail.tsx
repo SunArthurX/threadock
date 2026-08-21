@@ -118,6 +118,18 @@ export default function ConversationDetail({
       else showToast(r.error ?? "复制失败", "error");
     } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
   };
+  /** 直接在系统终端新窗口执行恢复命令；失败/不支持时回退为复制。 */
+  const resumeInTerminal = async () => {
+    try {
+      const cmd = await invoke<string | null>("resume_in_terminal", { conversationId: conv.id });
+      if (cmd == null) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
+      showToast(`✓ 已在终端打开：${cmd}`, "info");
+    } catch (e) {
+      // 打开失败（无终端/osascript 失败等）→ 回退复制，用户可手动粘贴
+      showToast(`终端打开失败（${typeof e === "string" ? e : String(e)}），已改为复制`, "error");
+      await copyResumeCommand();
+    }
+  };
 
   /** 解析父级滚动容器：ScrollArea 的 ref 可能是 { inner } 包装，也可能是原生 HTMLElement。 */
   const scrollEl = useCallback((): HTMLElement | null => {
@@ -353,8 +365,13 @@ export default function ConversationDetail({
         <button className="action-btn" onClick={openSourceApp} title="打开该会话的来源应用（Cursor / ZCode / MiniMax Code）">
           ↗ 来源应用
         </button>
-        <button className="action-btn" onClick={copyResumeCommand} title="复制「恢复原会话」命令（claude-code / codex CLI 来源支持）">
-          ⏯ 恢复命令
+        <button
+          className="action-btn"
+          onClick={() => void resumeInTerminal()}
+          onContextMenu={(e) => { e.preventDefault(); void copyResumeCommand(); }}
+          title="在系统终端新窗口直接执行恢复命令（仅 claude-code / codex CLI 来源；右击复制命令文本）"
+        >
+          ⏯ 恢复会话
         </button>
         <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
           {loading ? "提取中…" : "✨ 知识"}

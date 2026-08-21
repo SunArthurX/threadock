@@ -29,6 +29,14 @@ AI 知识提取（大模型引擎）+ API Key 本地加密存储。
   （解析→入库→详情→提取）+ 归属回归（独立序号流不再错挂）；前端 377 /
   桌面 33 / Adapter 43 项全过
 
+### Added
+- **恢复会话直接在终端打开**：详情页「⏯ 恢复命令」升级为「⏯ 恢复会话」——
+  点击直接在系统终端新窗口执行恢复命令（macOS Terminal via osascript /
+  Windows cmd / Linux gnome-terminal·konsole·xterm 逐个尝试）；终端打开
+  失败自动回退为复制；右键仍可复制命令文本。命令在后端按会话来源构造，
+  前端不传自由文本（避免任意命令执行面）。真实冒烟：osascript 打开
+  Terminal 执行测试命令通过
+
 ### Fixed
 - **重置数据后概览/成本需手动同步**：`reset_range` 会删除指标表
   （usage_records/tool_call_records），但重置后的自动重导只恢复会话、

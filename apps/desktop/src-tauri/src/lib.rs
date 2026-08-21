@@ -170,6 +170,7 @@ pub fn run() {
             conversation_raw,
             open_source_app,
             resume_command,
+            resume_in_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");
