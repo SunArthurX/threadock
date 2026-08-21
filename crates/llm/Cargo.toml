@@ -1,0 +1,24 @@
+[package]
+name = "ch-llm"
+description = "Conversation Hub LLM 客户端与密钥密封（OpenAI 兼容端点 + XChaCha20-Poly1305 静态加密，plan §13.5/§14.3）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+# 密封（与 backup 同栈：XChaCha20-Poly1305）
+chacha20poly1305.workspace = true
+# 主密钥内存清零
+zeroize = "1"
+# 密文/密钥 base64 编码
+base64 = "0.22"
+# HTTP 客户端（rustls，无 openssl 依赖）
+ureq = { version = "2", features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"

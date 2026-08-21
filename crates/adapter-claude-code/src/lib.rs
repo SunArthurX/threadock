@@ -187,7 +187,7 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                         }
                     }
 
-                    // 提取 tool_use 作为事件
+                    // 提取 tool_use 作为事件（摘要带实际命令/路径，而非只有工具名）
                     if let Some(arr) = content_val.and_then(|c| c.as_array()) {
                         for item in arr {
                             let item_type =
@@ -198,27 +198,29 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                                         .get("name")
                                         .and_then(|n| n.as_str())
                                         .unwrap_or("unknown");
+                                    let (event_type, summary) =
+                                        summarize_tool_use(tool_name, item.get("input"));
                                     events.push(RawEvent {
-                                        event_type: EventType::ToolCallStarted,
-                                        summary: Some(format!("Tool: {tool_name}")),
+                                        event_type,
+                                        summary,
                                         payload_json: Some(item.clone()),
                                         source_event_id: item
                                             .get("id")
                                             .and_then(|i| i.as_str())
                                             .map(String::from),
-                                        created_at: None,
+                                        created_at: msg_ts,
                                     });
                                 }
                                 "tool_result" => {
                                     events.push(RawEvent {
                                         event_type: EventType::ToolCallCompleted,
-                                        summary: Some("Tool result".into()),
+                                        summary: Some(summarize_tool_result(item)),
                                         payload_json: Some(item.clone()),
                                         source_event_id: item
                                             .get("tool_use_id")
                                             .and_then(|i| i.as_str())
                                             .map(String::from),
-                                        created_at: None,
+                                        created_at: msg_ts,
                                     });
                                 }
                                 _ => {}
@@ -273,6 +275,95 @@ fn parse_iso_timestamp(s: &str) -> Option<time::OffsetDateTime> {
 }
 
 /// 从 content 字段提取纯文本。
+/// tool_use →（事件类型，带内容的摘要）：Bash 显示命令、Read/Write/Edit 显示
+/// 路径、TodoWrite 标注清单更新，其余显示工具名。
+fn summarize_tool_use(
+    tool_name: &str,
+    input: Option<&serde_json::Value>,
+) -> (EventType, Option<String>) {
+    let input = input.unwrap_or(&serde_json::Value::Null);
+    let arg = |k: &str| input.get(k).and_then(|v| v.as_str());
+    match tool_name {
+        "Bash" => {
+            let cmd = arg("command").unwrap_or("");
+            let summary = if cmd.is_empty() {
+                "Bash".to_string()
+            } else {
+                truncate_chars(cmd.lines().next().unwrap_or("").trim(), 120)
+            };
+            (EventType::CommandStarted, Some(summary))
+        }
+        "Read" => (
+            EventType::FileRead,
+            Some(file_summary("读取", arg("file_path"))),
+        ),
+        "Write" => (
+            EventType::FileCreated,
+            Some(file_summary("写入", arg("file_path"))),
+        ),
+        "Edit" | "MultiEdit" | "NotebookEdit" => (
+            EventType::FileUpdated,
+            Some(file_summary("修改", arg("file_path"))),
+        ),
+        "Grep" | "Glob" => (
+            EventType::ToolCallStarted,
+            Some(format!("搜索 {}", arg("pattern").unwrap_or(""))),
+        ),
+        "TodoWrite" => (EventType::ToolCallStarted, Some("更新 TODO".into())),
+        _ => (
+            EventType::ToolCallStarted,
+            Some(format!("工具 {tool_name}")),
+        ),
+    }
+}
+
+/// `读取 src/main.rs`（路径取 basename，防超长）。
+fn file_summary(verb: &str, path: Option<&str>) -> String {
+    match path {
+        Some(p) if !p.is_empty() => {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            format!("{verb} {}", truncate_chars(name, 80))
+        }
+        _ => verb.to_string(),
+    }
+}
+
+/// tool_result → 内容预览（content 可能是字符串或 [{type:text,text}] 数组）。
+fn summarize_tool_result(item: &serde_json::Value) -> String {
+    let content = item.get("content").unwrap_or(&serde_json::Value::Null);
+    let text = match content {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(arr) => arr
+            .iter()
+            .filter_map(|c| c.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => String::new(),
+    };
+    let t = text.trim();
+    if t.is_empty() {
+        "工具结果（无文本）".to_string()
+    } else {
+        let one_line: String = t
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        truncate_chars(&one_line, 100)
+    }
+}
+
+/// 按字符截断（中文安全），超长加省略号。
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max).collect();
+        format!("{cut}…")
+    }
+}
+
 /// content 可能是 string，也可能是 [{type:text, text:...}, {`type:tool_use`, ...}]。
 /// 过滤 thinking 类型（内部思考，不是正文）。
 fn extract_text(content: Option<&serde_json::Value>) -> Option<String> {
@@ -349,14 +440,56 @@ mod tests {
     fn extracts_tool_use_and_result_as_events() {
         let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
         assert!(!raw.events.is_empty());
-        assert!(raw
+        // Bash 的摘要应是命令本身（而非 "Tool: Bash"）
+        let bash = raw
             .events
             .iter()
-            .any(|e| e.summary.as_deref().unwrap_or("").contains("Bash")));
+            .find(|e| e.event_type == EventType::CommandStarted)
+            .expect("Bash → CommandStarted");
+        assert_eq!(bash.summary.as_deref(), Some("ls"));
         assert!(raw
             .events
             .iter()
             .any(|e| e.event_type == EventType::ToolCallCompleted));
+    }
+
+    #[test]
+    fn tool_summaries_carry_content() {
+        let assistant_tools = r#"{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a/b/Config.kt"}},{"type":"tool_use","id":"t2","name":"Edit","input":{"file_path":"/a/b/Main.rs","old_string":"x"}},{"type":"tool_use","id":"t3","name":"TodoWrite","input":{"todos":[]}},{"type":"tool_use","id":"t4","name":"mcp_server__tool","input":{"k":"v"}},{"type":"tool_use","id":"t5","name":"Bash","input":{"command":"cargo build\n&& cargo test"}}]}}"#;
+        let result_line = r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t5","content":"   Compiling x\n Finished dev"}]}}"#;
+        let user_line = r#"{"type":"user","message":{"role":"user","content":"go"}}"#;
+        let raw = parse_str(&[user_line, assistant_tools, result_line].join("\n"), "s")
+            .expect("parse failed");
+        let find = |id: &str| {
+            raw.events
+                .iter()
+                .find(|e| e.source_event_id.as_deref() == Some(id))
+                .unwrap_or_else(|| panic!("event {id} missing"))
+        };
+        assert_eq!(find("t1").event_type, EventType::FileRead);
+        assert_eq!(find("t1").summary.as_deref(), Some("读取 Config.kt"));
+        assert_eq!(find("t2").summary.as_deref(), Some("修改 Main.rs"));
+        assert_eq!(find("t3").summary.as_deref(), Some("更新 TODO"));
+        assert!(find("t4")
+            .summary
+            .as_deref()
+            .is_some_and(|s| s.contains("mcp_server__tool")));
+        // 多行命令取首行
+        assert_eq!(find("t5").summary.as_deref(), Some("cargo build"));
+        // 结果预览：压缩空白（同一 t5 键，按事件类型区分调用与结果）
+        let result = raw
+            .events
+            .iter()
+            .find(|e| {
+                e.source_event_id.as_deref() == Some("t5")
+                    && e.event_type == EventType::ToolCallCompleted
+            })
+            .expect("result event");
+        assert!(result
+            .summary
+            .as_deref()
+            .expect("unexpected None")
+            .contains("Compiling x"));
     }
 
     #[test]

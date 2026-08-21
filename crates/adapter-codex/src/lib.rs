@@ -9,17 +9,30 @@
 //! - `response_item`：`payload.type`：
 //!   - `message`（`role=user` → `content[].input_text`；
 //!     `role=assistant` → `content[].output_text`）
-//!   - `function_call`（`name`/`arguments`）→ 工具调用事件
-//! - `event_msg`：`payload.type=token_count` 的
-//!   `info.total_token_usage` 为累计用量（ops 数据，由 ch-ops-metrics 消费）
+//!   - `function_call`（旧式：`name`/`arguments` JSON）→ 命令/工具事件
+//!   - `custom_tool_call`（新式 JS 工具桥：命令内容在 `input` 字段的
+//!     `tools.xxx({...})` JS 代码里，`arguments` 恒空）→ 见 [`js_bridge`]
+//!   - `function_call_output` / `custom_tool_call_output`：按 `call_id`
+//!     与调用配对，把执行输出合并进对应事件的 payload
+//! - `event_msg`：`payload.type=token_count` 的 `info.total_token_usage`
+//!   为累计用量（ops 数据，由 ch-ops-metrics 消费）
+//!
+//! ## 降噪
+//!
+//! - `name=wait` 的轮询调用（等生图/长任务的空转）不产生事件；
+//! - `get_goal` 等纯读取跳过。
 //!
 //! ## 能力
 //!
 //! - `discover_sessions`：列出 sessions/ 与 `archived_sessions`/ 下所有 .jsonl
 //! - `parse_session`：读取单条会话 → RawConversation（消息 + 工具事件 + 时间戳）
 
+pub mod js_bridge;
+
 use ch_domain::{EventType, Provider, Role};
 use ch_normalization::{RawConversation, RawEvent, RawMessage};
+use js_bridge::{extract_js_tool_calls, output_to_text, JsToolCall};
+use std::collections::HashMap;
 use std::path::Path;
 use thiserror::Error;
 
@@ -156,6 +169,8 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
     let mut first_ts: Option<time::OffsetDateTime> = None;
     let mut messages = Vec::new();
     let mut events = Vec::new();
+    // call_id → 该调用产生的事件下标（输出到达时合并 payload）
+    let mut pending_outputs: HashMap<String, Vec<usize>> = HashMap::new();
     let mut item_seq: i64 = 0;
 
     // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死）
@@ -243,20 +258,79 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                             .get("name")
                             .and_then(|v| v.as_str())
                             .unwrap_or("tool");
-                        let args = payload
-                            .get("arguments")
+                        // 降噪：wait 轮询（等生图/长任务的空转）不产生事件
+                        if name == "wait" {
+                            continue;
+                        }
+                        // 新式 JS 工具桥：命令在 input 的 tools.xxx({...}) 里；
+                        // 旧式 function_call：arguments 为 JSON 字符串
+                        let input_text = payload
+                            .get("input")
                             .and_then(|v| v.as_str())
+                            .or_else(|| payload.get("arguments").and_then(|v| v.as_str()))
                             .unwrap_or("");
-                        events.push(RawEvent {
-                            event_type: EventType::ToolCallStarted,
-                            summary: Some(format!("Codex: {name}")),
-                            payload_json: Some(serde_json::json!({
-                                "tool": name,
-                                "arguments": args,
-                            })),
-                            source_event_id: Some(format!("call-{item_seq}")),
-                            created_at: ts,
-                        });
+                        let calls: Vec<JsToolCall> = if input_text.contains("tools.") {
+                            extract_js_tool_calls(input_text)
+                        } else {
+                            // 旧式：包一层当单调用，参数按 JSON 尝试解析
+                            let args = serde_json::from_str::<serde_json::Value>(input_text)
+                                .unwrap_or(serde_json::Value::Null);
+                            vec![JsToolCall {
+                                tool: name.to_string(),
+                                args,
+                            }]
+                        };
+                        let call_id = payload
+                            .get("call_id")
+                            .and_then(|v| v.as_str())
+                            .map(std::string::ToString::to_string);
+                        for call in calls {
+                            if let Some((event_type, summary, mut payload_json)) =
+                                event_for_js_call(&call)
+                            {
+                                payload_json["tool"] = serde_json::json!(call.tool);
+                                let idx = events.len();
+                                events.push(RawEvent {
+                                    event_type,
+                                    summary: Some(summary),
+                                    payload_json: Some(payload_json),
+                                    source_event_id: Some(format!("call-{item_seq}-{idx}")),
+                                    created_at: ts,
+                                });
+                                // call_id → 事件下标：输出到达时合并 payload 并完结
+                                if let Some(id) = &call_id {
+                                    pending_outputs.entry(id.clone()).or_default().push(idx);
+                                }
+                            }
+                        }
+                    }
+                    "function_call_output" | "custom_tool_call_output" => {
+                        // 与调用按 call_id 配对：输出并入对应事件 payload；
+                        // 命令类事件升格为 CommandCompleted
+                        if let Some(id) = payload.get("call_id").and_then(|v| v.as_str()) {
+                            let output = output_to_text(payload.get("output").unwrap_or(
+                                payload.get("result").unwrap_or(&serde_json::Value::Null),
+                            ));
+                            if let Some(indices) = pending_outputs.get(id) {
+                                let mut merged = serde_json::Map::new();
+                                merged.insert(
+                                    "output".to_string(),
+                                    serde_json::Value::String(truncate_chars(&output, 4096)),
+                                );
+                                for &idx in indices {
+                                    if let Some(ev) = events.get_mut(idx) {
+                                        if let Some(p) = ev.payload_json.as_mut() {
+                                            if let Some(obj) = p.as_object_mut() {
+                                                obj.extend(merged.clone());
+                                            }
+                                        }
+                                        if ev.event_type == EventType::CommandStarted {
+                                            ev.event_type = EventType::CommandCompleted;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -300,6 +374,104 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
         events,
         source_parent_id: None,
     })
+}
+
+/// `tools.xxx({...})` 调用 →（领域事件类型，人类可读摘要，payload）。
+/// 返回 None 表示跳过（纯读取类调用，无展示价值）。
+fn event_for_js_call(call: &JsToolCall) -> Option<(EventType, String, serde_json::Value)> {
+    let arg_str = |key: &str| call.args.get(key).and_then(|v| v.as_str());
+    match call.tool.as_str() {
+        "exec_command" | "shell" | "exec" => {
+            let cmd = arg_str("cmd").or_else(|| arg_str("command")).unwrap_or("");
+            if cmd.is_empty() {
+                return Some((
+                    EventType::CommandStarted,
+                    "（空命令）".into(),
+                    serde_json::json!({}),
+                ));
+            }
+            let first_line = cmd.lines().next().unwrap_or("").trim();
+            let summary = truncate_chars(first_line, 120);
+            let mut payload = serde_json::json!({ "cmd": cmd });
+            if let Some(wd) = arg_str("workdir") {
+                payload["workdir"] = serde_json::json!(wd);
+            }
+            Some((EventType::CommandStarted, summary, payload))
+        }
+        "image_gen__imagegen" | "image_gen" => {
+            let prompt = arg_str("prompt").unwrap_or("");
+            let summary = if prompt.is_empty() {
+                "生成图片".to_string()
+            } else {
+                format!("生成图片：{}", truncate_chars(prompt.trim(), 60))
+            };
+            Some((
+                EventType::ArtifactCreated,
+                summary,
+                serde_json::json!({ "prompt": prompt }),
+            ))
+        }
+        "view_image" => {
+            let path = arg_str("path").unwrap_or("");
+            let name = path.rsplit('/').next().unwrap_or(path);
+            Some((
+                EventType::FileRead,
+                format!("查看图片 {}", truncate_chars(name, 80)),
+                serde_json::json!({ "path": path }),
+            ))
+        }
+        "apply_patch" => Some((
+            EventType::DiffGenerated,
+            "应用补丁".to_string(),
+            call.args.clone(),
+        )),
+        "update_plan" => Some((
+            EventType::ToolCallStarted,
+            "更新计划".to_string(),
+            call.args.clone(),
+        )),
+        "create_goal" | "update_goal" => {
+            let obj = arg_str("objective").unwrap_or("");
+            let summary = if obj.is_empty() {
+                format!(
+                    "{}目标",
+                    if call.tool == "create_goal" {
+                        "设定"
+                    } else {
+                        "更新"
+                    }
+                )
+            } else {
+                format!(
+                    "{}目标：{}",
+                    if call.tool == "create_goal" {
+                        "设定"
+                    } else {
+                        "更新"
+                    },
+                    truncate_chars(obj.trim(), 60)
+                )
+            };
+            Some((EventType::ToolCallStarted, summary, call.args.clone()))
+        }
+        // 纯读取类：跳过（无展示价值）
+        "get_goal" | "get_plan" => None,
+        _ => Some((
+            EventType::ToolCallStarted,
+            format!("工具 {}", call.tool),
+            call.args.clone(),
+        )),
+    }
+}
+
+/// 按字符截断（中文安全），超长加省略号。
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max).collect();
+        format!("{cut}…")
+    }
 }
 
 /// Codex 注入块标签：环境上下文 / 系统指令 / 插件推荐等（runtime 注入而非用户输入）。
@@ -368,14 +540,99 @@ mod tests {
             .expect("unexpected None")
             .contains("快速排序"));
         assert_eq!(raw.events.len(), 1);
-        assert!(raw.events[0]
-            .summary
-            .as_deref()
-            .expect("unexpected None")
-            .contains("exec_command"));
+        assert_eq!(raw.events[0].event_type, EventType::CommandStarted);
+        assert!(
+            raw.events[0]
+                .summary
+                .as_deref()
+                .expect("unexpected None")
+                .contains("ls"),
+            "旧式 function_call 应提取出 cmd 而非工具名"
+        );
         assert_eq!(raw.title.as_deref(), Some("帮我写个排序函数"));
         assert!(raw.started_at.is_some());
         assert!(raw.messages[0].created_at.is_some());
+    }
+
+    /// 新式 JS 工具桥会话：custom_tool_call.input 含 tools.exec_command /
+    /// view_image / update_plan；wait 轮询与 get_goal 应被降噪。
+    #[test]
+    fn parse_js_bridge_session() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let f = dir.path().join("rollout-js.jsonl");
+        let lines = [
+            r#"{"timestamp":"2026-08-15T21:00:00.000Z","type":"session_meta","payload":{"id":"js-1"}}"#,
+            r#"{"timestamp":"2026-08-15T21:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"审计素材"}]}}"#,
+            // JS 工具桥 exec（用户实例的真实形态）
+            r#"{"timestamp":"2026-08-15T21:00:05.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"cA","input":"const r=await tools.exec_command({cmd:\"printf 'Prompt entries: '; rg -c '^([0-9]+)\\\\.' prompts.md\nfind png -name '*.png' | wc -l\",\"workdir\":\"/tmp/proj\"});text(r.output);"}}"#,
+            // 输出配对（数组形态）
+            r#"{"timestamp":"2026-08-15T21:00:09.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"cA","output":[{"type":"input_text","text":"Prompt entries: 520\nPNG count: 520"}]}}"#,
+            // wait 轮询：降噪跳过
+            r#"{"timestamp":"2026-08-15T21:00:10.000Z","type":"response_item","payload":{"type":"function_call","name":"wait","arguments":"{\"ms\":5000}","call_id":"cW"}}"#,
+            // 查看图片
+            r#"{"timestamp":"2026-08-15T21:00:12.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"cB","input":"await tools.view_image({path:\"/tmp/png/498_袁隆平 Modern Field.png\"});"}}"#,
+            // 计划 + 目标（同一条 input 内两个调用）
+            r#"{"timestamp":"2026-08-15T21:00:15.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"cC","input":"const a=await tools.create_goal({objective:\"完成 520 张立绘\"});const b=await tools.update_plan({p:\"step\"});"}}"#,
+            // 纯读取：跳过
+            r#"{"timestamp":"2026-08-15T21:00:16.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"cD","input":"await tools.get_goal({});"}}"#,
+            // 旧式 wait 的输出（call_id 无对应事件）：安全忽略
+            r#"{"timestamp":"2026-08-15T21:00:17.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"cW","output":"waited"}}"#,
+        ];
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+
+        let raw = parse_session(&f).expect("parse failed");
+        let summaries: Vec<&str> = raw
+            .events
+            .iter()
+            .map(|e| e.summary.as_deref().unwrap_or(""))
+            .collect();
+        assert_eq!(
+            raw.events.len(),
+            4,
+            "wait/get_goal 降噪后应剩 4 个事件：{summaries:?}"
+        );
+        // exec → CommandStarted，输出配对后升格 CommandCompleted，payload 含输出
+        let exec = &raw.events[0];
+        assert_eq!(exec.event_type, EventType::CommandCompleted);
+        assert!(exec
+            .summary
+            .as_deref()
+            .is_some_and(|s| s.starts_with("printf 'Prompt entries")));
+        let payload = exec.payload_json.as_ref().expect("unexpected None");
+        assert!(payload
+            .get("output")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("520")));
+        assert!(payload
+            .get("cmd")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("rg -c")));
+        // view_image → FileRead 带文件名
+        assert_eq!(raw.events[1].event_type, EventType::FileRead);
+        assert!(summaries[1].contains("498_袁隆平"));
+        // 一条 input 双调用：create_goal + update_plan 各一个事件
+        assert!(summaries[2].contains("设定目标：完成 520 张立绘"));
+        assert_eq!(summaries[3], "更新计划");
+    }
+
+    #[test]
+    fn legacy_function_call_without_cmd_falls_back_to_tool_name() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let f = dir.path().join("rollout-legacy.jsonl");
+        let lines = [
+            r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"lg-1"}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]}}"#,
+            // 非命令类旧式调用（无 cmd/command 键）→ 工具事件 + 工具名
+            r#"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"function_call","name":"read_file","arguments":"{\"path\":\"/a.txt\"}","call_id":"c1"}}"#,
+        ];
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+        let raw = parse_session(&f).expect("parse failed");
+        assert_eq!(raw.events.len(), 1);
+        assert_eq!(raw.events[0].event_type, EventType::ToolCallStarted);
+        assert!(raw.events[0]
+            .summary
+            .as_deref()
+            .is_some_and(|s| s.contains("read_file")));
     }
 
     #[test]

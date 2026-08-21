@@ -3,9 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
+import { Icon } from "./Icon";
 import ScrollArea from "./ScrollArea";
 import { copyToClipboard } from "./clipboard";
 import MessageBlock from "./MessageBlock";
+import MessageEvents from "./MessageEvents";
+import { groupEventsByMessage } from "./eventGrouping";
 import PrivateNoteSection from "./PrivateNoteSection";
 
 interface Props {
@@ -50,6 +53,8 @@ export default function ConversationDetail({
 }: Props) {
   const [tagInput, setTagInput] = useState("");
   const [downloadOpen, setDownloadOpen] = useState(false);
+  // 执行事件归属：按 sequence_number 挂到对应消息名下（早于首条消息的进孤儿组）
+  const eventGroups = useMemo(() => groupEventsByMessage(messages, events), [messages, events]);
   /** 只看用户消息（我的提问）：消息视图与时间线同时生效。 */
   const [onlyUser, setOnlyUser] = useState(false);
   /** 消息内搜索（⌘F 唤起）：实时高亮 + 跳到第 N 个匹配。 */
@@ -75,6 +80,8 @@ export default function ConversationDetail({
 
   // 「滚到底部」浮动按钮：用户向上滚超过 200px 时显示
   const [showJumpBottom, setShowJumpBottom] = useState(false);
+  // 「回到顶部」浮动按钮：用户向下滚超过 400px 时显示
+  const [showJumpTop, setShowJumpTop] = useState(false);
 
   // ── 原始视图 / 来源应用 / 恢复命令（plan P2-3，v1.0.0）──────────────
   const [rawView, setRawView] = useState(false);
@@ -112,6 +119,18 @@ export default function ConversationDetail({
       else showToast(r.error ?? "复制失败", "error");
     } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
   };
+  /** 直接在系统终端新窗口执行恢复命令；失败/不支持时回退为复制。 */
+  const resumeInTerminal = async () => {
+    try {
+      const cmd = await invoke<string | null>("resume_in_terminal", { conversationId: conv.id });
+      if (cmd == null) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
+      showToast(`✓ 已在终端打开：${cmd}`, "info");
+    } catch (e) {
+      // 打开失败（无终端/osascript 失败等）→ 回退复制，用户可手动粘贴
+      showToast(`终端打开失败（${typeof e === "string" ? e : String(e)}），已改为复制`, "error");
+      await copyResumeCommand();
+    }
+  };
 
   /** 解析父级滚动容器：ScrollArea 的 ref 可能是 { inner } 包装，也可能是原生 HTMLElement。 */
   const scrollEl = useCallback((): HTMLElement | null => {
@@ -123,8 +142,9 @@ export default function ConversationDetail({
     const el = scrollEl();
     if (!el) return;
     const onScroll = () => {
-      const dist = el.scrollHeight - el.clientHeight - el.scrollTop;
-      setShowJumpBottom(dist > 200);
+      const distBottom = el.scrollHeight - el.clientHeight - el.scrollTop;
+      setShowJumpBottom(distBottom > 200);
+      setShowJumpTop(el.scrollTop > 400);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
@@ -134,6 +154,11 @@ export default function ConversationDetail({
     const el = scrollEl();
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  };
+  const jumpToTop = () => {
+    const el = scrollEl();
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   // ⌘F / Ctrl+F 唤起消息内搜索
@@ -341,11 +366,16 @@ export default function ConversationDetail({
         <button className="action-btn" onClick={openSourceApp} title="打开该会话的来源应用（Cursor / ZCode / MiniMax Code）">
           ↗ 来源应用
         </button>
-        <button className="action-btn" onClick={copyResumeCommand} title="复制「恢复原会话」命令（claude-code / codex CLI 来源支持）">
-          ⏯ 恢复命令
+        <button
+          className="action-btn"
+          onClick={() => void resumeInTerminal()}
+          onContextMenu={(e) => { e.preventDefault(); void copyResumeCommand(); }}
+          title="在系统终端新窗口直接执行恢复命令（仅 claude-code / codex CLI 来源；右击复制命令文本）"
+        >
+          ⏯ 恢复会话
         </button>
-        <button className="action-btn" onClick={onExtractKnowledge} disabled={loading || messages.length === 0}>
-          {loading ? "提取中…" : "✨ 知识"}
+        <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
+          {loading ? "提取中…" : <><Icon name="sparkle" size={12} /> 知识</>}
         </button>
         <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
         <button
@@ -448,6 +478,10 @@ export default function ConversationDetail({
         <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />
       )}
       {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
+      {/* 回到顶部：向下滚超过 400px 出现（与底部 ↓ 按钮对称） */}
+      {showJumpTop && (
+        <button className="jump-top-btn" onClick={jumpToTop} title="回到顶部">↑</button>
+      )}
       {/* 原始视图（plan P2-3）：Raw Store 未标准化归档，只读展示 */}
       {rawView && !loading && (
         rawContent === null
@@ -455,8 +489,12 @@ export default function ConversationDetail({
           : <pre className="raw-payload-view">{rawContent}</pre>
       )}
       {!rawView && timelineMode && !loading && renderTimeline()}
+      {!rawView && !timelineMode && !loading && eventGroups.orphan.length > 0 && (
+        <MessageEvents events={eventGroups.orphan} label="会话前置事件" />
+      )}
       {!rawView && !timelineMode && visibleMsgs.map((m) => {
         const isMatch = !!search.trim() && currentMatch?.kind === "msg" && currentMatch?.id === m.id;
+        const ownedEvents = eventGroups.byMessageId.get(m.id);
         return (
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
           <div className="role">
@@ -473,18 +511,10 @@ export default function ConversationDetail({
             onCopyMessage={copyMessage}
             onCopyMsgId={copyMsgId}
           />
+          {ownedEvents && ownedEvents.length > 0 && <MessageEvents events={ownedEvents} />}
         </div>
         );
       })}
-      {!rawView && events.length > 0 && (<>
-        <div className="events-header">执行事件 ({events.length})</div>
-        {events.map((e) => (
-          <div key={e.id} className={`event ${e.event_type}`}>
-            <span className="event-type">{eventTypeLabel(e.event_type)}</span>
-            <span className="event-summary">{e.summary ?? ""}</span>
-          </div>
-        ))}
-      </>)}
       {showJumpBottom && (
         <button className="jump-bottom-btn" onClick={jumpToBottom} title="滚到底部">↓</button>
       )}

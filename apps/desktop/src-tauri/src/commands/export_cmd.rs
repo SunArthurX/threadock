@@ -85,3 +85,114 @@ pub(crate) fn read_text_file(path: String) -> Result<String, String> {
     }
     std::fs::read_to_string(&path).map_err(|e| io_err(e))
 }
+
+/// 内联图片数据（base64 data URL，前端直接喂给 `<img src>`）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageData {
+    pub mime: String,
+    pub data_url: String,
+}
+
+/// 读取本机图片为 data URL（消息内联图片展示：消息引用的截图等仍在本机时直接展示）。
+///
+/// - 扩展名白名单 → MIME；上限 20 MB；
+/// - 文件不存在返回 `Ok(None)`（前端显示「已不在原位置」占位，不算错误）。
+#[tauri::command]
+pub(crate) fn read_image_file(path: String) -> Result<Option<ImageData>, String> {
+    const MAX_BYTES: u64 = 20 * 1024 * 1024;
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase)
+        .unwrap_or_default();
+    let mime = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        "ico" => "image/x-icon",
+        _ => {
+            return Err(format!(
+                "不支持的图片格式：.{ext}（仅 png/jpg/jpeg/gif/webp/bmp/svg/ico）"
+            ))
+        }
+    };
+    let meta = match std::fs::metadata(&path) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(io_err(e)),
+    };
+    if meta.len() > MAX_BYTES {
+        return Err(format!(
+            "图片过大（{} MB > 20 MB 上限）",
+            meta.len() / (1024 * 1024)
+        ));
+    }
+    let bytes = std::fs::read(&path).map_err(|e| io_err(e))?;
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(Some(ImageData {
+        mime: mime.to_string(),
+        data_url: format!("data:{mime};base64,{b64}"),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 最小合法 PNG（1×1 透明像素）。
+    const TINY_PNG: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x62, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    #[test]
+    fn read_image_file_roundtrip() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let p = dir.path().join("shot.png");
+        std::fs::write(&p, TINY_PNG).expect("write png");
+        let r = read_image_file(p.to_string_lossy().into_owned())
+            .expect("read image")
+            .expect("should exist");
+        assert_eq!(r.mime, "image/png");
+        assert!(r.data_url.starts_with("data:image/png;base64,"));
+    }
+
+    #[test]
+    fn read_image_file_missing_is_none() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let missing = dir.path().join("gone.png");
+        let r = read_image_file(missing.to_string_lossy().into_owned())
+            .expect("missing file is not an error");
+        assert!(r.is_none(), "不存在 → None（前端占位），不报错");
+    }
+
+    #[test]
+    fn read_image_file_rejects_non_image() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let p = dir.path().join("notes.txt");
+        std::fs::write(&p, "hi").expect("write txt");
+        let err =
+            read_image_file(p.to_string_lossy().into_owned()).expect_err("txt must be rejected");
+        assert!(err.contains("不支持"), "{err}");
+    }
+
+    #[test]
+    fn read_image_file_rejects_oversize() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let p = dir.path().join("huge.png");
+        // 写 20MB + 1 字节（稀疏写：set_len 直接扩展文件长度，不实际占内存）
+        let f = std::fs::File::create(&p).expect("create");
+        f.set_len(20 * 1024 * 1024 + 1).expect("set_len");
+        drop(f);
+        let err = read_image_file(p.to_string_lossy().into_owned())
+            .expect_err("oversize must be rejected");
+        assert!(err.contains("过大"), "{err}");
+    }
+}

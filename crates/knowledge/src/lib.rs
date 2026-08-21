@@ -19,9 +19,11 @@
 //! - **files**：从 Diff/File 事件 + 消息中的路径模式提取。
 
 pub mod extract;
+pub mod llm;
 pub mod model;
 pub mod similar;
 
 pub use extract::{RuleExtractor, TODOS};
+pub use llm::{LlmExtractor, PROMPT_VERSION};
 pub use model::{Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem};
 pub use similar::{conversation_text, find_similar, ConversationText, SimilarHit};

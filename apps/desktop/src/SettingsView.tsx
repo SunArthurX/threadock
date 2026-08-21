@@ -12,11 +12,14 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { showToast } from "./toast";
 import { formatTime } from "./types";
+import type { LlmConfigView } from "./types";
 import { exportAllSettings, importAllSettings, defaultSettingsFilename } from "./settingsIO";
 import ScrollArea from "./ScrollArea";
 import WorkspaceSection from "./WorkspaceSection";
+import { Icon } from "./Icon";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
 export const RESET_CONFIRM_TEXT = "重置";
 
@@ -64,6 +67,8 @@ type GovernanceView = "overview" | "cost" | "security";
 interface Props {
   theme: "dark" | "light";
   onThemeChange: (t: "dark" | "light") => void;
+  textSize: "sm" | "md" | "lg" | "xl";
+  onTextSizeChange: (s: "sm" | "md" | "lg" | "xl") => void;
   syncIntervalMin: number;
   onSyncIntervalChange: (min: number) => void;
   retentionDays: number;
@@ -105,6 +110,15 @@ function MiniProgress({ p }: { p: { current: number; total: number; detail: stri
   );
 }
 
+/** 在系统默认浏览器里打开 URL（Tauri WebView 的 target=_blank 不工作，必须走 plugin-opener）。 */
+function openExternal(url: string) {
+  openUrl(url).catch((e) => {
+    // 非 Tauri 环境（纯 web dev server）走兜底
+    try { window.open(url, "_blank", "noopener,noreferrer"); }
+    catch { showToast(`✗ 无法打开链接：${String(e)}`, "error", 3000); }
+  });
+}
+
 /** 字节数人性化。 */
 export function formatBytes(n: number): string {
   if (n >= 1e9) return (n / 1e9).toFixed(2) + " GB";
@@ -127,7 +141,7 @@ export const GOVERNANCE_LABELS: Record<string, string> = {
 };
 
 export default function SettingsView({
-  theme, onThemeChange, syncIntervalMin, onSyncIntervalChange,
+  theme, onThemeChange, textSize, onTextSizeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
   onNavigate, onReset, resetting, onClose, onShowChangelog, onShowOnboarding, onReapplyImportedPrefs,
@@ -222,10 +236,34 @@ export default function SettingsView({
           <section className="settings-section">
             <h3>外观</h3>
             <div className="settings-row">
-              <span>主题</span>
+              <span>外观</span>
               <div className="settings-segment">
-                <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>☾ 深色</button>
-                <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>☀ 浅色</button>
+                <button className={theme === "light" ? "active" : ""} onClick={() => onThemeChange("light")}>浅色</button>
+                <button className={theme === "dark" ? "active" : ""} onClick={() => onThemeChange("dark")}>深色</button>
+              </div>
+            </div>
+            <div className="settings-row">
+              <span>
+                字号
+                <small style={{ display: "block", fontSize: 11, color: "var(--text-faint)", fontWeight: 400, marginTop: 2 }}>
+                  macOS "Larger Text" 体验
+                </small>
+              </span>
+              <div className="text-size-control" role="radiogroup" aria-label="字号">
+                {(["sm", "md", "lg", "xl"] as const).map((s, i) => (
+                  <button
+                    key={s}
+                    type="button"
+                    role="radio"
+                    aria-checked={textSize === s}
+                    className={`text-size-btn ${textSize === s ? "active" : ""}`}
+                    onClick={() => onTextSizeChange(s)}
+                    title={["默认 (13.5px)", "稍大 (14.5px)", "大 (15.5px)", "特大 (16.5px)"][i]}
+                  >
+                    <span className="text-size-letter">A</span>
+                    <span className="text-size-letter-size" style={{ fontSize: 8 + i * 1.5 }}>A</span>
+                  </button>
+                ))}
               </div>
             </div>
           </section>
@@ -275,7 +313,7 @@ export default function SettingsView({
               </select>
             </div>
             <div className="settings-hint">
-              手动入口在「⬇ 导入 → 增量同步」；指标采集另有 30 分钟节流（防止重复全量扫描）。
+              手动入口在「同步 → 立即同步全部」；指标采集另有 30 分钟节流（防止重复全量扫描）。
             </div>
             <div className="settings-row">
               <span>上次会话同步</span>
@@ -316,6 +354,11 @@ export default function SettingsView({
           </section>
 
           <WorkspaceSection />
+
+          <section className="settings-section">
+            <h3>AI 提取（大模型）</h3>
+            <LlmSection />
+          </section>
 
           <section className="settings-section">
             <h3>存储与维护</h3>
@@ -482,11 +525,11 @@ function AboutSection({
     { name: "vitest", version: "3.2.7", role: "前端测试" },
     { name: "Rust 工具链", version: "stable", role: "后端运行时" },
   ];
-  const links: { label: string; url: string; hint: string }[] = [
-    { label: "📖 项目主页", url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图" },
-    { label: "🐛 报告问题", url: "https://github.com/sunqingguang/threadock/issues", hint: "Bug 反馈与功能建议" },
-    { label: "📝 更新日志", url: "https://github.com/sunqingguang/threadock/releases", hint: "各版本变更说明" },
-    { label: "💬 讨论", url: "https://github.com/sunqingguang/threadock/discussions", hint: "使用交流与最佳实践" },
+  const links: { label: string; url: string; hint: string; icon: "globe" | "bug" | "history" | "chat" }[] = [
+    { label: "项目主页", url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图", icon: "globe" },
+    { label: "报告问题", url: "https://github.com/sunqingguang/threadock/issues", hint: "Bug 反馈与功能建议", icon: "bug" },
+    { label: "更新日志", url: "https://github.com/sunqingguang/threadock/releases", hint: "各版本变更说明", icon: "history" },
+    { label: "讨论", url: "https://github.com/sunqingguang/threadock/discussions", hint: "使用交流与最佳实践", icon: "chat" },
   ];
   return (
     <section className="settings-section">
@@ -516,9 +559,17 @@ function AboutSection({
       <div className="settings-hint">相关链接：</div>
       <div className="about-links">
         {links.map((l) => (
-          <a key={l.url} className="about-link" href={l.url} target="_blank" rel="noreferrer" title={l.hint}>
-            {l.label}
-          </a>
+          <button
+            key={l.url}
+            type="button"
+            className="about-link"
+            onClick={() => openExternal(l.url)}
+            title={l.hint}
+          >
+            <Icon name={l.icon} size={12} />
+            <span>{l.label}</span>
+            <Icon name="external" size={10} className="about-link-ext" />
+          </button>
         ))}
       </div>
       <div className="settings-row" style={{ marginTop: 8 }}>
@@ -563,8 +614,7 @@ function AboutSection({
 }
 
 /** 加密备份/恢复（本地，密码仅进程内使用）。 */
-function BackupSection() {
-  const [pw, setPw] = useState("");
+function BackupSection() {  const [pw, setPw] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   return (
@@ -603,6 +653,164 @@ function BackupSection() {
       </div>
       <div className="settings-hint">
         备份含数据库与原始归档（Argon2id 加密）。恢复在 CLI：ch restore &lt;file&gt; &lt;dir&gt;（恢复为副本，不影响当前数据）。
+      </div>
+    </>
+  );
+}
+
+/** LLM 预设：一键填入常见云端/本地端点。 */
+const LLM_PRESETS: { label: string; baseUrl: string; model: string; local?: boolean }[] = [
+  { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  { label: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
+  { label: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b", local: true },
+];
+
+/** AI 提取（大模型）：端点配置 + API Key 加密存储 + 连接测试。
+ * 前端永远拿不到密钥明文/密文（后端只回 masked 提示）。 */
+function LlmSection() {
+  const [form, setForm] = useState({ enabled: false, base_url: "", model: "" });
+  const [meta, setMeta] = useState<Pick<LlmConfigView, "has_api_key" | "api_key_masked" | "is_local" | "api_key_broken"> | null>(null);
+  const [apiKey, setApiKey] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"save" | "test" | null>(null);
+
+  const applyView = (v: LlmConfigView) => {
+    setForm({ enabled: v.enabled, base_url: v.base_url, model: v.model });
+    setMeta({ has_api_key: v.has_api_key, api_key_masked: v.api_key_masked, is_local: v.is_local, api_key_broken: v.api_key_broken });
+  };
+
+  useEffect(() => {
+    invoke<LlmConfigView>("llm_config_get", {}).then(applyView).catch(() => setMsg("配置读取失败"));
+  }, []);
+
+  const save = async (clearKey = false) => {
+    setBusy("save"); setMsg(null);
+    try {
+      const v = await invoke<LlmConfigView>("llm_config_set", {
+        input: {
+          enabled: form.enabled,
+          base_url: form.base_url.trim(),
+          model: form.model.trim(),
+          api_key: clearKey ? null : (apiKey.trim() ? apiKey.trim() : null),
+          clear_api_key: clearKey,
+        },
+      });
+      applyView(v);
+      setApiKey("");
+      setMsg("✓ 已保存（API Key 已本地加密存储）");
+    } catch (e) { setMsg(`✗ ${typeof e === "string" ? e : String(e)}`); }
+    setBusy(null);
+  };
+
+  const test = async () => {
+    setBusy("test"); setMsg(null);
+    try {
+      const r = await invoke<{ ok: boolean; latency_ms: number; model: string }>("llm_test_connection", {});
+      setMsg(`✓ 连接成功（${r.model} · ${r.latency_ms}ms）`);
+    } catch (e) { setMsg(`✗ ${typeof e === "string" ? e : String(e)}`); }
+    setBusy(null);
+  };
+
+  const isLocal = (() => {
+    const rest = form.base_url.split("://")[1] ?? "";
+    const host = rest.startsWith("[") ? rest.split("]")[0].slice(1) : rest.split(/[:/?#]/)[0] ?? "";
+    const h = host.toLowerCase();
+    return h === "localhost" || h === "::1" || h === "0.0.0.0" || h.startsWith("127.");
+  })();
+
+  return (
+    <>
+      <div className="settings-row">
+        <span>启用大模型提取</span>
+        <label className="settings-segment">
+          <input
+            type="checkbox"
+            checked={form.enabled}
+            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+          />
+          显式开启（默认关闭，规则引擎不受影响）
+        </label>
+      </div>
+      {form.enabled && (
+        <div className="settings-hint">
+          开启后，在会话的「知识提取」弹窗可切换 ✨AI 引擎：会把<strong>当前会话的对话文本</strong>发送到所配端点做提取。
+          {isLocal ? " 当前端点为本机地址，数据不出本机。" : " 云端端点请注意会话内容的保密性。"}
+        </div>
+      )}
+      <div className="settings-row">
+        <span>
+          端点预设
+          {isLocal && <span className="badge" style={{ marginLeft: 6 }} title="本地推理端点，数据不出本机">本地</span>}
+        </span>
+        <div className="settings-segment">
+          {LLM_PRESETS.map((p) => (
+            <button
+              key={p.label}
+              className="action-btn"
+              title={`${p.baseUrl} · ${p.model}`}
+              onClick={() => setForm({ ...form, base_url: p.baseUrl, model: p.model })}
+            >{p.label}</button>
+          ))}
+        </div>
+      </div>
+      <div className="settings-row">
+        <span>Base URL（OpenAI 兼容）</span>
+        <input
+          className="settings-confirm-input"
+          style={{ flex: 1 }}
+          type="text"
+          value={form.base_url}
+          placeholder="https://api.openai.com/v1 或 http://127.0.0.1:11434/v1"
+          onChange={(e) => setForm({ ...form, base_url: e.target.value })}
+        />
+      </div>
+      <div className="settings-row">
+        <span>模型名</span>
+        <input
+          className="settings-confirm-input"
+          style={{ flex: 1 }}
+          type="text"
+          value={form.model}
+          placeholder="gpt-4o-mini / deepseek-chat / qwen2.5:7b"
+          onChange={(e) => setForm({ ...form, model: e.target.value })}
+        />
+      </div>
+      <div className="settings-row">
+        <span>API Key</span>
+        <input
+          className="settings-confirm-input"
+          style={{ flex: 1 }}
+          type="password"
+          value={apiKey}
+          placeholder={meta?.has_api_key ? `已存储（${meta.api_key_masked ?? "无法解密"}）——输入新值覆盖` : "本地推理可留空"}
+          onChange={(e) => setApiKey(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      {meta?.api_key_broken && (
+        <div className="settings-hint">
+          ⚠ 已存储密钥无法解密（可能更换过设备），请重新录入后保存。
+        </div>
+      )}
+      <div className="settings-row">
+        <span>操作</span>
+        <button className="action-btn" disabled={busy !== null} onClick={() => save(false)}>
+          {busy === "save" ? "保存中…" : "💾 保存配置"}
+        </button>
+        {meta?.has_api_key && (
+          <button className="action-btn" disabled={busy !== null} onClick={() => save(true)} title="清除已存储的加密密钥">
+            🗑 清除密钥
+          </button>
+        )}
+        <button className="action-btn" disabled={busy !== null} onClick={test} title="对已保存的配置发起最小请求">
+          {busy === "test" ? "测试中…" : "🔌 测试连接"}
+        </button>
+        {msg && <span className="settings-value">{msg}</span>}
+      </div>
+      <div className="settings-hint">
+        API Key 以 XChaCha20-Poly1305 加密后存本地数据库，主密钥为应用数据目录下 0600 权限的密钥文件（仅本用户可读）；
+        明文永不落盘、不出现在日志。测试连接使用已保存的配置。
       </div>
     </>
   );

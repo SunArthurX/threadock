@@ -1,5 +1,92 @@
 # Changelog
 
+## [Unreleased]
+
+AI 知识提取（大模型引擎）+ API Key 本地加密存储。
+
+### Fixed
+- **Codex 执行事件「获取不了」**（用户实例：西游记立绘 /goal 会话）：新版
+  Codex 把 shell/生图/看图/计划更新全封装为 `custom_tool_call` 的 JS 工具桥
+  （命令在 `input` 字段的 `tools.xxx({...})` 里，`arguments` 恒空）——新增
+  `js_bridge` 模块解析 JS（括号配平 + 无引号键扫描 + 转义还原），命令/生图/
+  看图/补丁/计划/目标映射为可读事件（`printf 'Prompt entries…`、`生成图片…`、
+  `查看图片 …`）；`*_output` 按 `call_id` 配对合并输出（截断 4KB）；
+  `wait` 轮询与 `get_goal` 降噪。真实会话验证：683 条噪音/空事件 →
+  474 条可读事件
+- **ZCode 事件采集为零（schema 漂移）**：真实 part 类型已变为 `tool`
+  （`state.{status,input,output,time}`），Adapter 仍按旧 `tool_use`/`command`
+  匹配——新增 `tool` 处理（Bash→命令、Read/Write/Edit→文件事件，输出并入
+  payload）。真实库验证：0 → 465 条事件；旧类型保留兼容
+- **MiniMax 事件采集为零**：`tool_calls[]`（含 `tool_call_args` 与
+  `tool_call_result_data`）完全未解析——现映射为命令/文件事件并带输出。
+  真实库验证：0 → 747 条事件
+- **Claude Code 事件摘要无内容**：`Tool: Bash`/`Tool result` → 命令本身、
+  `读取/写入/修改 文件名`、结果内容预览
+- **事件→消息归属错乱**：消息/事件序号是两条独立流（曾按序号跨流比较），
+  改为按时间戳归属；Claude Code/ZCode 事件补父消息时间戳；无时间戳事件
+  归最后一条消息（近似）
+- 测试：js_bridge 9 项矩阵 + 四家 Adapter 新 schema 用例 + 命令层集成旅程
+  （解析→入库→详情→提取）+ 归属回归（独立序号流不再错挂）；前端 377 /
+  桌面 33 / Adapter 43 项全过
+
+### Added
+- **恢复会话直接在终端打开**：详情页「⏯ 恢复命令」升级为「⏯ 恢复会话」——
+  点击直接在系统终端新窗口执行恢复命令（macOS Terminal via osascript /
+  Windows cmd / Linux gnome-terminal·konsole·xterm 逐个尝试）；终端打开
+  失败自动回退为复制；右键仍可复制命令文本。命令在后端按会话来源构造，
+  前端不传自由文本（避免任意命令执行面）。真实冒烟：osascript 打开
+  Terminal 执行测试命令通过
+
+### Fixed
+- **重置数据后概览/成本需手动同步**：`reset_range` 会删除指标表
+  （usage_records/tool_call_records），但重置后的自动重导只恢复会话、
+  从不触发 `ops_sync`（且 30 分钟节流会拦住常规调用）→ 概览/成本一直
+  空/旧直到手动点。现在重置后自动链式执行：重导会话 → 强制重算指标
+  （force 绕过节流）→ 刷新预算条/红点，全程无需手动点击
+
+### Added
+- **会话详情「回到顶部」浮动按钮**：与现有「滚到底部」↓ 对称——向下滚动
+  超过 400px 出现 ↑，点击平滑回顶；顶部/底部附近自动隐藏对应按钮
+- **执行事件挂到对应消息下 + 详情展开**：事件按 `sequence_number` 归属到
+  「序号 ≤ 事件序号的最大消息」，以紧凑行挂在消息气泡下（≤4 条，超出折叠
+  「还有 N 条」）；点击事件行展开详情（完整摘要 / 状态 / 起止时间与耗时 /
+  payload JSON 美化展示）。早于首条消息的事件显示为顶部「会话前置事件」组；
+  底部平铺事件列表移除（上一轮的平铺分页方案被本设计取代）。
+  `EventDto` 扩展 `status` / `completed_at_ms` / `payload_json`（超 8KB 截断）
+- **消息内联本机图片**：消息里引用的本机图片（Markdown 图片语法 /
+  Unix·Windows 绝对路径 / `file://` 链接，http 远程图除外）若仍在原位置，
+  直接在对话流中展示；已移动/删除显示灰色占位。新命令 `read_image_file`
+  （扩展名白名单 png/jpg/jpeg/gif/webp/bmp/svg/ico → MIME、单图 20MB 上限、
+  不存在返回 None）；前端模块级缓存（同路径只读一次）、每消息限 6 张；
+  纯函数 `extractLocalImagePaths` 12 项矩阵测试 + 组件三态测试
+- **AI 提取（大模型引擎，可选，默认关闭）**：知识提取支持切换 LLM 引擎，
+  输出与规则引擎同构（摘要/决策/TODO/错误/命令/文件 + 消息级来源引用），
+  `extractor` 记录 `llm:{model}@prompt-v1`（模型 + Prompt 版本，plan §13.5）
+- **OpenAI 兼容端点配置**：云端（OpenAI / DeepSeek / GLM…）与本地推理
+  （Ollama / LM Studio / llama.cpp server）同一套配置；GUI 提供 4 个预设；
+  本地端点自动识别并标记「本地」（允许 http），云端强制 https
+- **API Key 本地加密存储**：XChaCha20-Poly1305 AEAD（随机 nonce + 固定 AAD
+  + `v1` 版本前缀）；主密钥为应用数据目录下 **0600 权限密钥文件**
+  （`keys/llm-master.key`，跨平台统一，不依赖 OS 钥匙串——用户决策，
+  避免 macOS/Windows/Linux 钥匙串可用性差异）；明文永不落盘/不出现在
+  日志与错误信息（plan §14.3）
+- **新 crate `ch-llm`**：`LlmConfig`（校验/钳制/本地端点判定）+ `SecretVault`
+  （密封保险库，主密钥 Zeroize）+ `HttpChat`（ureq+rustls；`response_format`
+  被 400/422 拒绝时降级重试；401/429/5xx 分类）
+- **`LlmExtractor`**（`ch-knowledge`）：编号转录（截断上限）+ 严格 JSON
+  schema prompt + 宽松解析（剥围栏/条目裁剪/source 编号映射回真实消息 id）
+- **GUI**：设置页「AI 提取（大模型）」区（开关/预设/Key 密码框 masked
+  回显/测试连接/密钥破损提示）；知识弹窗 ⚙规则/✨AI 引擎切换 + 模型徽标
+- **新 Tauri 命令**：`llm_config_get` / `llm_config_set` / `llm_test_connection`；
+  `extract_knowledge` 增加 `engine` 参数（None/rule 默认规则引擎）
+
+### Security
+- API Key 视图契约：前端只接收 `has_api_key` + `api_key_masked`
+  （`sk-***1234`），明文/密文均不回传
+- 数据库单独泄露不解密（主密钥不在数据库中）；跨设备迁移检测（密文解不
+  开 → 提示重新录入，不静默失败）
+- 传输输入截断上限 `max_input_chars`（默认 48,000 字符，上限 200,000）
+
 ## [1.1.1] - 2026-08-19
 
 依赖安全修复轮（Dependabot 5 项告警清零）。

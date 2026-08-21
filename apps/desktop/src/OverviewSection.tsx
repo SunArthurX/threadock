@@ -2,6 +2,8 @@
 import { useState } from "react";
 import { BarChart, DonutChart, formatTokens, formatCost, formatDuration } from "./charts";
 import { AnimatedKpi } from "./OverviewCards";
+import { CardTitle } from "./CardTitle";
+import { Icon } from "./Icon";
 import type { OpsOverview, ProviderUsage, ModelUsage, DailyUsage, ToolUsageRow, CacheStat, AgentHealth, LatencyStat, TokenWaste, AgentBenchmark } from "./ops-types";
 import { meta } from "./ops-types";
 
@@ -94,19 +96,21 @@ export default function OverviewSection({
   return (
     <>
       <div className="card-toolbar">
-        <span style={{ fontSize: 11, opacity: 0.55 }}>卡片显隐</span>
+        <span className="card-toolbar-label">
+          <Icon name="panel-left" size={12} /> 卡片显隐
+        </span>
         <button
           className="action-btn"
-          style={{ fontSize: 11 }}
           onClick={() => setHidden(setAllHidden(false))}
-        >▣ 全部展开</button>
+          disabled={hidden.size === 0}
+        ><Icon name="chevrons-up" size={11} /> 全部展开</button>
         <button
           className="action-btn"
-          style={{ fontSize: 11 }}
           onClick={() => setHidden(setAllHidden(true))}
-        >▢ 全部收起</button>
-        <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.55 }}>
-          已隐藏 {hidden.size} / {CARD_KEYS.length}
+          disabled={hidden.size === CARD_KEYS.length}
+        ><Icon name="chevrons-down" size={11} /> 全部收起</button>
+        <span className="card-toolbar-count">
+          已隐藏 <b>{hidden.size}</b> / {CARD_KEYS.length}
         </span>
       </div>
       {overview ? <div className="ops-kpis">{kpis.map((k, i) => <AnimatedKpi key={i} {...k} />)}</div>
@@ -116,7 +120,7 @@ export default function OverviewSection({
 
       <div className="ops-charts">
         <div className={`ops-card ${hidden.has("provider") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">Agent 用量分布{vis("provider")}</div>
+          <CardTitle icon="globe" trailing={vis("provider")}>Agent 用量分布</CardTitle>
           <div className="ops-donut-wrap">
             <DonutChart slices={donutSlices} />
             <div className="ops-legend">
@@ -132,14 +136,14 @@ export default function OverviewSection({
           </div>
         </div>
         <div className={`ops-card ops-card-wide ${hidden.has("trend") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">每日 Tokens 趋势{vis("trend")}</div>
+          <CardTitle icon="trend-up" trailing={vis("trend")}>每日 Tokens 趋势</CardTitle>
           <BarChart data={barData} />
         </div>
       </div>
 
       <div className="ops-tables">
         <div className={`ops-card ${hidden.has("model") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">模型明细{vis("model")}</div>
+          <CardTitle icon="cpu" trailing={vis("model")}>模型明细</CardTitle>
           <table className="ops-table">
             <thead><tr><th>模型</th><th>请求</th><th>输入</th><th>输出</th><th>错误</th></tr></thead>
             <tbody>
@@ -152,12 +156,12 @@ export default function OverviewSection({
                   <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
                 </tr>
               ))}
-              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? "加载中…" : "暂无数据"}</td></tr>}
+              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? "加载中…" : "暂无模型明细"}</td></tr>}
             </tbody>
           </table>
         </div>
         <div className={`ops-card ${hidden.has("tools") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">工具调用 Top 10{vis("tools")}</div>
+          <CardTitle icon="wand" trailing={vis("tools")}>工具调用 Top 10</CardTitle>
           <div className="ops-tools">
             {topTools.map((t, i) => {
               const share = (t.calls / maxToolCalls) * 100;
@@ -171,18 +175,18 @@ export default function OverviewSection({
                 </div>
               );
             })}
-            {topTools.length === 0 && <div className="ops-table-empty">{loading ? "加载中…" : "暂无数据"}</div>}
+            {topTools.length === 0 && <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div>}
           </div>
         </div>
       </div>
 
       {benchmark.length > 1 && (
         <div className={`ops-card ${hidden.has("benchmark") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">
-            📐 Agent 横向对比
-            <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onWeeklyReport}>⤓ 导出周报</button>
-            <button className="action-btn" style={{ fontSize: 11 }} onClick={onOpenReports} title="应用内查看当前周报与历史报告">📊 报告中心</button>
-          {vis("benchmark")}</div>
+          <CardTitle icon="compass" trailing={<>
+            <button className="action-btn" onClick={onWeeklyReport}>导出周报</button>
+            <button className="action-btn" onClick={onOpenReports} title="应用内查看当前周报与历史报告">报告中心</button>
+            {vis("benchmark")}
+          </>}>Agent 横向对比</CardTitle>
           <div style={{ overflowX: "auto" }}>
             <table className="ops-table">
               <thead><tr><th>指标</th>{benchmark.map((b, i) => <th key={i}>{meta(b.provider).label}</th>)}</tr></thead>
@@ -200,8 +204,8 @@ export default function OverviewSection({
       )}
 
       <div className={`ops-card ${hidden.has("health") ? "card-hidden" : ""}`}>
-        <div className="ops-card-title">🏥 Agent 健康度{vis("health")}</div>
-        {health.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无数据"}</div> : (
+        <CardTitle icon="heart" trailing={vis("health")}>Agent 健康度</CardTitle>
+        {health.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : (
           <table className="ops-table">
             <thead><tr><th>Agent</th><th>请求</th><th>成功率</th><th>错误率</th><th>重试率</th><th>稳定性</th></tr></thead>
             <tbody>
@@ -226,7 +230,7 @@ export default function OverviewSection({
 
       {latency.length > 0 && (
         <div className={`ops-card ${hidden.has("latency") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">⚡ 延迟 P50 / P95{vis("latency")}</div>
+          <CardTitle icon="zap" trailing={vis("latency")}>延迟 P50 / P95</CardTitle>
           <div className="ops-risky">
             {latency.map((l, i) => {
               const tip = `${meta(l.provider).label}\nP50 ${formatDuration(l.p50_ms)} · P95 ${formatDuration(l.p95_ms)}\n平均 ${formatDuration(l.avg_ms)} · ${l.sample_count.toLocaleString()} 样本`;
@@ -245,7 +249,7 @@ export default function OverviewSection({
 
       {waste.length > 0 && (
         <div className={`ops-card ${hidden.has("waste") ? "card-hidden" : ""}`}>
-          <div className="ops-card-title">🔥 Token 浪费检测（{waste.length}）{vis("waste")}</div>
+          <CardTitle icon="flame" sub={`${waste.length} 个会话`} trailing={vis("waste")}>Token 浪费检测</CardTitle>
           <div className="ops-risky">
             {waste.map((w, i) => (
               <div key={i} className="ops-risky-row">
@@ -262,8 +266,8 @@ export default function OverviewSection({
       )}
 
       <div className={`ops-card ${hidden.has("cache") ? "card-hidden" : ""}`}>
-        <div className="ops-card-title">缓存命中率{vis("cache")}</div>
-        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无数据"}</div> : cacheStats.map((c) => {
+        <CardTitle icon="database" trailing={vis("cache")}>缓存命中率</CardTitle>
+        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : cacheStats.map((c) => {
           const hitPct = (c.hit_rate * 100).toFixed(1);
           const tip = `${meta(c.provider).label}\n命中率 ${hitPct}% · ${formatTokens(c.cache_read_tokens)} 缓存\n${formatTokens(c.input_tokens)} 总输入`;
           return (

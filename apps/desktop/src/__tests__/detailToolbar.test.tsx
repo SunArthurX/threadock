@@ -1,5 +1,6 @@
 // 详情页按钮清单 / provider chips 显隐
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { RefObject } from "react";
 import { describe, expect, it, vi } from "vitest";
 import ConversationDetail from "../ConversationDetail";
 import ConversationList from "../ConversationList";
@@ -71,7 +72,7 @@ describe("详情页按钮清单", () => {
 
   it("无消息时知识按钮禁用", () => {
     render(<ConversationDetail {...baseDetail} />);
-    const btn = screen.getByText("✨ 知识") as HTMLButtonElement;
+    const btn = screen.getByText("知识") as HTMLButtonElement;
     expect(btn).toBeDisabled();
   });
 
@@ -135,5 +136,129 @@ describe("provider chips 显隐", () => {
     expect(panel.textContent).toContain("收藏");
     expect(panel.textContent).toContain("已归档");
     expect(panel.textContent).toContain("回收站");
+  });
+});
+
+describe("执行事件挂到对应消息下 + 详情展开", () => {
+  const genEvents = (n: number, startSeq: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `e${startSeq + i}`, event_type: "tool_call_started",
+      summary: `事件 ${startSeq + i}`, sequence_number: startSeq + i,
+      created_at_ms: startSeq + i, status: null, completed_at_ms: null, payload_json: null,
+    }));
+  const msgs = [
+    { id: "m1", role: "user", content_text: "第一问", sequence_number: 10, created_at_ms: 10 },
+    { id: "m2", role: "assistant", content_text: "回答", sequence_number: 20, created_at_ms: 20 },
+  ];
+
+  it("事件渲染在所属消息块内部（seq ≤ 最大消息序号），不再有底部平铺区", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(3, 11)} />,
+    );
+    // 3 个事件 seq 11/12/13 全部归属 m1
+    const m1 = container.querySelector("#msg-m1")!;
+    const m2 = container.querySelector("#msg-m2")!;
+    expect(m1.querySelectorAll(".msg-event-row").length).toBe(3);
+    expect(m2.querySelectorAll(".msg-event-row").length).toBe(0);
+    expect(container.querySelector(".events-header")).toBeNull();
+  });
+
+  it("点击事件行展开详情（完整摘要/状态/耗时/payload JSON）", () => {
+    const events = [{
+      id: "e1", event_type: "command_started", summary: "cargo build --release",
+      sequence_number: 11, created_at_ms: 1_000, completed_at_ms: 53_000,
+      status: "completed", payload_json: JSON.stringify({ exit_code: 0, duration_s: 52 }),
+    }];
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={events} />,
+    );
+    expect(container.querySelector(".msg-event-detail")).toBeNull();
+    fireEvent.click(container.querySelector(".msg-event-row")!);
+    const detail = container.querySelector(".msg-event-detail")!;
+    expect(detail.textContent).toContain("cargo build --release");
+    expect(detail.textContent).toContain("状态 completed");
+    expect(detail.textContent).toContain("耗时 52s");
+    expect(detail.textContent).toContain("\"exit_code\": 0");
+    // 再点收起
+    fireEvent.click(container.querySelector(".msg-event-row")!);
+    expect(container.querySelector(".msg-event-detail")).toBeNull();
+  });
+
+  it("单条消息超过 4 个事件折叠，「还有 N 条」展开", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(7, 11)} />,
+    );
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(4);
+    expect(screen.getByText("还有 3 条 ▾")).toBeTruthy();
+    fireEvent.click(screen.getByText("还有 3 条 ▾"));
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(7);
+    fireEvent.click(screen.getByText("收起 ▴"));
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(4);
+  });
+
+  it("早于首条消息的事件显示为顶部「会话前置事件」组", () => {
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={msgs} events={genEvents(2, 1)} />,
+    );
+    expect(container.querySelector(".msg-events-label")?.textContent).toContain("会话前置事件");
+    expect(container.querySelectorAll(".msg-event-row").length).toBe(2);
+    expect(container.querySelector("#msg-m1")!.querySelectorAll(".msg-event-row").length).toBe(0);
+  });
+});
+
+describe("快速上/下浮动按钮", () => {
+  /** 伪造滚动容器：jsdom 无布局，手动喂 scrollHeight/clientHeight/scrollTop。 */
+  function fakeScrollRef() {
+    const listeners: ((e: unknown) => void)[] = [];
+    const el = {
+      scrollHeight: 3000, clientHeight: 600, scrollTop: 0,
+      addEventListener: (_t: string, fn: (e: unknown) => void) => { listeners.push(fn); },
+      removeEventListener: () => {},
+      scrollTo: vi.fn(),
+    } as unknown as HTMLElement;
+    const ref = { current: { inner: el } } as unknown as RefObject<
+      { inner: HTMLElement | null } | HTMLElement | null
+    >;
+    const setScroll = (top: number) => {
+      el.scrollTop = top;
+      listeners.forEach((fn) => fn({}));
+    };
+    return { ref, el, setScroll };
+  }
+
+  const manyMsgs = Array.from({ length: 30 }, (_, i) => ({
+    id: `m${i}`, role: i % 2 ? "assistant" : "user",
+    content_text: `消息 ${i}`, sequence_number: i + 1, created_at_ms: i + 1,
+  }));
+
+  it("顶部时两按钮都不显示；中部仅 ↑；底部仅 ↓", async () => {
+    const { ref, setScroll } = fakeScrollRef();
+    const { container, rerender } = render(
+      <ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />,
+    );
+    // 初始 scrollTop=0：都在顶部，两个按钮都不出现
+    expect(container.querySelector(".jump-top-btn")).toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).not.toBeNull();
+    // 滚到中部（scrollTop=1500，距底 900、距顶 1500）：↑ 出现、↓ 仍在
+    setScroll(1500);
+    rerender(<ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />);
+    expect(container.querySelector(".jump-top-btn")).not.toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).not.toBeNull();
+    // 滚到底部（scrollTop=2400，距底 0）：↑ 在、↓ 消失
+    setScroll(2400);
+    rerender(<ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />);
+    expect(container.querySelector(".jump-top-btn")).not.toBeNull();
+    expect(container.querySelector(".jump-bottom-btn")).toBeNull();
+  });
+
+  it("点 ↑ 平滑回到顶部", async () => {
+    const { ref, el, setScroll } = fakeScrollRef();
+    const { container } = render(
+      <ConversationDetail {...baseDetail} messages={manyMsgs} scrollContainerRef={ref} />,
+    );
+    setScroll(1500);
+    await waitFor(() => expect(container.querySelector(".jump-top-btn")).not.toBeNull());
+    fireEvent.click(container.querySelector(".jump-top-btn")!);
+    expect(el.scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
   });
 });

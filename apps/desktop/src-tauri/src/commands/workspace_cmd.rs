@@ -1,6 +1,6 @@
 //! v1.0.0 Workspace 治理 + 保存搜索 + 原始视图 + 来源应用命令（plan §4.3/§13.2/P2-3）。
 
-use super::{io_err, storage_err};
+use super::*;
 use ch_daemon::DaemonState;
 
 // ── 保存搜索（plan §13.2，V14）────────────────────────────────────────
@@ -147,6 +147,15 @@ pub(crate) async fn open_source_app(provider: String) -> Result<String, String> 
     }
 }
 
+/// 会话 → 恢复命令（仅 claude-code / codex 有官方 resume）。
+fn resume_cmd_for(conv: &ch_domain::Conversation) -> Option<String> {
+    match conv.provider.as_str() {
+        "claude-code" => Some(format!("claude --resume {}", conv.source_conversation_id)),
+        "codex" => Some(format!("codex resume {}", conv.source_conversation_id)),
+        _ => None,
+    }
+}
+
 /// 生成「恢复原会话」命令（plan P2-3：来源支持时恢复原会话）。
 /// 仅 CLI 来源（claude-code / codex）有官方 resume；其余返回 None。
 #[tauri::command]
@@ -161,11 +170,116 @@ pub(crate) async fn resume_command(
     else {
         return Ok(None);
     };
-    let provider = conv.provider.as_str();
-    let cmd = match provider {
-        "claude-code" => format!("claude --resume {}", conv.source_conversation_id),
-        "codex" => format!("codex resume {}", conv.source_conversation_id),
-        _ => return Ok(None),
+    Ok(resume_cmd_for(&conv))
+}
+
+/// 直接在系统终端里执行「恢复原会话」命令（新开一个终端窗口）。
+/// 命令在后端按会话来源构造，前端不传自由文本（避免任意命令执行面）。
+#[tauri::command]
+pub(crate) async fn resume_in_terminal(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<Option<String>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    let conv = repo
+        .get_conversation(&conversation_id)
+        .map_err(|e| storage_err(e))?
+        .ok_or_else(|| AppError::not_found("会话不存在").to_string())?;
+    let Some(cmd) = resume_cmd_for(&conv) else {
+        return Ok(None); // 来源不支持 resume（与 resume_command 同口径）
     };
-    Ok(Some(cmd))
+    open_terminal(&cmd).map(|()| Some(cmd))
+}
+
+/// 在系统终端新窗口执行命令（macOS Terminal / Windows cmd / Linux 常见终端）。
+fn open_terminal(cmd: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "tell application \"Terminal\" to do script \"{}\"",
+            escape_applescript(cmd)
+        );
+        let out = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| format!("无法启动 osascript：{e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "Terminal 打开失败：{}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "Threadock", "cmd", "/K", cmd])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("无法打开终端：{e}"))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let run = format!("{cmd}; exec bash");
+        // 常见终端逐个尝试（不存在则 NotFound，换下一个）
+        let candidates: Vec<(&str, Vec<String>)> = vec![
+            (
+                "gnome-terminal",
+                vec!["--".into(), "bash".into(), "-c".into(), run.clone()],
+            ),
+            (
+                "konsole",
+                vec!["-e".into(), "bash".into(), "-c".into(), run.clone()],
+            ),
+            (
+                "xterm",
+                vec!["-e".into(), "bash".into(), "-c".into(), run.clone()],
+            ),
+        ];
+        for (bin, args) in candidates {
+            match std::process::Command::new(bin).args(&args).spawn() {
+                Ok(_) => return Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(format!("打开 {bin} 失败：{e}")),
+            }
+        }
+        Err("未找到可用终端（尝试过 gnome-terminal / konsole / xterm）".into())
+    }
+}
+
+/// AppleScript 字符串转义：反斜杠与双引号（命令本身由后端构造，双保险）。
+fn escape_applescript(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applescript_escaping() {
+        assert_eq!(
+            escape_applescript("claude --resume abc"),
+            "claude --resume abc"
+        );
+        assert_eq!(
+            escape_applescript("echo \"hi\" && cd \\tmp"),
+            "echo \\\"hi\\\" && cd \\\\tmp"
+        );
+    }
+
+    #[test]
+    fn resume_cmd_provider_matrix() {
+        let conv = ch_domain::Conversation::new(ch_domain::Provider::ClaudeCode, "s-1");
+        assert_eq!(
+            resume_cmd_for(&conv).as_deref(),
+            Some("claude --resume s-1")
+        );
+        let codex = ch_domain::Conversation::new(ch_domain::Provider::Codex, "s-2");
+        assert_eq!(resume_cmd_for(&codex).as_deref(), Some("codex resume s-2"));
+        let generic = ch_domain::Conversation::new(ch_domain::Provider::Generic, "s-3");
+        assert!(resume_cmd_for(&generic).is_none());
+    }
 }

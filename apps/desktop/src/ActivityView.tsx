@@ -8,6 +8,11 @@ import ScrollArea from "./ScrollArea";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
 import HeatmapGitHub from "./HeatmapGitHub";
+import { CardTitle } from "./CardTitle";
+import { Skeleton } from "./Skeleton";
+import { InlineEmpty } from "./EmptyState";
+import { ListToolbar } from "./ListToolbar";
+import { Icon } from "./Icon";
 
 interface Stats {
   heatmap: { day: string; calls: number; sessions: number }[];
@@ -463,22 +468,20 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
   return (
     <div className="activity-page">
       <div className="ops-card">
-        <div className="ops-card-title">
-          📆 活动节律
-          <span className="ops-card-sub">{rangeText}</span>
-          {stats && (
-            <>
-              <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={() => exportCsv(false)}
-                title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
-                📋 复制 CSV
-              </button>
-              <button className="action-btn" style={{ fontSize: 11 }} onClick={() => exportCsv(true)}
-                title="弹文件选择对话框，把 CSV 保存到磁盘（实际写入需要 clipboard 兜底）">
-                💾 保存 CSV
-              </button>
-            </>
-          )}
-          <div className="ops-range" style={{ marginLeft: stats ? 8 : "auto" }}>
+        <CardTitle icon="calendar" sub={rangeText} trailing={stats ? (
+          <>
+            <button className="action-btn" onClick={() => exportCsv(false)}
+              title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
+              <Icon name="copy" size={12} /> 复制 CSV
+            </button>
+            <button className="action-btn" onClick={() => exportCsv(true)}
+              title="弹文件选择对话框，把 CSV 保存到磁盘（实际写入需要 clipboard 兜底）">
+              <Icon name="save" size={12} /> 保存 CSV
+            </button>
+          </>
+        ) : null}>活动节律</CardTitle>
+        <div className="ops-range-wrap">
+          <div className="ops-range">
             {([90, 180, 365] as const).map((d) => (
               <button
                 key={d}
@@ -512,51 +515,49 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
             ))}
           </div>
         </div>
-        <div className="kb-grid">
-          <div className="kb-stat" title="统计范围内全部工具调用次数"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
-          <div className="kb-stat" title="至少有 1 次调用的天数"><b>{activeDays}</b><span>活跃天数</span></div>
-          <div className="kb-stat" title="总调用 ÷ 活跃天数"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
-          <div className="kb-stat" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
-          <div className="kb-stat" title="今日（最近 1 天）总调用"><b>{todayStats.calls.toLocaleString()}</b><span>今日调用 · {todayStats.sessions} 会话</span></div>
-          <div className="kb-stat" title="最近 7 天总调用"><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
-          <div className="kb-stat" title="最近 30 天总调用"><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
-          <div className="kb-stat" title="从今天或昨天起算的连续活跃天数"><b>{streak} 天</b><span>🔥 连续活跃</span></div>
+        <div className="kb-grid-grouped">
+          <div className="kb-grid-section">
+            <div className="kb-grid-section-label">活动度量</div>
+            <div className="kb-grid">
+              <div className="kb-stat kpi-primary" title="统计范围内全部工具调用次数"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
+              <div className="kb-stat kpi-primary" title="至少有 1 次调用的天数"><b>{activeDays}</b><span>活跃天数</span></div>
+              <div className="kb-stat kpi-primary" title="总调用 ÷ 活跃天数"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
+              <div className="kb-stat kpi-primary" title="从今天或昨天起算的连续活跃天数"><b>{streak} 天</b><span><Icon name="flame" size={11} /> 连续活跃</span></div>
+            </div>
+          </div>
+          <div className="kb-grid-section">
+            <div className="kb-grid-section-label">时间分布</div>
+            <div className="kb-grid">
+              <div className="kb-stat kpi-secondary" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
+              <div className="kb-stat kpi-secondary" title="今日（最近 1 天）总调用"><b>{todayStats.calls.toLocaleString()}</b><span>今日 · {todayStats.sessions} 会话</span></div>
+              <div className="kb-stat kpi-secondary" title="最近 7 天总调用"><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
+              <div className="kb-stat kpi-secondary" title="最近 30 天总调用"><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title" style={{ alignItems: "center" }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
-            {totalCalls.toLocaleString()} contributions in the last {days} days
-          </span>
-          {toolList.length > 0 && (
-            <span className="heat-tool-filter" style={{ marginLeft: "auto", display: "inline-flex", gap: 4, alignItems: "center" }}>
-              <span style={{ fontSize: 11, opacity: 0.6 }}>维度：</span>
-              <button
-                className={`filter-chip ${toolFilter === "all" ? "active" : ""}`}
-                onClick={() => setToolFilter("all")}
-                style={{ fontSize: 11 }}
-              >全部工具</button>
-              <select
-                value={toolFilter === "all" ? "" : toolFilter}
-                onChange={(e) => setToolFilter(e.target.value || "all")}
-                className="heat-tool-select"
-                title="只看某工具的活跃度"
-              >
-                <option value="">指定工具…</option>
-                {toolList.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </span>
-          )}
-        </div>
+        <CardTitle icon="calendar" sub={`${totalCalls.toLocaleString()} contributions in the last ${days} days`} trailing={
+          <ListToolbar
+            dense
+            filterLabel="维度"
+            filterValue={toolFilter === "all" ? "__all__" : toolFilter}
+            onFilterChange={(v) => setToolFilter(v === "__all__" ? "all" : v)}
+            filterOptions={[{ value: "__all__", label: "全部工具" }, ...toolList.map((t) => ({ value: t, label: t }))]}
+            count={totalCalls}
+            countLabel="次调用"
+          />
+        }>活动热力图</CardTitle>
         {grid.cols.length === 0 ? (
-          <div className="ops-table-empty">
-            {isEmpty
-              ? "📊 暂无活动数据 — 导入并使用 ZCode / Claude Code / Cursor / minimax / Codex 等 Agent 后，本页会按天聚合工具调用与活跃会话"
-              : "暂无热力数据（同步指标后生成）"}
-          </div>
+          stats === null
+            ? <Skeleton variant="heatmap" />
+            : <InlineEmpty
+                message="暂无活动热力数据"
+                hint={isEmpty
+                  ? "同步并使用 ZCode / Claude Code / Cursor / MiniMax / Codex 等 Agent 后，本页会按天聚合"
+                  : "同步指标后生成热力"}
+              />
         ) : (
           <div className="heatmap-wrap">
             <div className="heatmap-scroll">
@@ -666,11 +667,10 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">
-          ⏰ 24 小时分布
-          {peak.calls > 0 && <span className="ops-card-sub">高峰 {String(peak.hour).padStart(2, "0")}:00 · {peak.calls.toLocaleString()} 次</span>}
-        </div>
-        {(stats?.hourly ?? []).length === 0 ? <div className="ops-table-empty">暂无数据</div> : (
+        <CardTitle icon="clock" sub={peak.calls > 0 ? `高峰 ${String(peak.hour).padStart(2, "0")}:00 · ${peak.calls.toLocaleString()} 次` : undefined}>24 小时分布</CardTitle>
+        {(stats?.hourly ?? []).length === 0
+          ? (stats === null ? <Skeleton variant="chart-bars" count={12} height={140} /> : <InlineEmpty message="暂无 24 小时分布数据" />)
+          : (
           <>
             <div className="day-parts">
               {[...parts.entries()].map(([name, v]) => (
@@ -719,17 +719,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       </div>
 
       <div className="ops-card">
-        <div className="ops-card-title">
-          🔧 工具使用 Top 10
-          {toolRanking.curMonth && (
-            <span className="ops-card-sub">
-              {toolRanking.curMonth.slice(2)} 月
-              {toolRanking.prevMonth && <> · 对比 {toolRanking.prevMonth.slice(2)} 月</>}
-            </span>
-          )}
-        </div>
+        <CardTitle icon="wand" sub={toolRanking.curMonth ? `${toolRanking.curMonth.slice(2)} 月${toolRanking.prevMonth ? ` · 对比 ${toolRanking.prevMonth.slice(2)} 月` : ""}` : undefined}>工具使用 Top 10</CardTitle>
         {toolRanking.items.length === 0 ? (
-          <div className="ops-table-empty">暂无数据</div>
+          stats === null ? <Skeleton variant="list" count={6} /> : <InlineEmpty message="暂无工具使用排行" hint="导入并使用 Agent 后会按月统计" />
         ) : (
           <div className="tool-rank-list">
             {toolRanking.items.map((t, i) => {

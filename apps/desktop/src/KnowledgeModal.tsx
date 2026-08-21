@@ -5,17 +5,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import type { ExtractionResult } from "./types";
+import type { ExtractionResult, KnowledgeEngine } from "./types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
+import { Icon } from "./Icon";
 interface Props {
   knowledge: ExtractionResult;
   /** 所属会话 ID（用于跨会话引用排除自身）。 */
   conversationId?: string;
   /** 所属会话标题（弹窗副标题展示）。 */
   convTitle?: string | null;
+  /** 当前提取引擎（默认规则；AI 需在设置中启用）。 */
+  engine?: KnowledgeEngine;
   onClose: () => void;
-  onReextract: () => void;
+  /** 以指定引擎重新提取（可异步；无论成败，弹窗都会解除按钮禁用态） */
+  onReextract: (engine: KnowledgeEngine) => void | Promise<void>;
   /** 跳转到其他会话（跨会话引用点击）。 */
   onJumpToConversation?: (conversationId: string) => void;
 }
@@ -85,9 +89,19 @@ export function knowledgeToJson(k: ExtractionResult): string {
   }, null, 2);
 }
 
-export default function KnowledgeModal({ knowledge, conversationId, convTitle, onClose, onReextract, onJumpToConversation }: Props) {
+export default function KnowledgeModal({ knowledge, conversationId, convTitle, engine = "rule", onClose, onReextract, onJumpToConversation }: Props) {
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState<Tab>("all");
+  /** 引擎切换瞬时的请求中标记（AI 引擎有网络延迟）；
+   * 无论成功失败都要清除——失败路径（未启用/网络错）不会有新结果到达，
+   * 若只依赖「结果引用变化」清除，按钮会永久禁用（功能测试轮发现的回归） */
+  const [switching, setSwitching] = useState<KnowledgeEngine | null>(null);
+  const runExtract = (target: KnowledgeEngine) => {
+    setSwitching(target);
+    void Promise.resolve(onReextract(target)).finally(() => setSwitching(null));
+  };
+  const isLlmResult = (knowledge.extractor ?? "").startsWith("llm:");
+  const llmModel = isLlmResult ? knowledge.extractor.slice(4).split("@")[0] : null;
   /** 导出 dropdown 开关（合并 MD/JSON 后的单按钮） */
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -180,11 +194,27 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
       <div className="settings-modal knowledge-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
           <h2>
-            ✨ 知识提取结果
+            <Icon name="sparkle" size={15} /> 知识提取结果
             {convTitle && <span className="knowledge-modal-sub">{convTitle}</span>}
+            {llmModel && (
+              <span className="badge" style={{ marginLeft: 8 }} title={`由 ${llmModel} 提取`}><Icon name="cpu" size={10} /> {llmModel}</span>
+            )}
           </h2>
           <div className="knowledge-modal-actions">
-            <button className="action-btn" onClick={onReextract}>↻ 重新提取</button>
+            {/* 引擎切换：规则（默认，离线确定性）/ AI（需在设置中启用大模型） */}
+            <div className="settings-segment" title="切换提取引擎并重新提取">
+              <button
+                className={engine === "rule" ? "active" : ""}
+                disabled={switching !== null}
+                onClick={() => runExtract("rule")}
+              ><Icon name="settings" size={11} /> 规则</button>
+              <button
+                className={engine === "llm" ? "active" : ""}
+                disabled={switching !== null}
+                onClick={() => runExtract("llm")}
+              >{switching === "llm" ? "AI 提取中…" : <><Icon name="sparkle" size={11} /> AI 引擎</>}</button>
+            </div>
+            <button className="action-btn" onClick={() => runExtract(engine)} disabled={switching !== null}><Icon name="sync" size={11} /> 重新提取</button>
             {/* MD/JSON 下载合并为单一 dropdown 按钮：节省顶栏空间 */}
             <div className={`list-dropdown ${downloadOpen ? "open" : ""}`} ref={downloadRef}>
               <button
@@ -216,7 +246,7 @@ export default function KnowledgeModal({ knowledge, conversationId, convTitle, o
             >
               {copied ? "✓ 已复制" : "⧉ 复制为纪要"}
             </button>
-            <button className="settings-close" onClick={onClose}>✕</button>
+            <button className="settings-close" onClick={onClose} aria-label="关闭"><Icon name="close" size={14} /></button>
           </div>
         </div>
         {/* 类型筛选 tabs（带计数徽标） */}

@@ -61,6 +61,27 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     Ok(ch_adapter_sdk::open_readonly(db_path)?)
 }
 
+/// `读取 src/main.rs`（路径取 basename，防超长）。
+fn file_summary(verb: &str, path: Option<&str>) -> String {
+    match path {
+        Some(p) if !p.is_empty() => {
+            let name = p.rsplit('/').next().unwrap_or(p);
+            format!("{verb} {}", truncate_chars(name, 80))
+        }
+        _ => verb.to_string(),
+    }
+}
+
+/// 按字符截断（中文安全），超长加省略号。
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let cut: String = s.chars().take(max).collect();
+        format!("{cut}…")
+    }
+}
+
 /// 列出 `ZCode` 所有**主任务**`会话（parent_id` 为空），按更新时间降序。
 ///
 /// `ZCode` 的 session 有层级：主任务（`parent_id` 为 null/空）下面挂多个子任务
@@ -238,6 +259,68 @@ pub fn parse_session(
                         }
                     }
                 }
+                "tool" => {
+                    // 新 schema（2026-08 实测）：{callID, tool, state:{status,
+                    // input:{command|file_path…}, output, time:{start,end}}}
+                    let tool_name = part_obj
+                        .get("tool")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("tool");
+                    let state = part_obj.get("state").unwrap_or(&serde_json::Value::Null);
+                    let input = state.get("input").unwrap_or(&serde_json::Value::Null);
+                    let arg = |k: &str| input.get(k).and_then(|v| v.as_str());
+                    let completed =
+                        state.get("status").and_then(|s| s.as_str()) == Some("completed");
+                    let mut payload = serde_json::json!({
+                        "tool": tool_name,
+                        "input": input,
+                    });
+                    if let Some(out) = state.get("output").and_then(|o| o.as_str()) {
+                        payload["output"] = serde_json::json!(truncate_chars(out, 4096));
+                    }
+                    if let Some(t) = state.get("time") {
+                        payload["time"] = t.clone();
+                    }
+                    let (event_type, summary) = match tool_name {
+                        "Bash" => {
+                            let cmd = arg("command").unwrap_or("");
+                            let s = if cmd.is_empty() {
+                                "Bash".to_string()
+                            } else {
+                                truncate_chars(cmd.lines().next().unwrap_or("").trim(), 120)
+                            };
+                            (
+                                if completed {
+                                    EventType::CommandCompleted
+                                } else {
+                                    EventType::CommandStarted
+                                },
+                                s,
+                            )
+                        }
+                        "Read" => (EventType::FileRead, file_summary("读取", arg("file_path"))),
+                        "Write" => (
+                            EventType::FileCreated,
+                            file_summary("写入", arg("file_path")),
+                        ),
+                        "Edit" | "MultiEdit" | "NotebookEdit" => (
+                            EventType::FileUpdated,
+                            file_summary("修改", arg("file_path")),
+                        ),
+                        "TodoWrite" => (EventType::ToolCallStarted, "更新 TODO".to_string()),
+                        _ => (EventType::ToolCallStarted, format!("工具 {tool_name}")),
+                    };
+                    events.push(RawEvent {
+                        event_type,
+                        summary: Some(summary),
+                        payload_json: Some(payload),
+                        source_event_id: part_obj
+                            .get("callID")
+                            .and_then(|i| i.as_str())
+                            .map(String::from),
+                        created_at: msg_created_at,
+                    });
+                }
                 "tool_use" | "tool-call" => {
                     let tool_name = part_obj
                         .get("name")
@@ -245,10 +328,10 @@ pub fn parse_session(
                         .unwrap_or("tool");
                     events.push(RawEvent {
                         event_type: EventType::ToolCallStarted,
-                        summary: Some(format!("Tool: {tool_name}")),
+                        summary: Some(format!("工具 {tool_name}")),
                         payload_json: Some(part_obj),
                         source_event_id: None,
-                        created_at: None,
+                        created_at: msg_created_at,
                     });
                 }
                 "tool_result" | "tool-result" => {
@@ -257,7 +340,7 @@ pub fn parse_session(
                         summary: Some("Tool result".into()),
                         payload_json: Some(part_obj),
                         source_event_id: None,
-                        created_at: None,
+                        created_at: msg_created_at,
                     });
                 }
                 "command" => {
@@ -270,7 +353,7 @@ pub fn parse_session(
                         summary: Some(cmd.to_string()),
                         payload_json: Some(part_obj),
                         source_event_id: None,
-                        created_at: None,
+                        created_at: msg_created_at,
                     });
                 }
                 _ => {}
@@ -430,6 +513,65 @@ mod tests {
             .as_deref()
             .expect("unexpected None")
             .contains("Bash"));
+    }
+
+    #[test]
+    fn new_tool_schema_extracts_readable_events() {
+        // 2026-08 实测 schema：part.type="tool"，state 含 input/output/status/time
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("t.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
+        ).expect("unexpected None");
+        conn.execute(
+            "INSERT INTO session VALUES ('s','新schema会话','d',0,0,NULL)",
+            [],
+        )
+        .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO message VALUES ('m1','s',0,0,'{\"role\":\"assistant\"}',0)",
+            [],
+        )
+        .expect("unexpected None");
+        let bash_part = r#"{"type":"tool","callID":"c1","tool":"Bash","state":{"status":"completed","input":{"command":"printf 'Prompt entries: '; rg -c '^x' a.md\nwc -l"},"output":"Prompt entries: 520\n520","time":{"start":1787284037790,"end":1787284037839}}}"#;
+        let read_part = r#"{"type":"tool","callID":"c2","tool":"Read","state":{"status":"completed","input":{"file_path":"/a/b/袁隆平.png","limit":50},"output":"..."}}"#;
+        let edit_part = r#"{"type":"tool","callID":"c3","tool":"Edit","state":{"status":"running","input":{"file_path":"/a/b/main.rs"}}}"#;
+        for (i, p) in [bash_part, read_part, edit_part].iter().enumerate() {
+            conn.execute(
+                "INSERT INTO part VALUES (?1,'m1','s',0,0,?2,?3)",
+                rusqlite::params![format!("p{i}"), p, i as i64],
+            )
+            .expect("unexpected None");
+        }
+        drop(conn);
+
+        let raw = super::parse_session(&db, "s").expect("parse failed");
+        assert_eq!(raw.events.len(), 3, "新 schema tool part 应全部成事件");
+        let bash = &raw.events[0];
+        assert_eq!(bash.event_type, EventType::CommandCompleted);
+        assert!(bash
+            .summary
+            .as_deref()
+            .expect("unexpected None")
+            .starts_with("printf 'Prompt entries"));
+        assert!(bash
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("output"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("520")));
+        assert_eq!(raw.events[1].event_type, EventType::FileRead);
+        assert_eq!(raw.events[1].summary.as_deref(), Some("读取 袁隆平.png"));
+        // running 状态的 Edit → FileUpdated + Started 语义（无输出）
+        assert_eq!(raw.events[2].event_type, EventType::FileUpdated);
+        assert_eq!(raw.events[2].summary.as_deref(), Some("修改 main.rs"));
+        assert!(raw.events[2]
+            .payload_json
+            .as_ref()
+            .is_some_and(|p| p.get("output").is_none()));
     }
 
     #[test]

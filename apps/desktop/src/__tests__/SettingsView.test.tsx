@@ -8,6 +8,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "reset_range") return { conversations: 2, messages: 10 };
     if (cmd === "governance_log_list") return [];
     if (cmd === "app_setting_get") return null;
+    if (cmd === "llm_config_get")
+      return {
+        enabled: false, base_url: "", model: "", timeout_secs: 60, max_input_chars: 48000,
+        has_api_key: false, api_key_masked: null, is_local: false, api_key_broken: false,
+      };
     return {};
   }),
 }));
@@ -19,6 +24,8 @@ import SettingsView, { RESET_CONFIRM_TEXT } from "../SettingsView";
 const base = {
   theme: "dark" as const,
   onThemeChange: vi.fn(),
+  textSize: "sm" as const,
+  onTextSizeChange: vi.fn(),
   syncIntervalMin: 10,
   onSyncIntervalChange: vi.fn(),
   retentionDays: 0,
@@ -43,7 +50,7 @@ const openSettings = () => render(<SettingsView {...base} />);
 describe("SettingsView 外观与同步", () => {
   it("主题切换按钮触发回调", () => {
     openSettings();
-    fireEvent.click(screen.getByText("☀ 浅色"));
+    fireEvent.click(screen.getByText("浅色"));
     expect(base.onThemeChange).toHaveBeenCalledWith("light");
   });
 

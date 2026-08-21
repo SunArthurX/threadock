@@ -300,6 +300,6 @@ describe("活动页 .slice 崩溃回归（month 为 undefined）", () => {
     // 触发渲染；如果 .slice bug 还在会 throw
     const { findByText } = render(<ActivityView />);
     // 找到标题即视为渲染成功
-    expect(await findByText("📆 活动节律")).toBeTruthy();
+    expect(await findByText("活动节律")).toBeTruthy();
   });
 });

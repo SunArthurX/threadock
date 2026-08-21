@@ -9,6 +9,7 @@ import AssetsSection from "./AssetsSection";
 import type { Section, OpsOverview, ProviderUsage, ModelUsage, DailyUsage, ToolUsageRow, RiskyCall, AssetRow, AutomationRow, DirCost, CacheStat, AnomalyRow, AgentHealth, LatencyStat, TokenWaste, AgentBenchmark, AuditReport, PolicyRule, BudgetSettings } from "./ops-types";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
+import { Icon } from "./Icon";
 
 type Props = {
   section: Section;
@@ -200,21 +201,30 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
             ))}
           </div>
         )}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button onClick={async () => { setSyncing(true); let ok = false; try { await invoke("ops_sync", { force: true }); ok = true; } catch { /* 失败静默：后台/可选操作 */ } if (ok) setLastSyncedAt(Date.now()); setSyncing(false); loadSection(section); }}>
-            {syncing ? "⟳ 同步指标中…" : "↻ 同步指标"}
-          </button>
-          {/* P1-B2: 数据新鲜度指示 — 超过 1 小时变 stale（黄） */}
-          {lastSyncedAt != null && (() => {
-            // 取最新时间显示「同步于 X 分钟前」，父级 setSyncing 触发重渲染。
-            // eslint-disable-next-line react-hooks/purity
-            const ageMs = Date.now() - lastSyncedAt;
-            const stale = ageMs > 60 * 60_000;
-            const min = Math.floor(ageMs / 60_000);
-            const label = min < 1 ? "刚刚" : min < 60 ? `${min} 分钟前` : min < 1440 ? `${Math.floor(min / 60)} 小时前` : `${Math.floor(min / 1440)} 天前`;
-            return <span className={`ops-freshness ${stale ? "stale" : "fresh"}`} title={`上次同步：${new Date(lastSyncedAt).toLocaleString("zh-CN")}`}>· 同步于 {label}</span>;
-          })()}
-        </div>
+        <div className="ops-toolbar-spacer" />
+        {lastSyncedAt != null && (() => {
+          // 取最新时间显示「同步于 X 分钟前」，父级 setSyncing 触发重渲染。
+          // eslint-disable-next-line react-hooks/purity
+          const ageMs = Date.now() - lastSyncedAt;
+          const stale = ageMs > 60 * 60_000;
+          const min = Math.floor(ageMs / 60_000);
+          const label = min < 1 ? "刚刚" : min < 60 ? `${min} 分钟前` : min < 1440 ? `${Math.floor(min / 60)} 小时前` : `${Math.floor(min / 1440)} 天前`;
+          return (
+            <span className={`ops-freshness ${stale ? "stale" : "fresh"}`} title={`上次同步：${new Date(lastSyncedAt).toLocaleString("zh-CN")}`}>
+              <Icon name={stale ? "warning" : "check"} size={11} />
+              同步于 {label}
+            </span>
+          );
+        })()}
+        <button
+          className="action-btn"
+          onClick={async () => { setSyncing(true); let ok = false; try { await invoke("ops_sync", { force: true }); ok = true; } catch { /* 失败静默：后台/可选操作 */ } if (ok) setLastSyncedAt(Date.now()); setSyncing(false); loadSection(section); }}
+          disabled={syncing}
+        >
+          {syncing
+            ? <><Icon name="sync" size={12} className="icon-spin" /> 同步中…</>
+            : <><Icon name="sync" size={12} /> 同步{section === "assets" ? "资产" : "指标"}</>}
+        </button>
       </div>
       {recalcMsg && <div className="recalc-msg">{recalcMsg}</div>}
 

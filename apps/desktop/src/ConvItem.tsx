@@ -25,6 +25,7 @@ function ConvItemImpl({
 }: ConvItemProps) {
   return (
     <div
+      data-conv-row={conv.id}
       className={`list-item ${isChild ? "child-item" : ""} ${isActive ? "active" : ""} ${isSelected ? "selected-multi" : ""} ${isPinned ? "pinned" : ""}`}
       onClick={onItemClick}
       onContextMenu={onContextMenu}

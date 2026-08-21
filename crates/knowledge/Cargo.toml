@@ -9,6 +9,7 @@ license.workspace = true
 [dependencies]
 ch-domain = { path = "../domain" }
 ch-normalization = { path = "../normalization" }
+ch-llm = { path = "../llm" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

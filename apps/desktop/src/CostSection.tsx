@@ -2,6 +2,9 @@
 import { useMemo } from "react";
 import { formatTokens, formatCost } from "./charts";
 import { BarChart } from "./charts";
+import { CardTitle } from "./CardTitle";
+import { Skeleton } from "./Skeleton";
+import { InlineEmpty } from "./EmptyState";
 import type { DirCost, BudgetSettings, ProviderUsage, ModelUsage, DailyUsage } from "./ops-types";
 import { meta } from "./ops-types";
 
@@ -113,33 +116,68 @@ export default function CostSection({
 
   const budgetCard = (
       <div className="ops-card ops-budget">
-        <div className="ops-card-title">月度预算</div>
+        <CardTitle icon="dollar" sub="按当前速率自动检测超支并提醒">月度预算</CardTitle>
         <div className="budget-grid">
-          <div className="budget-item">
-            <div className="budget-label">本月 Tokens</div>
-            <div className="budget-value">{monthUsage ? formatTokens(monthUsage.tokens) : "—"}</div>
-            {tokenPct != null && (<>
-              <div className="budget-progress"><div className={`budget-progress-bar ${tokenPct >= 100 ? "over" : ""}`} style={{ width: `${Math.min(tokenPct, 100)}%` }} /></div>
-              <div className="budget-pct">{Math.round(tokenPct)}% / {formatTokens(budget.monthly_token_limit!)}</div>
-            </>)}
-          </div>
-          <div className="budget-item">
-            <div className="budget-label">本月成本</div>
-            <div className="budget-value">{monthUsage ? formatCost(monthUsage.cost_usd) : "—"}</div>
-            {costPct != null && (<>
-              <div className="budget-progress"><div className={`budget-progress-bar ${costPct >= 100 ? "over" : ""}`} style={{ width: `${Math.min(costPct, 100)}%` }} /></div>
-              <div className="budget-pct">{Math.round(costPct)}% / {formatCost(budget.monthly_cost_limit!)}</div>
-            </>)}
-          </div>
-          <div className="budget-item budget-edit">
-            <div className="budget-label">阈值设置</div>
-            <div className="budget-inputs">
-              <input type="text" placeholder="Token 上限" value={budgetInput.tokens}
-                onChange={(e) => onBudgetInput("tokens", e.target.value)} />
-              <input type="text" placeholder="成本上限 $" value={budgetInput.cost}
-                onChange={(e) => onBudgetInput("cost", e.target.value)} />
-              <button className="action-btn" onClick={onSaveBudget}>保存预算</button>
+          {/* 左侧两个大数字 — 进度条 + 数字突出 */}
+          <div className="budget-stat">
+            <div className="budget-stat-label">本月 Tokens</div>
+            <div className="budget-stat-value">
+              {monthUsage ? formatTokens(monthUsage.tokens) : <span className="budget-stat-empty">—</span>}
             </div>
+            {tokenPct != null ? (
+              <>
+                <div className="budget-progress">
+                  <div className={`budget-progress-bar ${tokenPct >= 100 ? "over" : tokenPct >= 80 ? "warn" : ""}`}
+                    style={{ width: `${Math.min(tokenPct, 100)}%` }} />
+                </div>
+                <div className="budget-pct">
+                  <span className="budget-pct-num">{Math.round(tokenPct)}%</span>
+                  <span className="budget-pct-sep">/</span>
+                  <span className="budget-pct-cap">上限 {formatTokens(budget.monthly_token_limit!)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="budget-stat-hint">未设置上限</div>
+            )}
+          </div>
+          <div className="budget-stat">
+            <div className="budget-stat-label">本月成本</div>
+            <div className="budget-stat-value">
+              {monthUsage ? formatCost(monthUsage.cost_usd) : <span className="budget-stat-empty">—</span>}
+            </div>
+            {costPct != null ? (
+              <>
+                <div className="budget-progress">
+                  <div className={`budget-progress-bar ${costPct >= 100 ? "over" : costPct >= 80 ? "warn" : ""}`}
+                    style={{ width: `${Math.min(costPct, 100)}%` }} />
+                </div>
+                <div className="budget-pct">
+                  <span className="budget-pct-num">{Math.round(costPct)}%</span>
+                  <span className="budget-pct-sep">/</span>
+                  <span className="budget-pct-cap">上限 {formatCost(budget.monthly_cost_limit!)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="budget-stat-hint">未设置上限</div>
+            )}
+          </div>
+          {/* 右侧：Apple-style Form 字段，label 在上、input 在下 */}
+          <div className="budget-form">
+            <div className="budget-form-field">
+              <label className="budget-form-label" htmlFor="budget-tokens">Token 上限</label>
+              <input id="budget-tokens" className="budget-form-input" type="text" inputMode="numeric"
+                placeholder="例如 5000000" value={budgetInput.tokens}
+                onChange={(e) => onBudgetInput("tokens", e.target.value)} />
+            </div>
+            <div className="budget-form-field">
+              <label className="budget-form-label" htmlFor="budget-cost">成本上限（USD）</label>
+              <input id="budget-cost" className="budget-form-input" type="text" inputMode="decimal"
+                placeholder="例如 50" value={budgetInput.cost}
+                onChange={(e) => onBudgetInput("cost", e.target.value)} />
+            </div>
+            <button className="budget-form-submit" onClick={onSaveBudget}>
+              保存预算
+            </button>
           </div>
         </div>
         {summary && (
@@ -158,10 +196,7 @@ export default function CostSection({
       {/* 超支预测（基于本月速率外推） */}
       {projection && (projTokenOver != null || projCostOver != null) && (
         <div className={`ops-card projection-card ${(projTokenOver ?? 0) > 0 || (projCostOver ?? 0) > 0 ? "over" : "ok"}`}>
-          <div className="ops-card-title">
-            🔮 月末预测
-            <span className="ops-card-sub">按当前速率（本月 {projection.dayOfMonth}/{projection.daysInMonth} 天）外推</span>
-          </div>
+          <CardTitle icon="trending" sub={`按当前速率（本月 ${projection.dayOfMonth}/${projection.daysInMonth} 天）外推`}>月末预测</CardTitle>
           <div className="projection-grid">
             {projTokenOver != null && (
               <div className="projection-item">
@@ -193,12 +228,9 @@ export default function CostSection({
         </div>
       )}
       <div className="ops-card">
-        <div className="ops-card-title">
-          按项目成本 Top10
-          <button className="action-btn" style={{ marginLeft: "auto", fontSize: 11 }} onClick={onRecalc}>$ 重算</button>
-        </div>
+        <CardTitle icon="folder" trailing={<button className="action-btn" onClick={onRecalc}>重算</button>}>按项目成本 Top10</CardTitle>
         {dirCosts.length === 0 ? (
-          loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">暂无数据</div>
+          loading ? <Skeleton variant="list" count={5} /> : <InlineEmpty message="暂无项目成本数据" hint="导入并使用 Agent 后将按 source_dir 自动归并" />
         ) : (
           <table className="ops-table">
             <thead><tr><th>项目目录</th><th>Tokens</th><th>成本</th><th>请求</th>{onJumpByDir && <th></th>}</tr></thead>
@@ -220,7 +252,7 @@ export default function CostSection({
       {/* 按 Provider 维度成本对比（与项目维度互补） */}
       {byProvider && byProvider.length > 0 && (
         <div className="ops-card">
-          <div className="ops-card-title">按 Agent（Provider）成本分布</div>
+          <CardTitle icon="globe">按 Agent（Provider）成本分布</CardTitle>
           <BarChart
             data={byProvider.map((p) => ({ label: meta(p.provider).label, value: p.cost_usd }))}
             height={120}
@@ -254,7 +286,7 @@ export default function CostSection({
       {/* 按模型成本 Top10（看清哪个模型最烧钱） */}
       {byModel && byModel.length > 0 && (
         <div className="ops-card">
-          <div className="ops-card-title">按模型成本 Top10</div>
+          <CardTitle icon="cpu">按模型成本 Top10</CardTitle>
           <div className="ops-table-wrap">
             <table className="ops-table">
               <thead><tr><th>模型</th><th>Provider</th><th>成本</th><th>Tokens</th><th>请求</th><th>错误</th>{onJumpByModel && <th></th>}</tr></thead>
@@ -279,12 +311,7 @@ export default function CostSection({
       {/* 本周 vs 上周 对比卡（无数据时隐藏） */}
       {wow && (
         <div className="ops-card">
-          <div className="ops-card-title">
-            📅 本周 vs 上周
-            <span className="ops-card-sub" title={timeseries && timeseries.length < 14 ? "1 周数据 vs 前 1 周（数据较少）" : "成本按 $4/M tokens 中位估算"}>
-              {timeseries && timeseries.length < 14 ? "1 周数据 vs 前 1 周（数据较少）" : "成本按 $4/M tokens 中位估算"}
-            </span>
-          </div>
+          <CardTitle icon="calendar" sub={timeseries && timeseries.length < 14 ? "1 周数据 vs 前 1 周（数据较少）" : "成本按 $4/M tokens 中位估算"}>本周 vs 上周</CardTitle>
           <div className="wow-grid">
             <div className="wow-col">
               <div className="wow-label">本周</div>

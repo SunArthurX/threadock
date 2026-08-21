@@ -63,6 +63,9 @@ pub fn run() {
             get_conversation_detail,
             extract_knowledge,
             knowledge_xref,
+            llm_config_get,
+            llm_config_set,
+            llm_test_connection,
             search,
             search_grouped,
             search_tree_hits,
@@ -115,6 +118,7 @@ pub fn run() {
             export_conversation,
             save_text_file,
             read_text_file,
+            read_image_file,
             set_favorite,
             set_user_title,
             list_all_tags,
@@ -166,6 +170,7 @@ pub fn run() {
             conversation_raw,
             open_source_app,
             resume_command,
+            resume_in_terminal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");
@@ -175,6 +180,12 @@ pub fn run() {
 
 #[cfg(test)]
 mod e2e_journeys;
+
+#[cfg(test)]
+mod llm_journeys;
+
+#[cfg(test)]
+mod adapter_journeys;
 
 #[cfg(test)]
 mod tests {

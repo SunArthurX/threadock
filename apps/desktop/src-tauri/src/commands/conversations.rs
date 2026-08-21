@@ -372,28 +372,36 @@ pub(crate) async fn hard_delete_conversation(
 }
 
 /// 知识提取（plan §13.5）：返回 ExtractionResult 结构给前端。
+/// `engine`：`None`/`"rule"` → 规则引擎（默认，确定性离线）；`"llm"` →
+/// 大模型引擎（需在设置中显式启用，见 `llm_cmd::extract_with_llm`）。
 #[tauri::command]
 pub(crate) async fn extract_knowledge(
     state: tauri::State<'_, DaemonState>,
     conversation_id: String,
+    engine: Option<String>,
 ) -> Result<ch_knowledge::ExtractionResult, String> {
-    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
-    let conv = repo
-        .get_conversation(&conversation_id)
-        .map_err(|e| storage_err(e))?
-        .ok_or_else(|| format!("conversation not found: {conversation_id}"))?;
-    let messages = repo
-        .list_messages(&conversation_id)
-        .map_err(|e| storage_err(e))?;
-    let events = repo
-        .list_events(&conversation_id)
-        .map_err(|e| storage_err(e))?;
-    let input = ch_knowledge::ExtractionInput {
-        title: Some(conv.effective_title().to_string()),
-        messages,
-        events,
-    };
-    Ok(ch_knowledge::RuleExtractor::new().extract(&input))
+    let input = run_blocking(|| {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        let conv = repo
+            .get_conversation(&conversation_id)
+            .map_err(|e| storage_err(e))?
+            .ok_or_else(|| format!("conversation not found: {conversation_id}"))?;
+        let messages = repo
+            .list_messages(&conversation_id)
+            .map_err(|e| storage_err(e))?;
+        let events = repo
+            .list_events(&conversation_id)
+            .map_err(|e| storage_err(e))?;
+        Ok::<_, String>(ch_knowledge::ExtractionInput {
+            title: Some(conv.effective_title().to_string()),
+            messages,
+            events,
+        })
+    })?;
+    match engine.as_deref().unwrap_or("rule") {
+        "llm" => run_blocking(|| super::llm_cmd::extract_with_llm(&state, &input)),
+        _ => Ok(ch_knowledge::RuleExtractor::new().extract(&input)),
+    }
 }
 
 /// 知识跨会话引用：给定文件/命令关键词，返回各关键词在多少个其他会话里被提到。

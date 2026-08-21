@@ -62,6 +62,7 @@
 | 导出（Markdown/JSON/批量 + 敏感信息脱敏 + 自定义规则） | `crates/export` | §6.6, §14.6 |
 | 加密备份/恢复（XChaCha20-Poly1305 + Argon2id） | `crates/backup` | §6.6, §14.3 |
 | 知识提取（摘要/决策/TODO/错误/命令/文件 + 版本化持久化） | `crates/knowledge` + `crates/storage` | §13.5 |
+| **AI 提取（大模型引擎，可选）**：OpenAI 兼容端点（云 / 本地 Ollama 等）+ API Key 本地 AEAD 加密（0600 密钥文件主密钥，不依赖 OS 钥匙串） | `crates/llm` + `crates/knowledge` + GUI | §13.5, §14.3 |
 | 相似会话推荐（有界候选集） | `crates/storage` | §6.7 |
 | Daemon 常驻服务（JSON-RPC over stdio，14 个方法） | `crates/daemon` | §8.2, §16 |
 | Tauri 桌面 GUI（101 个 Tauri 命令） | `apps/desktop` | §9.1, §17 |
@@ -223,6 +224,7 @@ threadock/
 │   ├── export/              导出（Markdown/JSON + 脱敏）
 │   ├── backup/              加密备份/恢复（XChaCha20 + Argon2id）
 │   ├── knowledge/           知识提取（规则引擎，plan §13.5）
+│   ├── llm/                LLM 客户端 + 密钥密封（OpenAI 兼容端点，plan §13.5/§14.3）
 │   ├── adapter-sdk/         Adapter trait + stdio JSON-RPC 协议
 │   ├── adapter-host/        进程隔离（spawn + 超时 + 崩溃检测）
 │   ├── adapter-markdown/    Markdown Adapter（独立进程二进制）
