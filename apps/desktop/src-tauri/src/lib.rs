@@ -118,6 +118,7 @@ pub fn run() {
             export_conversation,
             save_text_file,
             read_text_file,
+            read_image_file,
             set_favorite,
             set_user_title,
             list_all_tags,

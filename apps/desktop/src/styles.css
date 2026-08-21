@@ -3579,6 +3579,13 @@ button {
 .msg-code-pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; line-height: 1.5; }
 .msg-code-pre code { background: transparent; padding: 0; color: var(--text); }
 
+/* 消息内联本机图片（引用的截图仍在本机原位置时展示） */
+.msg-images { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 2px; }
+.msg-image { max-width: min(420px, 100%); max-height: 320px; object-fit: contain; border-radius: 8px; border: 1px solid var(--border-default); background: var(--bg-elevated, rgba(255,255,255,0.03)); }
+.msg-image-loading { width: 140px; height: 64px; animation: msg-image-pulse 1.2s ease-in-out infinite; }
+@keyframes msg-image-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.7; } }
+.msg-image-missing { font-size: 11px; color: var(--text-secondary); background: var(--bg-elevated, rgba(255,255,255,0.03)); border: 1px dashed var(--border-default); border-radius: 8px; padding: 4px 10px; max-width: min(480px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* 代码语法高亮（简易 regex-based） */
 .tok-keyword { color: #c678dd; font-weight: 600; }  /* 紫：关键字 */
 .tok-string { color: #98c379; }  /* 绿：字符串 */

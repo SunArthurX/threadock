@@ -5,6 +5,7 @@ import type { Message } from "./types";
 import { COLLAPSE_THRESHOLD } from "./types";
 import { splitCodeBlocks } from "./messageRender";
 import { highlightCode } from "./codeHighlight.tsx";
+import MessageImages from "./MessageImages";
 
 export interface MessageBlockProps {
   message: Message;
@@ -89,6 +90,8 @@ function MessageBlockImpl({
           ),
         )}
       </div>
+      {/* 本机图片内联：消息引用的截图等仍在本机原位置时直接展示 */}
+      <MessageImages text={text} />
       <div className="msg-actions">
         {isLong && (
           <button className="msg-action-btn" onClick={() => onToggleCollapse(message.id)}>

@@ -5,6 +5,12 @@
 AI 知识提取（大模型引擎）+ API Key 本地加密存储。
 
 ### Added
+- **消息内联本机图片**：消息里引用的本机图片（Markdown 图片语法 /
+  Unix·Windows 绝对路径 / `file://` 链接，http 远程图除外）若仍在原位置，
+  直接在对话流中展示；已移动/删除显示灰色占位。新命令 `read_image_file`
+  （扩展名白名单 png/jpg/jpeg/gif/webp/bmp/svg/ico → MIME、单图 20MB 上限、
+  不存在返回 None）；前端模块级缓存（同路径只读一次）、每消息限 6 张；
+  纯函数 `extractLocalImagePaths` 12 项矩阵测试 + 组件三态测试
 - **AI 提取（大模型引擎，可选，默认关闭）**：知识提取支持切换 LLM 引擎，
   输出与规则引擎同构（摘要/决策/TODO/错误/命令/文件 + 消息级来源引用），
   `extractor` 记录 `llm:{model}@prompt-v1`（模型 + Prompt 版本，plan §13.5）

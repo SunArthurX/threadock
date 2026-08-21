@@ -26,6 +26,7 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 time = "0.3"
 regex = "1"
+base64 = "0.22"
 tokio = { version = "1", features = ["rt"] }
 ch-storage = { path = "../../../crates/storage" }
 ch-domain = { path = "../../../crates/domain" }
