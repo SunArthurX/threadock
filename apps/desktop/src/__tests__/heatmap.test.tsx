@@ -63,12 +63,20 @@ describe("活动页热力图渲染", () => {
   });
 
   it("空数据显示空态而非崩溃", async () => {
-    vi.mocked(await import("@tauri-apps/api/core")).invoke.mockResolvedValueOnce({
-      heatmap: [], hourly: [], tools_trend: [],
-    });
-    const { findByText } = render(<ActivityView />);
-    // 第 7 轮优化：empty 用 InlineEmpty，文案统一为「暂无活动热力数据」
-    expect(await findByText(/暂无活动热力数据/)).toBeTruthy();
+    // 持续按命令覆盖（子组件甘特卡的 invoke 先于 activity_stats 执行，
+    // once 型 mock 会被它消费掉导致本测试拿到全量数据）；用例结束恢复原实现
+    const mocked = vi.mocked((await import("@tauri-apps/api/core")).invoke);
+    const original = mocked.getMockImplementation() ?? (async () => []);
+    mocked.mockImplementation(async (cmd: string) =>
+      cmd === "activity_stats" ? { heatmap: [], hourly: [], tools_trend: [] } : original(cmd, undefined),
+    );
+    try {
+      const { findByText } = render(<ActivityView />);
+      // 第 7 轮优化：empty 用 InlineEmpty，文案统一为「暂无活动热力数据」
+      expect(await findByText(/暂无活动热力数据/)).toBeTruthy();
+    } finally {
+      mocked.mockImplementation(original);
+    }
   });
 
   it("Top 10 工具列表带环比 delta", async () => {

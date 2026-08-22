@@ -277,31 +277,6 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
     })();
   }, [days]);
 
-  // 会话甘特图数据：跟 days/year 范围走，取主任务会话（含时间跨度）
-  const [rangeConvs, setRangeConvs] = useState<Conversation[] | null>(null);
-  const [rangeLoading, setRangeLoading] = useState(false);
-  const [ganttRange, setGanttRange] = useState<{ fromMs: number; toMs: number }>({ fromMs: 0, toMs: 1 });
-  useEffect(() => {
-    // Date.now() 属副作用，范围计算放 effect 内（render 期 purity 禁止）
-    const now = Date.now();
-    const r = year === "all"
-      ? { fromMs: now - days * 86_400_000, toMs: now }
-      : {
-          fromMs: new Date(`${year}-01-01T00:00:00`).getTime(),
-          toMs: Math.min(new Date(`${year}-12-31T23:59:59.999`).getTime(), now),
-        };
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 清旧数据后按范围异步加载甘特图会话
-    setGanttRange(r);
-    setRangeConvs(null);
-    (async () => {
-      setRangeLoading(true);
-      try {
-        setRangeConvs(await invoke<Conversation[]>("list_conversations_by_date", r));
-      } catch { /* 空库静默 */ }
-      finally { setRangeLoading(false); }
-    })();
-  }, [days, year]);
-
   // P1-C5: 年度选择 — 把 days 强制覆盖为「从今天到目标年 1/1」的天数，覆盖整年
   // （year 与 days 是两个独立状态，选中年份时需要同步派生 days；重构为纯派生值
   //  会牵动 90/180/365 按钮、CSV 导出等多处语义，此处保持 effect 同步并豁免检查）
@@ -692,14 +667,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         )}
       </div>
 
-      <GanttConversations
-        convs={rangeConvs}
-        loading={rangeLoading}
-        fromMs={ganttRange.fromMs}
-        toMs={ganttRange.toMs}
-        rangeLabel={rangeText}
-        onJumpToConversation={onJumpToConversation}
-      />
+      <GanttConversations onJumpToConversation={onJumpToConversation} />
 
       <div className="ops-card">
         <CardTitle icon="clock" sub={peak.calls > 0 ? `高峰 ${String(peak.hour).padStart(2, "0")}:00 · ${peak.calls.toLocaleString()} 次` : undefined}>24 小时分布</CardTitle>

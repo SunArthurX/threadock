@@ -1,12 +1,19 @@
 // 会话甘特图：每会话一行，条 = started_at → updated_at 跨度，按 Agent 着色。
+// 卡片自带时间范围选择（默认近 30 天），独立于活动页全局范围；
 // 悬停浮动详情（fixed 定位，沿 HeatmapGitHub 模式，不被滚动容器裁剪），
 // 点击条跳转会话详情；跨范围边界的会话裁剪到窗口内显示。
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
 import { meta } from "./ops-types";
 import { CardTitle } from "./CardTitle";
 import { Skeleton } from "./Skeleton";
 import { InlineEmpty } from "./EmptyState";
+
+/** 卡片内可选的时间范围（天）。 */
+export const GANTT_RANGE_OPTIONS = [7, 30, 90, 365] as const;
+/** 默认范围：近 30 天。 */
+export const GANTT_DEFAULT_DAYS = 30;
 
 /** 单行布局（leftPct/widthPct 相对整个时间窗口）。 */
 export interface GanttRow {
@@ -76,20 +83,10 @@ export function ganttTimeText(ms: number): string {
 const nowMs = () => Date.now();
 
 export default function GanttConversations({
-  convs,
-  loading,
-  fromMs,
-  toMs,
-  rangeLabel,
   onJumpToConversation,
 }: {
-  convs: Conversation[] | null;
-  loading: boolean;
-  fromMs: number;
-  toMs: number;
-  rangeLabel?: string;
   onJumpToConversation?: (conversationId: string) => void;
-}) {
+} = {}) {
   const [tip, setTip] = useState<{ x: number; y: number; row: GanttRow } | null>(null);
   // 「今天」刻度：跨午夜自动换位（沿 ActivityView todayKey 的 1 分钟刷新模式）
   const [nowTick, setNowTick] = useState<number>(nowMs);
@@ -98,19 +95,50 @@ export default function GanttConversations({
     return () => clearInterval(id);
   }, []);
 
+  // 卡片自己的时间范围（默认近 30 天），独立于活动页全局范围
+  const [days, setDays] = useState<number>(GANTT_DEFAULT_DAYS);
+  const [range, setRange] = useState<{ fromMs: number; toMs: number }>({ fromMs: 0, toMs: 1 });
+  const [convs, setConvs] = useState<Conversation[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    // Date.now() 属副作用，范围计算放 effect 内（render 期 purity 禁止）
+    const now = Date.now();
+    const r = { fromMs: now - days * 86_400_000, toMs: now };
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 清旧数据后按范围异步加载
+    setRange(r);
+    setConvs(null);
+    (async () => {
+      setLoading(true);
+      try {
+        const list = await invoke<Conversation[]>("list_conversations_by_date", r);
+        // 防御：异常返回（非数组）按空处理，避免下游 .map 崩掉整树
+        setConvs(Array.isArray(list) ? list : []);
+      } catch { /* 空库静默 */ }
+      finally { setLoading(false); }
+    })();
+  }, [days]);
+
   const { rows, total, ticks } = useMemo(
-    () => buildGanttRows(convs ?? [], fromMs, toMs),
-    [convs, fromMs, toMs],
+    () => buildGanttRows(convs ?? [], range.fromMs, range.toMs),
+    [convs, range],
   );
   const providers = useMemo(
     () => [...new Set((convs ?? []).map((c) => c.provider))].sort(),
     [convs],
   );
   const nowPct = useMemo(() => {
-    return nowTick >= fromMs && nowTick <= toMs
-      ? ((nowTick - fromMs) / Math.max(1, toMs - fromMs)) * 100
+    return nowTick >= range.fromMs && nowTick <= range.toMs
+      ? ((nowTick - range.fromMs) / Math.max(1, range.toMs - range.fromMs)) * 100
       : null;
-  }, [fromMs, toMs, nowTick]);
+  }, [range, nowTick]);
+  const daysLabel = days === 365 ? "1 年" : `${days} 天`;
+  const rangeText = useMemo(() => {
+    const a = new Date(range.fromMs);
+    const b = new Date(range.toMs);
+    const p = (n: number) => String(n).padStart(2, "0");
+    const f = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    return range.toMs > range.fromMs ? `${f(a)} ~ ${f(b)}` : "";
+  }, [range]);
 
   const showSkeleton = loading || convs === null;
 
@@ -118,7 +146,7 @@ export default function GanttConversations({
     <div className="ops-card">
       <CardTitle
         icon="chart"
-        sub={rangeLabel ? `${total.toLocaleString()} 个会话 · ${rangeLabel}` : `${total.toLocaleString()} 个会话`}
+        sub={rangeText ? `近 ${daysLabel} · ${total.toLocaleString()} 个会话` : undefined}
         trailing={
           providers.length > 0 ? (
             <div className="gantt-legend">
@@ -134,10 +162,25 @@ export default function GanttConversations({
       >
         会话甘特图
       </CardTitle>
+      <div className="ops-range-wrap">
+        <div className="ops-range">
+          {GANTT_RANGE_OPTIONS.map((d) => (
+            <button
+              key={d}
+              className={`filter-chip ${days === d ? "active" : ""}`}
+              onClick={() => setDays(d)}
+              data-testid={`gantt-range-${d}`}
+              title={`查看最近 ${d === 365 ? "1 年" : `${d} 天`} 的会话时间跨度`}
+            >
+              {d === 365 ? "1 年" : `${d} 天`}
+            </button>
+          ))}
+        </div>
+      </div>
       {showSkeleton ? (
         <Skeleton variant="list" count={6} />
       ) : rows.length === 0 ? (
-        <InlineEmpty message="时间范围内没有会话" hint="同步 Agent 数据后，这里按时间跨度排布每个会话" />
+        <InlineEmpty message={`近 ${daysLabel}没有会话`} hint="切换更大的时间范围，或同步 Agent 数据后查看" />
       ) : (
         <div className="gantt-wrap">
           <div className="gantt-axis">
