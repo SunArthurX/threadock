@@ -344,6 +344,67 @@ mod tests {
         assert!(err.contains("设置"), "应引导到设置：{err}");
     }
 
+    /// knowledge_xref 回归：同关键词在其他会话命中、自身会话排除、空关键词跳过。
+    #[test]
+    fn knowledge_xref_finds_other_conversations() {
+        let (app, _guard) = harness();
+        let state = app.state::<DaemonState>();
+        // 两个会话：都提到 src/lib.rs；关键词由 xref 内部 FTS 查询
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        for (name, body) in [
+            ("a.md", "# 会话A\n\n## User\n\n请看 src/lib.rs 的实现\n\n## Assistant\n\n好的，src/lib.rs 已读\n"),
+            ("b.md", "# 会话B\n\n## User\n\nsrc/lib.rs 这里怎么改\n\n## Assistant\n\n改好了\n"),
+        ] {
+            let md = dir.path().join(name);
+            std::fs::write(&md, body).expect("write failed");
+            tauri::async_runtime::block_on(import_file(
+                state.clone(),
+                md.to_string_lossy().into_owned(),
+                None,
+            ))
+            .expect("import");
+        }
+        let convs = {
+            let repo = state.read_repo.lock().expect("mutex poisoned");
+            repo.list_conversations(None).expect("convs")
+        };
+        assert_eq!(convs.len(), 2);
+        let target = &convs[0];
+        let other = &convs[1];
+        let entries = tauri::async_runtime::block_on(super::knowledge_xref(
+            state.clone(),
+            target.id.clone(),
+            vec![super::KnowledgeXrefKeyword {
+                text: "src/lib.rs".into(),
+                kind: "file".into(),
+            }],
+        ))
+        .expect("xref");
+        assert_eq!(entries.len(), 1, "一个关键词一个条目：{entries:?}");
+        let e = &entries[0];
+        assert_eq!(e.keyword, "src/lib.rs");
+        assert!(e.other_count >= 1, "应在另一会话命中：{e:?}");
+        assert!(
+            e.other_conversations.iter().all(|c| c.id != target.id),
+            "自身会话必须排除"
+        );
+        assert!(
+            e.other_conversations.iter().any(|c| c.id == other.id),
+            "另一会话必须命中：{e:?}"
+        );
+        // 空关键词跳过
+        let empty = tauri::async_runtime::block_on(super::knowledge_xref(
+            state.clone(),
+            target.id.clone(),
+            vec![super::KnowledgeXrefKeyword {
+                text: "  ".into(),
+                kind: "file".into(),
+            }],
+        ))
+        .expect("xref empty");
+        assert!(empty.is_empty(), "空白关键词应跳过");
+    }
+
     #[test]
     fn stored_knowledge_roundtrip() {
         // 弹窗秒开链路：手动提取统一落库 → knowledge_get_stored 读回同结果
