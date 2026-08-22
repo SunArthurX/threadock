@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **搜索常见中文词丢失低频命中会话**：GUI 搜索（`search_grouped` /
+  `search_tree_hits`）的 tantivy 路径未把 `base_limit`（500）透传给查询，
+  回落到 `SearchQuery::new` 默认 limit=50——常见二元词命中上千条消息时
+  （实测「追问」命中 1609 条 / 266 会话），低分但相关的会话被整体截掉，
+  表现为「搜『追问』找不到、搜『追问详细答案』才找到」。现在 tantivy
+  查询统一走 `base_limit`（有 DB 后过滤时仍 ≥200 超量拉取），并补回归
+  测试；`engine_search`/`fts_search` 同步重构为收 `&DaemonState`（可测性，
+  与 `gc_raw_inner` 同模式）
+
 ## [1.3.0] - 2026-08-22
 
 知识提取 rule-v2（TODO 完成态）+ AI 提取全链路重构（经验导向 prompt-v3 / 落库 / 实时日志）+ GLM/MiniMax 兼容修复 + 规则引擎 27 倍提速 + 自动化任务三档分组。
