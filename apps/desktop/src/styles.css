@@ -5161,8 +5161,15 @@ button {
 
 /* ── 会话列表横向滚动（v1.3.0）：列表列较窄时长标题不再截断，行区可左右滑动 ──
    只作用于行区（.list-virtual-container），表头/搜索/工具栏固定不随动；
-   macOS 上 shift+滚轮 / 触控板横滑 即原生横向滚动 */
-.list-virtual-container { overflow-x: auto; }
+   macOS 上 shift+滚轮 / 触控板横滑 即原生横向滚动。
+   overflow-y 必须 hidden：开 overflow-x 后另一轴的 visible 会被计算成 auto，
+   横向滚动条占用的高度会让右缘冒出一条原生纵向滚动条（白条）；
+   纵向滚动归外层 ScrollArea。padding-bottom 给横向滚动条让位，避免盖住末行 */
+.list-virtual-container {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 12px;
+}
 .list-virtual-container .list-item .title {
   overflow: visible;
   text-overflow: clip;

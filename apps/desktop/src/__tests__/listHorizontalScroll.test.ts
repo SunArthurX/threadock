@@ -15,9 +15,10 @@ const APP = resolve(here, "../App.tsx");
 async function src(p: string) { return readFile(p, "utf8"); }
 
 describe("会话列表横向滚动", () => {
-  it("行区容器开启 overflow-x:auto，标题在行区内不再省略号截断", async () => {
+  it("行区容器开启 overflow-x:auto + overflow-y:hidden（防右缘原生纵向白条），标题不再省略号截断", async () => {
     const css = await src(CSS);
-    expect(/\.list-virtual-container\s*\{\s*overflow-x:\s*auto/.test(css)).toBe(true);
+    expect(/\.list-virtual-container\s*\{[^}]*overflow-x:\s*auto[^}]*overflow-y:\s*hidden/s.test(css)).toBe(true);
+    expect(/\.list-virtual-container\s*\{[^}]*padding-bottom/s.test(css)).toBe(true);
     expect(/\.list-virtual-container \.list-item \.title\s*\{[^}]*text-overflow:\s*clip/.test(css)).toBe(true);
   });
 
