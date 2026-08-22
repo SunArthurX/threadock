@@ -113,14 +113,15 @@ describe("搜索模式：主对话分组 + 命中步进", () => {
     expect(container.querySelector<HTMLInputElement>(".search-box input")!.value).toBe("");
   });
 
-  it("顶栏「清除」按钮仍可退出搜索模式并清空关键词", async () => {
+  it("顶栏 ✕ 清空按钮仍可退出搜索模式并清空关键词", async () => {
     const { container } = render(<App />);
     const input = container.querySelector<HTMLInputElement>(".search-box input")!;
     fireEvent.change(input, { target: { value: "西游记" } });
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(container.querySelectorAll(".search-group").length).toBe(1));
 
-    const clearBtn = [...container.querySelectorAll("button")].find((b) => b.textContent === "清除")!;
+    // 有内容时输入框内出现 ✕（.search-box-clear），点击 = 清关键词 + 退出搜索模式
+    const clearBtn = container.querySelector<HTMLButtonElement>(".search-box-clear")!;
     fireEvent.click(clearBtn);
 
     await waitFor(() => expect(container.querySelectorAll(".search-group").length).toBe(0));

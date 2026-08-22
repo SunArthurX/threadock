@@ -440,8 +440,36 @@ button {
   transition: color var(--transition);
 }
 
-.search-box input:focus + .search-icon,
-.search-box input:not(:placeholder-shown) + .search-icon {
+/* 搜索输入包裹层（承载 ✕ 清空按钮；input 不再与 icon 相邻，选择器随之调整） */
+.search-box .search-input-wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+.search-box .search-input-wrap input {
+  flex: 1;
+  min-width: 0;
+  padding-right: 30px; /* 给 ✕ 留位 */
+}
+.search-box-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: 4px;
+}
+.search-box-clear:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.search-box .search-input-wrap:focus-within + .search-icon,
+.search-box .search-input-wrap:has(input:not(:placeholder-shown)) + .search-icon {
   color: var(--accent);
 }
 

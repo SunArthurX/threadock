@@ -27,6 +27,7 @@ import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast
 import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
+import { useTrackpadSwipe } from "./useTrackpadSwipe";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, KnowledgeEngine } from "./types";
 import { Icon, type IconName } from "./Icon";
@@ -336,6 +337,13 @@ export default function App() {
     setHitNav(null);
     setSearchQuery("");
   };
+
+  // 触控板横滑切会话（左/右栏通用）：左滑下一会话、右滑上一会话，
+  // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）
+  const paneSwipe = useTrackpadSwipe(
+    () => navigateConv(1),
+    () => navigateConv(-1),
+  );
 
   // ── effects ──
   useEffect(() => {
@@ -947,16 +955,29 @@ export default function App() {
             ) : syncResult && <span className="sync-status done"><span className="dot" />{syncResult}</span>}
 
             <div className="search-box">
-              <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
-                value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && doSearch()}
-                onFocus={() => setHistoryOpen(true)}
-                onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
+              <div className="search-input-wrap">
+                <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
+                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Esc：先清空搜索内容（含搜索模式），停止传播避免触发全局 Esc
+                    if (e.key === "Escape" && searchQuery) {
+                      e.stopPropagation();
+                      clearSearchMode();
+                      return;
+                    }
+                    if (e.key === "Enter") doSearch();
+                  }}
+                  onFocus={() => setHistoryOpen(true)}
+                  onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
+                {searchQuery && (
+                  <button className="search-box-clear" title="清空搜索（Esc）"
+                    onClick={() => { clearSearchMode(); searchInputRef.current?.focus(); }}>✕</button>
+                )}
+              </div>
               <Icon name="search" size={14} className="search-icon" />
               <div className="search-actions">
                 <button onClick={() => doSearch()}>搜索</button>
               </div>
-              {searchGroups && <button onClick={clearSearchMode}>清除</button>}
               {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchGroups && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
                   {savedSearches.length > 0 && (
@@ -1139,7 +1160,7 @@ export default function App() {
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
           <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
-            <ScrollArea style={{ width: listWidth }}>
+            <ScrollArea style={{ width: listWidth }} onWheel={paneSwipe}>
               {searchGroups
                 ? <SearchResultsPanel groups={searchGroups} query={searchQuery} role={searchRole}
                     onRoleChange={(r) => { setSearchRole(r); void runSearch(searchQuery.trim(), r); }}
@@ -1199,7 +1220,7 @@ export default function App() {
               title="拖拽调整会话列表宽度"
             />
             {/* 右栏：命中步进条钉在滚动区域外（始终可见，不随内容滚走）+ 详情滚动区 */}
-            <div className="detail-col">
+            <div className="detail-col" onWheel={paneSwipe}>
               {/* 命中步进条：当前会话树（主对话+子对话）内的全部命中，↑/↓ 跨会话跳转 */}
               {hitNav && (
                 <div className="hit-nav-bar">
