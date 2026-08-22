@@ -537,7 +537,9 @@ export default function ConversationList({
                   position: "absolute",
                   top: 0,
                   left: 0,
-                  width: "100%",
+                  // max-content：长标题把行撑宽 → 触发容器横向滚动（窄列看全标题）
+                  width: "max-content",
+                  minWidth: "100%",
                   transform: `translateY(${vi.start}px)`,
                 }}
               >

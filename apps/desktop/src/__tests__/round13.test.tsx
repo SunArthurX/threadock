@@ -18,12 +18,16 @@ const CSS = resolve(here, "../styles.css");
 
 async function src(p: string) { return readFile(p, "utf8"); }
 
-describe("Round 13.1 搜索下拉 hover 用 accent-bg", () => {
-  it("styles.css 改用 var(--accent-bg) + var(--accent) 蓝", async () => {
+describe("Round 13.1 搜索下拉样式（v1.3.0 升级为悬浮卡片）", () => {
+  it("下拉用 backdrop 模糊 + elevated 背景 + 中性行 hover，取代 13 轮的 accent 蓝整行高亮", async () => {
     const css = await src(CSS);
-    const m = /\.search-history-item:hover\s*\{[^}]*accent-bg[^}]*\}/.exec(css);
-    expect(/color:\s*var\(--accent\)/.test(css)).toBe(true);
-    expect(m).toBeTruthy();
+    // 悬浮卡片：backdrop 模糊 + 高层背景，与下方会话列表拉开层次
+    expect(/\.search-history-dropdown\s*\{[^}]*backdrop-filter/.test(css)).toBe(true);
+    expect(/\.search-history-dropdown\s*\{[^}]*--bg-elevated/.test(css)).toBe(true);
+    // 行 hover：中性底色 + 主文字色（不再 accent 蓝整行）
+    expect(/\.search-history-item:hover\s*\{[^}]*--bg-hover/.test(css)).toBe(true);
+    // 单条删除 × 的 hover 反馈
+    expect(/\.search-history-del:hover/.test(css)).toBe(true);
   });
 });
 

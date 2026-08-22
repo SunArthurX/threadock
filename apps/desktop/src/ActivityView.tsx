@@ -8,6 +8,7 @@ import ScrollArea from "./ScrollArea";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
 import HeatmapGitHub from "./HeatmapGitHub";
+import GanttConversations from "./GanttConversations";
 import { CardTitle } from "./CardTitle";
 import { Skeleton } from "./Skeleton";
 import { InlineEmpty } from "./EmptyState";
@@ -665,6 +666,8 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
           </div>
         )}
       </div>
+
+      <GanttConversations onJumpToConversation={onJumpToConversation} />
 
       <div className="ops-card">
         <CardTitle icon="clock" sub={peak.calls > 0 ? `高峰 ${String(peak.hour).padStart(2, "0")}:00 · ${peak.calls.toLocaleString()} 次` : undefined}>24 小时分布</CardTitle>

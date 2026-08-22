@@ -95,10 +95,8 @@ fn journey_codex_js_bridge_import_to_detail() {
     assert!(ev_at < assistant_msg.created_at_ms.expect("assistant ts"));
 
     // 5. 规则知识提取仍消费事件（命令进 commands 列表）
-    let k = tauri::async_runtime::block_on(crate::commands::extract_knowledge(
-        state.clone(),
-        conv_id,
-        None,
+    let k = tauri::async_runtime::block_on(crate::commands::extract_knowledge_with(
+        &state, None, conv_id, None,
     ))
     .expect("rule extract");
     assert!(

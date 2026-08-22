@@ -13,6 +13,8 @@ interface KbItem {
   text?: string;
   error?: string;
   summary?: string;
+  /** 提取器判定的完成态：pending | done | stale（rule-v1 旧记录缺省 pending）。 */
+  status?: string;
   conversation_id: string;
   title: string;
   message_id?: string;
@@ -99,20 +101,55 @@ export function toggleDoneTodo(text: string): Set<string> {
   return new Set(cur);
 }
 
+/** 「复活」覆盖集：提取器判 done/stale 但用户手动改回未完成的条目。 */
+export function loadUndoneTodos(): Set<string> {
+  try {
+    return new Set(JSON.parse(localStorage.getItem("ch-todo-undone") ?? "[]") as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistSet(key: string, set: Set<string>): Set<string> {
+  localStorage.setItem(key, JSON.stringify([...set]));
+  return new Set(set);
+}
+
+/** 最终完成态 =（提取器判 done/stale 或手动勾完成）且未被「复活」覆盖。 */
+export function resolveTodoDone(
+  text: string,
+  status: string | undefined,
+  manualDone: Set<string> = loadDoneTodos(),
+  manualUndone: Set<string> = loadUndoneTodos(),
+): boolean {
+  const resolvedByExtraction = status === "done" || status === "stale";
+  return (resolvedByExtraction || manualDone.has(text)) && !manualUndone.has(text);
+}
+
+/** 隐藏已完成开关（默认开：LLM 会话里「说过就做完」的计划不再刷屏）。 */
+export function loadHideDone(): boolean {
+  return localStorage.getItem("ch-todo-hide-done") !== "0";
+}
+
 /** 知识库 → Markdown 纪要（导出用）。 */
 export function knowledgeBaseToMarkdown(kb: {
-  todos?: { text?: string; title: string }[];
+  todos?: { text?: string; status?: string; title: string }[];
   decisions?: { text?: string; title: string }[];
   top_commands?: { cmd: string; count: number }[];
   top_files?: { path: string; count: number }[];
 }): string {
-  const done = loadDoneTodos();
   const lines: string[] = ["# 知识库纪要", ""];
   if ((kb.decisions ?? []).length > 0) {
     lines.push("## 决策", ...(kb.decisions ?? []).map((d) => `- ${d.text ?? ""}（${d.title}）`), "");
   }
   if ((kb.todos ?? []).length > 0) {
-    lines.push("## TODO", ...(kb.todos ?? []).map((t) => `- [${done.has(t.text ?? "") ? "x" : " "}] ${t.text ?? ""}（${t.title}）`), "");
+    lines.push(
+      "## TODO",
+      ...(kb.todos ?? []).map((t) =>
+        `- [${resolveTodoDone(t.text ?? "", t.status) ? "x" : " "}] ${t.text ?? ""}（${t.title}）`,
+      ),
+      "",
+    );
   }
   if ((kb.top_commands ?? []).length > 0) {
     lines.push("## 常用命令", ...(kb.top_commands ?? []).map((c) => `- \`${c.cmd}\` ×${c.count}`), "");
@@ -141,6 +178,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const [favs, setFavs] = useState<string[]>(loadPromptFavorites);
   const [doneTodos, setDoneTodos] = useState<Set<string>>(loadDoneTodos);
+  const [undoneTodos, setUndoneTodos] = useState<Set<string>>(loadUndoneTodos);
+  const [hideDone, setHideDone] = useState<boolean>(loadHideDone);
   const [extracting, setExtracting] = useState(false);
   const [tab, setTab] = useState<KbTab>("todos");
   const [search, setSearch] = useState("");
@@ -195,22 +234,26 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
     setExtracting(false);
   };
 
-  // 搜索过滤（当前 tab 生效；额外对命令/文件生效——P1-A4）
+  // 搜索过滤（当前 tab 生效；额外对命令/文件生效——P1-A4）；TODO 先过「隐藏已完成」
+  const todoDone = (t: KbItem) => resolveTodoDone(t.text ?? "", t.status, doneTodos, undoneTodos);
   const filtered = useMemo(() => {
+    const empty = {
+      todos: [] as KbItem[],
+      decisions: [] as KbItem[],
+      summaries: [] as KbItem[],
+      errors: [] as KbItem[],
+      topCommands: [] as KbCommand[],
+      topFiles: [] as KbFile[],
+    };
     if (!kb) {
-      return {
-        todos: [] as KbItem[],
-        decisions: [] as KbItem[],
-        summaries: [] as KbItem[],
-        errors: [] as KbItem[],
-        topCommands: [] as KbCommand[],
-        topFiles: [] as KbFile[],
-      };
+      return empty;
     }
+    const baseTodos = hideDone ? kb.todos.filter((t) => !todoDone(t)) : kb.todos;
     const q = search.trim().toLowerCase();
     if (!q) {
       return {
-        todos: kb.todos,
+        ...empty,
+        todos: baseTodos,
         decisions: kb.decisions,
         summaries: kb.summaries ?? [],
         errors: kb.errors ?? [],
@@ -219,14 +262,16 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
       };
     }
     return {
-      todos: kb.todos.filter((t) => (t.text ?? "").toLowerCase().includes(q) || t.title.toLowerCase().includes(q)),
+      ...empty,
+      todos: baseTodos.filter((t) => (t.text ?? "").toLowerCase().includes(q) || t.title.toLowerCase().includes(q)),
       decisions: kb.decisions.filter((d) => (d.text ?? "").toLowerCase().includes(q) || d.title.toLowerCase().includes(q)),
       summaries: (kb.summaries ?? []).filter((s) => (s.summary ?? s.text ?? "").toLowerCase().includes(q) || s.title.toLowerCase().includes(q)),
       errors: (kb.errors ?? []).filter((e) => (e.error ?? e.text ?? "").toLowerCase().includes(q) || e.title.toLowerCase().includes(q)),
       topCommands: kb.top_commands.filter((c) => c.cmd.toLowerCase().includes(q)),
       topFiles: kb.top_files.filter((f) => f.path.toLowerCase().includes(q)),
     };
-  }, [kb, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kb, search, hideDone, doneTodos, undoneTodos]);
 
   const todoPager = usePager(filtered.todos, 50);
   const decisionPager = usePager(filtered.decisions, 50);
@@ -261,9 +306,29 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
     ) : null;
 
   const empty = kb && kb.extracted === 0;
-  const openTodos = kb ? kb.todos.filter((t) => !doneTodos.has(t.text ?? "")).length : 0;
+  // 完成态 = 提取器判定（done/stale）∪ 手动勾选 − 手动「复活」
+  const todoDoneAll = (t: KbItem) => resolveTodoDone(t.text ?? "", t.status, doneTodos, undoneTodos);
+  const openTodos = kb ? kb.todos.filter((t) => !todoDoneAll(t)).length : 0;
   const doneCount = kb ? kb.todos.length - openTodos : 0;
   const doneRatio = kb && kb.todos.length > 0 ? (doneCount / kb.todos.length) * 100 : 0;
+
+  /** 勾选往返：未完成→手动完成；提取判完成→「复活」（两者都可再点回）。 */
+  const toggleTodo = (t: KbItem) => {
+    const text = t.text ?? "";
+    const resolvedByExtraction = t.status === "done" || t.status === "stale";
+    if (todoDoneAll(t)) {
+      if (resolvedByExtraction) {
+        setUndoneTodos(persistSet("ch-todo-undone", new Set([...undoneTodos, text])));
+      } else {
+        setDoneTodos(persistSet("ch-todo-done", new Set([...doneTodos].filter((x) => x !== text))));
+      }
+    } else {
+      setDoneTodos(persistSet("ch-todo-done", new Set([...doneTodos, text])));
+      if (undoneTodos.has(text)) {
+        setUndoneTodos(persistSet("ch-todo-undone", new Set([...undoneTodos].filter((x) => x !== text))));
+      }
+    }
+  };
 
   // 通用"标题 + 来源"行渲染：todos/decisions/summaries/errors 共用
   const kbItemRow = (
@@ -356,9 +421,9 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               <div className="kb-stat"><b>{kb.top_files.length}</b><span>高频文件</span></div>
             </div>
             {kb.todos.length > 0 && (
-              <div className="kb-progress" title={`已完成 ${doneCount} / 共 ${kb.todos.length} 条 TODO`}>
+              <div className="kb-progress" title={`已了结 ${doneCount} / 共 ${kb.todos.length} 条 TODO（完成或过期）`}>
                 <div className="kb-progress-bar"><div className="kb-progress-fill" style={{ width: `${doneRatio}%` }} /></div>
-                <span className="kb-progress-label">✅ {doneCount} / {kb.todos.length} TODO 已完成 · {doneRatio.toFixed(0)}%</span>
+                <span className="kb-progress-label">✅ {doneCount} / {kb.todos.length} TODO 已了结（完成或过期）· {doneRatio.toFixed(0)}%</span>
               </div>
             )}
           </>
@@ -378,6 +443,21 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               ] as const).map(([k, label]) => (
                 <button key={k} className={`scope-chip ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button>
               ))}
+              <label
+                className="scope-chip"
+                style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, userSelect: "none" }}
+                title="提取器判定「已完成 / 过期」的条目默认隐藏——点勾选框可复活单条"
+              >
+                <input
+                  type="checkbox"
+                  checked={hideDone}
+                  onChange={(e) => {
+                    setHideDone(e.target.checked);
+                    localStorage.setItem("ch-todo-hide-done", e.target.checked ? "1" : "0");
+                  }}
+                />
+                隐藏已完成
+              </label>
               <input
                 ref={searchRef}
                 className="settings-confirm-input"
@@ -391,15 +471,21 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               <div className="kb-list">
                 {todoPager.slice.length === 0 && (
                   <div className="ops-table-empty">
-                    {search ? "🔍 无匹配条目" : kb?.todos.length === 0 ? "🎯 当前没有提取到 TODO —— 多用 Agent 处理任务后再提取" : "✅ 所有 TODO 都已勾选完成"}
+                    {search
+                      ? "🔍 无匹配条目"
+                      : kb?.todos.length === 0
+                        ? "🎯 当前没有提取到 TODO —— 多用 Agent 处理任务后再提取"
+                        : hideDone
+                          ? "✅ 没有未完成的 TODO —— 关闭「隐藏已完成」可查看全部历史条目"
+                          : "✅ 所有 TODO 都已勾选完成"}
                   </div>
                 )}
                 {todoPager.slice.map((t, i) => {
                   const text = t.text ?? "";
-                  const done = doneTodos.has(text);
-                  return kbItemRow(t, i, "", "TODO", text, {
-                    is: done,
-                    toggle: () => setDoneTodos(toggleDoneTodo(text)),
+                  const stale = t.status === "stale";
+                  return kbItemRow(t, i, stale ? "⊘" : "", "TODO", text, {
+                    is: todoDone(t),
+                    toggle: () => toggleTodo(t),
                   });
                 })}
                 {pagerBar(todoPager)}

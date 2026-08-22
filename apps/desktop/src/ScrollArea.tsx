@@ -16,6 +16,7 @@
 import {
   forwardRef, useEffect, useImperativeHandle, useRef, useState,
   type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 
 export interface ScrollAreaRef {
@@ -39,6 +40,8 @@ export interface ScrollAreaProps {
   minThumbHeight?: number;
   /** 透传到内部 div 的 mousedown（如 .tag-suggest 阻止 input blur） */
   onMouseDown?: (e: ReactMouseEvent<HTMLDivElement>) => void;
+  /** 透传到内部 div 的 wheel（对话视图左右栏横滑切换会话用） */
+  onWheel?: (e: ReactWheelEvent<HTMLDivElement>) => void;
 }
 
 const HIDE_DELAY_MS = 1000;
@@ -55,6 +58,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
     thumbOffset = 2,
     minThumbHeight = 30,
     onMouseDown,
+    onWheel,
   },
   ref,
 ) {
@@ -197,6 +201,7 @@ const ScrollArea = forwardRef<ScrollAreaRef, ScrollAreaProps>(function ScrollAre
         data-testid="scroll-area-inner"
         className={`scroll-area-inner ${className}`}
         onMouseDown={onMouseDown}
+        onWheel={onWheel}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
         style={{

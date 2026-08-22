@@ -7,7 +7,10 @@ use crate::LlmError;
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
 pub const MAX_TIMEOUT_SECS: u64 = 300;
-pub const DEFAULT_MAX_INPUT_CHARS: usize = 48_000;
+/// 转录默认字符上限。2026-08 从 48k 降到 24k：AI 提取要的是「用户需求 + 关键过程 +
+/// 结论」，配合单条消息截断（见 knowledge::llm::build_transcript），24k 覆盖绝大多数
+/// 会话，耗时/费用约减半。设置中可调（clamp 到 1k..200k）。
+pub const DEFAULT_MAX_INPUT_CHARS: usize = 24_000;
 pub const MAX_INPUT_CHARS_LIMIT: usize = 200_000;
 
 /// LLM 提取配置。默认关闭（plan §13.5：显式启用）。
@@ -81,6 +84,13 @@ impl LlmConfig {
                     "非本地端点必须使用 https（防止明文传输）".into(),
                 ));
             }
+            if is_anthropic_endpoint(&self.base_url) {
+                return Err(LlmError::InvalidConfig(
+                    "这是 Anthropic 协议端点，与 OpenAI 兼容协议不互通（会报「响应无法解析」）。\
+                     GLM 请填 https://open.bigmodel.cn/api/paas/v4"
+                        .into(),
+                ));
+            }
             if self.model.is_empty() {
                 return Err(LlmError::InvalidConfig("model 不能为空".into()));
             }
@@ -123,6 +133,18 @@ fn host_of(base_url: &str) -> String {
 fn is_local_base_url(base_url: &str) -> bool {
     let host = host_of(base_url);
     host == "localhost" || host == "::1" || host == "0.0.0.0" || host.starts_with("127.")
+}
+
+/// 是否 Anthropic 协议端点（路径以 `/anthropic` 结尾，如 GLM Coding Plan 用的
+/// `https://open.bigmodel.cn/api/anthropic`）。2026-08 实测：用户从 Coding Plan
+/// 配置里复制该地址，OpenAI 客户端请求后只得到「响应无法解析」。
+fn is_anthropic_endpoint(base_url: &str) -> bool {
+    base_url
+        .split(['#', '?'])
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/')
+        .ends_with("/anthropic")
 }
 
 #[cfg(test)]
@@ -224,6 +246,46 @@ mod tests {
             ..LlmConfig::default()
         };
         assert!(c.validate().is_err(), "启用时空 model 必须被拒绝");
+    }
+
+    #[test]
+    fn validate_rejects_anthropic_protocol_endpoint() {
+        // 回归：GLM Coding Plan 的 Anthropic 端点被误配为 OpenAI 兼容 base_url
+        for url in [
+            "https://open.bigmodel.cn/api/anthropic",
+            "https://open.bigmodel.cn/api/anthropic/",
+            "https://open.bigmodel.cn/api/anthropic#coding-plan",
+            "https://api.anthropic.com/anthropic",
+        ] {
+            let mut c = LlmConfig {
+                enabled: true,
+                base_url: url.into(),
+                model: "glm-5.3".into(),
+                ..LlmConfig::default()
+            };
+            let err = c.validate().expect_err("anthropic 必须被拒").to_string();
+            assert!(err.contains("Anthropic"), "{url}：{err}");
+            assert!(err.contains("paas/v4"), "应给出正确端点指引：{err}");
+        }
+        // OpenAI 兼容端点不受影响
+        let mut ok = LlmConfig {
+            enabled: true,
+            base_url: "https://open.bigmodel.cn/api/paas/v4".into(),
+            model: "glm-5.3".into(),
+            ..LlmConfig::default()
+        };
+        ok.validate()
+            .unwrap_or_else(|e| panic!("paas/v4 应通过：{e}"));
+        // 未启用（草稿）不强校验
+        let mut draft = LlmConfig {
+            enabled: false,
+            base_url: "https://open.bigmodel.cn/api/anthropic".into(),
+            model: "m".into(),
+            ..LlmConfig::default()
+        };
+        draft
+            .validate()
+            .unwrap_or_else(|e| panic!("草稿不应被拦截：{e}"));
     }
 
     #[test]

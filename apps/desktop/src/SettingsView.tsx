@@ -663,6 +663,7 @@ const LLM_PRESETS: { label: string; baseUrl: string; model: string; local?: bool
   { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   { label: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
+  { label: "MiniMax", baseUrl: "https://api.minimax.io/v1", model: "MiniMax-M3" },
   { label: "Ollama 本地", baseUrl: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b", local: true },
 ];
 
@@ -703,6 +704,30 @@ function LlmSection() {
     setBusy(null);
   };
 
+  /** 勾选「启用」即时落库生效（无需点保存）；校验失败（如端点未填）回滚并提示。 */
+  const toggleEnabled = async (next: boolean) => {
+    const prev = form.enabled;
+    setForm({ ...form, enabled: next }); // 乐观更新，失败回滚
+    setBusy("save"); setMsg(null);
+    try {
+      const v = await invoke<LlmConfigView>("llm_config_set", {
+        input: {
+          enabled: next,
+          base_url: form.base_url.trim(),
+          model: form.model.trim(),
+          api_key: null, // 仅切开关：不覆盖已存密钥（空值=保持）
+          clear_api_key: false,
+        },
+      });
+      applyView(v);
+      setMsg(next ? "✓ 已启用，立即生效" : "✓ 已停用，立即生效");
+    } catch (e) {
+      setForm((f) => ({ ...f, enabled: prev }));
+      setMsg(`✗ ${typeof e === "string" ? e : String(e)}`);
+    }
+    setBusy(null);
+  };
+
   const test = async () => {
     setBusy("test"); setMsg(null);
     try {
@@ -727,9 +752,10 @@ function LlmSection() {
           <input
             type="checkbox"
             checked={form.enabled}
-            onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
+            disabled={busy !== null}
+            onChange={(e) => toggleEnabled(e.target.checked)}
           />
-          显式开启（默认关闭，规则引擎不受影响）
+          显式开启（默认关闭，勾选立即生效，规则引擎不受影响）
         </label>
       </div>
       {form.enabled && (
@@ -761,7 +787,7 @@ function LlmSection() {
           style={{ flex: 1 }}
           type="text"
           value={form.base_url}
-          placeholder="https://api.openai.com/v1 或 http://127.0.0.1:11434/v1"
+          placeholder="GLM: https://open.bigmodel.cn/api/paas/v4 · OpenAI: https://api.openai.com/v1 · 本地: http://127.0.0.1:11434/v1"
           onChange={(e) => setForm({ ...form, base_url: e.target.value })}
         />
       </div>

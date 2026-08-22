@@ -9,3 +9,17 @@ globalThis.ResizeObserver = class ResizeObserver {
   unobserve() {}
   disconnect() {}
 } as unknown as typeof ResizeObserver;
+
+// jsdom 缺 matchMedia（xterm 等 UI 库依赖）；补最小 stub
+if (typeof window !== "undefined" && !window.matchMedia) {
+  window.matchMedia = ((q: string) => ({
+    matches: false,
+    media: q,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}

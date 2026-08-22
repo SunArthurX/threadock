@@ -11,7 +11,7 @@ use ch_domain::now_utc;
 use rusqlite::Connection;
 
 /// 当前 schema 目标版本。
-pub const LATEST_VERSION: u32 = 14;
+pub const LATEST_VERSION: u32 = 15;
 
 /// 一个迁移步骤：版本号 + 描述 + SQL。
 struct Migration {
@@ -92,6 +92,11 @@ fn migrations() -> Vec<Migration> {
             version: 14,
             description: "saved searches (plan §13.2)",
             sql: crate::schema::SCHEMA_V14,
+        },
+        Migration {
+            version: 15,
+            description: "llm extract run log (success & failure)",
+            sql: crate::schema::SCHEMA_V15,
         },
     ]
 }

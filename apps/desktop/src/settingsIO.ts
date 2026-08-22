@@ -22,12 +22,6 @@ const ALL_KEYS = [
   "ch-last-seen-version",
 ];
 
-export interface SettingsBundle {
-  version: number;
-  exported_at: string;
-  prefs: Record<string, string | null>;
-}
-
 /** 打包所有用户配置为 JSON 字符串。 */
 export function exportAllSettings(): string {
   const prefs: Record<string, string | null> = {};

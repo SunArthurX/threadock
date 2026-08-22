@@ -88,6 +88,30 @@ describe("自动化关注持久化", () => {
   });
 });
 
+describe("自动化任务状态分桶（174 条历史任务误判「进行中」修复）", () => {
+  it("运行中：running / active / queued 等", async () => {
+    const { classifyAutomation } = await import("../AssetsSection");
+    expect(classifyAutomation("running")).toBe("running");
+    expect(classifyAutomation("ACTIVE")).toBe("running");
+    expect(classifyAutomation("in_progress")).toBe("running");
+  });
+  it("已启用：configured / enabled·trusted 等配置态（非执行态）", async () => {
+    const { classifyAutomation } = await import("../AssetsSection");
+    expect(classifyAutomation("configured")).toBe("configured");
+    expect(classifyAutomation("enabled·trusted")).toBe("configured");
+    expect(classifyAutomation("enabled·untrusted")).toBe("configured");
+  });
+  it("已结束：finished / completed / disabled / failed 及 null", async () => {
+    const { classifyAutomation } = await import("../AssetsSection");
+    expect(classifyAutomation("finished")).toBe("ended");
+    expect(classifyAutomation("completed")).toBe("ended");
+    expect(classifyAutomation("disabled")).toBe("ended");
+    expect(classifyAutomation("failed")).toBe("ended");
+    // 无状态的历史目录不得默认算活动
+    expect(classifyAutomation(null)).toBe("ended");
+  });
+});
+
 describe("时间线归并排序（M15 修复验证）", () => {
   it("消息与事件按时间排序且不再截断 100", async () => {
     const { default: ConversationDetail } = await import("../ConversationDetail");

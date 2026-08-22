@@ -41,6 +41,7 @@ pub struct SourceWorkspaceLink {
 
 mod audit_repo;
 mod knowledge_repo;
+mod llm_runs;
 mod ops_queries;
 mod settings;
 
@@ -48,6 +49,7 @@ pub use audit_repo::{
     AuditFindingState, AuditMessageRow, BudgetSettings, GovernanceLogRow, PolicyRuleRecord,
 };
 pub use knowledge_repo::KnowledgeRecord;
+pub use llm_runs::LlmRunRecord;
 pub use ops_queries::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat,
     CacheTrendRow, DailyTool, DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage,

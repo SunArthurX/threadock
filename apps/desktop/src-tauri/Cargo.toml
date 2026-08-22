@@ -49,6 +49,7 @@ ch-llm = { path = "../../../crates/llm" }
 ch-export = { path = "../../../crates/export" }
 ch-backup = { path = "../../../crates/backup" }
 arboard = "3.6.1"
+portable-pty = "0.8"
 
 # dev 模式运行时设置 macOS Dock 图标（裸二进制无 bundle icns）
 [target.'cfg(target_os = "macos")'.dependencies]

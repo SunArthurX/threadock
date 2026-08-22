@@ -127,6 +127,44 @@ describe("知识库 5 轮优化", () => {
     expect(md).toContain("- 用 SQLite（A）");
     expect(md).toContain("`cargo test` ×9");
   });
+
+  it("提取 status 与手动勾选/复活合并判定", async () => {
+    const { resolveTodoDone, toggleDoneTodo, loadUndoneTodos } = await import("../KnowledgeView");
+    // 提取器判 done/stale → 默认已了结
+    expect(resolveTodoDone("分页已修复", "done")).toBe(true);
+    expect(resolveTodoDone("早期叙事计划", "stale")).toBe(true);
+    // pending 且未手动勾选 → 未完成
+    expect(resolveTodoDone("待处理边界", "pending")).toBe(false);
+    // 手动勾选完成
+    toggleDoneTodo("待处理边界");
+    expect(resolveTodoDone("待处理边界", "pending")).toBe(true);
+    // 提取判完成但被「复活」覆盖 → 回到未完成
+    localStorage.setItem("ch-todo-undone", JSON.stringify(["分页已修复"]));
+    expect(loadUndoneTodos().has("分页已修复")).toBe(true);
+    expect(resolveTodoDone("分页已修复", "done")).toBe(false);
+    localStorage.removeItem("ch-todo-done");
+    localStorage.removeItem("ch-todo-undone");
+  });
+
+  it("隐藏已完成开关默认开启", async () => {
+    const { loadHideDone } = await import("../KnowledgeView");
+    expect(loadHideDone()).toBe(true);
+    localStorage.setItem("ch-todo-hide-done", "0");
+    expect(loadHideDone()).toBe(false);
+    localStorage.removeItem("ch-todo-hide-done");
+  });
+
+  it("导出 Markdown 识别提取 status", async () => {
+    const { knowledgeBaseToMarkdown } = await import("../KnowledgeView");
+    const md = knowledgeBaseToMarkdown({
+      todos: [
+        { text: "过期计划", status: "stale", title: "A" },
+        { text: "真待办", status: "pending", title: "A" },
+      ],
+    });
+    expect(md).toContain("- [x] 过期计划（A）");
+    expect(md).toContain("- [ ] 真待办（A）");
+  });
 });
 
 describe("项目页 5 轮优化", () => {

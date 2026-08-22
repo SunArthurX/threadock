@@ -100,7 +100,7 @@ pub(crate) async fn read_report(
 
 // ── 知识库 ──────────────────────────────────────────────────────────────
 
-/// 全库批量知识提取（幂等：已提取的会话跳过，force 重提）。
+/// 全库批量知识提取（幂等：当前引擎版本已提取的会话跳过，旧版本自动升级，force 重提）。
 /// 重活：逐会话正则提取，经 sync_progress 事件上报进度。
 #[tauri::command]
 pub(crate) async fn knowledge_extract_all(
@@ -121,13 +121,17 @@ pub(crate) async fn knowledge_extract_all(
         let mut skipped = 0u64;
         for c in &convs {
             if !force {
-                let has = {
+                // 幂等跳过：当前版本是规则引擎最新版，或已是 AI 提取结果
+                // （`llm:` 前缀，用户付费跑的，不被批量规则提取覆盖——版本历史仍可查）；
+                // rule-v1 等旧版本（TODO 无完成态、含 system 噪音）自动重提取升级
+                let up_to_date = {
                     let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-                    repo.get_knowledge(&c.id)
-                        .map(|k| k.is_some())
-                        .unwrap_or(false)
+                    repo.get_knowledge(&c.id).ok().flatten().is_some_and(|rec| {
+                        rec.extractor == ch_knowledge::RULE_EXTRACTOR
+                            || rec.extractor.starts_with("llm:")
+                    })
                 };
-                if has {
+                if up_to_date {
                     skipped += 1;
                     done += 1;
                     continue;
@@ -153,7 +157,7 @@ pub(crate) async fn knowledge_extract_all(
             };
             {
                 let repo = state.repo.lock().map_err(|e| storage_err(e))?;
-                let _ = repo.save_knowledge(&c.id, "rule-v1", &extracted_json);
+                let _ = repo.save_knowledge(&c.id, ch_knowledge::RULE_EXTRACTOR, &extracted_json);
             }
             extracted += 1;
             done += 1;
@@ -199,6 +203,8 @@ pub(crate) async fn knowledge_base_list(
     };
 
     let mut todos: Vec<serde_json::Value> = Vec::new();
+    let mut todos_pending: Vec<serde_json::Value> = Vec::new();
+    let mut todos_resolved: Vec<serde_json::Value> = Vec::new();
     let mut decisions: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<serde_json::Value> = Vec::new();
     let mut summaries: Vec<serde_json::Value> = Vec::new();
@@ -256,15 +262,27 @@ pub(crate) async fn knowledge_base_list(
             .map(|a| a.as_slice())
             .unwrap_or_default()
         {
-            if todos.len() < 300 {
+            // 未完成优先入列：300 上限若被 done/stale 挤满，真正待办会被淹没
+            let is_resolved = matches!(
+                t.get("status").and_then(|x| x.as_str()),
+                Some("done") | Some("stale")
+            );
+            let target = if is_resolved {
+                &mut todos_resolved
+            } else {
+                &mut todos_pending
+            };
+            if target.len() < 300 {
                 let mid = t
                     .get("source_message_ids")
                     .and_then(|x| x.as_array())
                     .and_then(|a| a.first())
                     .and_then(|x| x.as_str())
                     .unwrap_or("");
-                todos.push(serde_json::json!({
+                target.push(serde_json::json!({
                     "text": t.get("text").and_then(|x| x.as_str()).unwrap_or(""),
+                    // rule-v1 旧记录无 status → pending（前端按未完成渲染）
+                    "status": t.get("status").and_then(|x| x.as_str()).unwrap_or("pending"),
                     "conversation_id": c.id,
                     "title": title_of(&c.id),
                     "message_id": mid,
@@ -317,6 +335,10 @@ pub(crate) async fn knowledge_base_list(
             }
         }
     }
+
+    // 未完成在前、已完成/过期在后（各 300 上限）
+    todos.append(&mut todos_pending);
+    todos.append(&mut todos_resolved);
 
     let mut top_commands: Vec<serde_json::Value> = commands
         .into_iter()
@@ -452,5 +474,64 @@ mod activity_tests {
         assert!(!stats.heatmap.is_empty(), "热力图必须有数据");
         assert!(!stats.hourly.is_empty(), "时段分布必须有数据");
         assert!(!stats.tools_trend.is_empty(), "工具趋势必须有数据");
+    }
+
+    /// 真实库副本验证 rule-v2 TODO 质量：system 注入不再入列，
+    /// 且大量「说过就做完」的计划被判定 done/stale 而非 pending。
+    /// cargo test --lib knowledge_rule_v2_real -- --ignored --nocapture
+    #[test]
+    #[ignore = "依赖本机真实 app 数据副本"]
+    fn knowledge_rule_v2_on_real_copy() {
+        let app = std::path::PathBuf::from(std::env::var("HOME").expect("unexpected None"))
+            .join("Library/Application Support/com.threadock.desktop");
+        if !app.join("threadock.db").exists() {
+            panic!("本机无真实 app 数据");
+        }
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        std::fs::copy(app.join("threadock.db"), dir.path().join("threadock.db"))
+            .expect("file I/O failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("state open");
+        let repo = state.repo.lock().expect("mutex poisoned");
+        let convs = repo.list_conversations(None).expect("list convs");
+
+        let (mut pending, mut done, mut stale) = (0u64, 0u64, 0u64);
+        let mut boilerplate_leaks = 0u64;
+        for c in &convs {
+            let Ok(msgs) = repo.list_messages(&c.id) else {
+                continue;
+            };
+            let events = repo.list_events(&c.id).unwrap_or_default();
+            let input = ch_knowledge::ExtractionInput {
+                title: Some(c.effective_title().to_string()),
+                messages: msgs,
+                events,
+            };
+            for t in ch_knowledge::RuleExtractor::new().extract(&input).todos {
+                match t.status {
+                    ch_knowledge::TodoStatus::Pending => pending += 1,
+                    ch_knowledge::TodoStatus::Done => done += 1,
+                    ch_knowledge::TodoStatus::Stale => stale += 1,
+                }
+                let l = t.text.to_lowercase();
+                if l.contains("todowrite tool hasn't been used")
+                    || l.contains("existing contents of your todo list")
+                {
+                    boilerplate_leaks += 1;
+                }
+            }
+        }
+        let total = pending + done + stale;
+        println!(
+            "todos: total={total} pending={pending} done={done} stale={stale} boilerplate_leaks={boilerplate_leaks}"
+        );
+        assert_eq!(boilerplate_leaks, 0, "框架注入句不得再出现在 TODO 里");
+        assert!(
+            pending * 3 < total,
+            "真实语料中大多数 LLM 叙事 TODO 应判为 done/stale，pending 应为少数（实测约 16%）"
+        );
     }
 }

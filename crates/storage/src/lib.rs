@@ -17,8 +17,8 @@ pub use repository::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AuditFindingState,
     AuditMessageRow, AutomationRow, BudgetSettings, CacheStat, CacheTrendRow, DailyTool,
     DailyUsage, DirCost, GovernanceLogRow, HeatCell, HourBucket, KnowledgeRecord, LatencyStat,
-    ModelUsage, MonthProjection, NoteDto, OpsOverview, PolicyRuleRecord, ProviderUsage,
-    RedactionRuleRecord, Repository, SavedSearchRecord, SourceWorkspaceLink, TagCountDto,
-    TokenWaste, ToolTrend, ToolUsageRow, UsageSummary, WeeklySummary,
+    LlmRunRecord, ModelUsage, MonthProjection, NoteDto, OpsOverview, PolicyRuleRecord,
+    ProviderUsage, RedactionRuleRecord, Repository, SavedSearchRecord, SourceWorkspaceLink,
+    TagCountDto, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary, WeeklySummary,
 };
 pub use search::{build_match_expr, PromptReuseHit, SearchQuery, SearchResult};

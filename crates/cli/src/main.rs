@@ -839,7 +839,13 @@ fn print_extraction_result(result: &ch_knowledge::ExtractionResult) {
     if !result.todos.is_empty() {
         println!("\n📋 TODO（{}）：", result.todos.len());
         for t in &result.todos {
-            println!("  • {}", t.text);
+            // ☐ 待办 / ☑ 已完成 / ⊘ 过期（说过就做完的叙事计划）
+            let mark = match t.status {
+                ch_knowledge::TodoStatus::Pending => "☐",
+                ch_knowledge::TodoStatus::Done => "☑",
+                ch_knowledge::TodoStatus::Stale => "⊘",
+            };
+            println!("  {mark} {}", t.text);
         }
     }
     if !result.errors.is_empty() {

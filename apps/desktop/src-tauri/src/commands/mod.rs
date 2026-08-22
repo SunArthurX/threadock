@@ -88,6 +88,7 @@ mod maintenance;
 mod ops;
 mod search_cmd;
 mod settings;
+mod terminal;
 mod workspace_cmd;
 
 pub(crate) use audit::*;
@@ -102,4 +103,5 @@ pub(crate) use maintenance::*;
 pub(crate) use ops::*;
 pub(crate) use search_cmd::*;
 pub(crate) use settings::*;
+pub(crate) use terminal::*;
 pub(crate) use workspace_cmd::*;

@@ -122,8 +122,9 @@ fn journey_conversation_lifecycle() {
     assert!(detail2.tags.contains(&"e2e-tag".to_string()));
 
     // 知识提取（规则引擎全链路）
-    let k = tauri::async_runtime::block_on(extract_knowledge(
-        state.clone(),
+    let k = tauri::async_runtime::block_on(extract_knowledge_with(
+        &state,
+        None,
         imported.conversation_id.clone(),
         None,
     ))

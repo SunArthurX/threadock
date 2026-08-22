@@ -27,8 +27,10 @@ import { showToast, subscribeToasts, toastSnapshot, dismissToast } from "./toast
 import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDateFormat, saveDateFormat, type NumberFormat, type Currency, type DateFormat } from "./prefs";
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
+import { useTrackpadSwipe } from "./useTrackpadSwipe";
+import BottomTerminal from "./BottomTerminal";
 import type { ListScope } from "./ConversationList";
-import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, KnowledgeEngine } from "./types";
+import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, LlmRunRecord, KnowledgeEngine } from "./types";
 import { Icon, type IconName } from "./Icon";
 import { EmptyState } from "./EmptyState";
 
@@ -86,6 +88,19 @@ export default function App() {
   const [completenessLabel, setCompletenessLabel] = useState("");
   const [detailTags, setDetailTags] = useState<string[]>([]);
   const [knowledge, setKnowledge] = useState<ExtractionResult | null>(null);
+  /** 弹窗打开即渲染（数据可后到）：点「知识」零等待 */
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  /** 当前会话 id 的 ref（事件监听里取最新值，避免闭包陈旧） */
+  const selectedConvIdRef = useRef<string | null>(null);
+  // 渲染期不得写 ref（react-hooks/refs）：在 commit 后同步
+  useEffect(() => {
+    selectedConvIdRef.current = selectedConv?.id ?? null;
+  }, [selectedConv?.id]);
+  /** 本会话 AI 提取运行历史（最近在前）与当次事件日志（「AI 记录」tab 展示） */
+  const [llmRuns, setLlmRuns] = useState<LlmRunRecord[]>([]);
+  const [extractLog, setExtractLog] = useState<string[]>([]);
+  /** 最近一次成功 AI 提取的知识内容（「AI 知识」tab 独立数据，主视图恒为规则结果） */
+  const [aiKnowledge, setAiKnowledge] = useState<ExtractionResult | null>(null);
   // 知识提取引擎：rule 默认（离线确定性）；llm 需在设置中启用大模型
   const [knowledgeEngine, setKnowledgeEngine] = useState<KnowledgeEngine>("rule");
   const [childConvs, setChildConvs] = useState<Record<string, Conversation[]>>({});
@@ -164,6 +179,8 @@ export default function App() {
   // 任何 await 之后置状态前比对「当前序号 === 函数入口捕获的序号」，避免快速 A→B 点击时
   // A 的稍后 await 回调把 B 的消息列表覆盖掉（P0-3）。
   const loadSeqRef = useRef(0);
+  /** selectConversation 的最新引用（声明在其后、navigateConv 要用——经 ref 转发消除先用后声明） */
+  const selectConversationRef = useRef<(c: Conversation, highlightId?: string) => Promise<void>>(async () => {});
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
@@ -322,7 +339,7 @@ export default function App() {
     else nextIdx = Math.max(0, Math.min(conversations.length - 1, curIdx + dir));
     const next = conversations[nextIdx];
     if (!next) return;
-    void selectConversation(next);
+    void selectConversationRef.current(next);
     // 滚动列表容器让该行可见
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-conv-row="${CSS.escape(next.id)}"]`) as HTMLElement | null;
@@ -336,6 +353,28 @@ export default function App() {
     setHitNav(null);
     setSearchQuery("");
   };
+
+  // 底部终端 dock（ZCode/Codex 风格）：开合与高度持久化
+  const [bottomOpen, setBottomOpen] = useState<boolean>(() => localStorage.getItem("ch-bottom-open") === "1");
+  const [bottomHeight, setBottomHeight] = useState<number>(() => loadClampedNumber("ch-bottom-height", 300, 160, 720));
+  const toggleBottom = () => {
+    setBottomOpen((v) => {
+      localStorage.setItem("ch-bottom-open", v ? "0" : "1");
+      return !v;
+    });
+  };
+  const resizeBottom = (h: number) => {
+    setBottomHeight(h);
+    saveNumber("ch-bottom-height", h);
+  };
+
+  // 触控板横滑切会话（右栏详情）：左滑下一会话、右滑上一会话，
+  // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）；
+  // 左栏列表本身支持横向滚动（窄列看全标题），不参与横滑导航
+  const paneSwipe = useTrackpadSwipe(
+    () => navigateConv(1),
+    () => navigateConv(-1),
+  );
 
   // ── effects ──
   useEffect(() => {
@@ -478,6 +517,12 @@ export default function App() {
         showToast("↻ 已触发数据刷新", "info", 2000);
         return;
       }
+      // ⌘J / Ctrl+J 开关底部终端面板（VSCode 惯例）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        toggleBottom();
+        return;
+      }
       // ⌘1..8 直接跳页
       if ((e.metaKey || e.ctrlKey) && /^[1-8]$/.test(e.key)) {
         e.preventDefault();
@@ -580,6 +625,7 @@ export default function App() {
   };
 
   const selectConversation = async (c: Conversation, highlightId?: string) => {
+    selectConversationRef.current = selectConversation; // 最新引用供先声明的回调使用
     const seq = ++loadSeqRef.current;
     setSelectedConv(c);
     setHighlightMsgId(highlightId ?? null);
@@ -672,6 +718,17 @@ export default function App() {
     setSearchHistory([]);
     try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* 静默 */ }
   };
+  // 单条删除：按内容删（列表内唯一），同步 localStorage
+  const removeSearchHistory = (q: string) => {
+    setSearchHistory((prev) => {
+      const next = prev.filter((x) => x !== q);
+      try {
+        if (next.length) localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+        else localStorage.removeItem(SEARCH_HISTORY_KEY);
+      } catch { /* 静默 */ }
+      return next;
+    });
+  };
 
   const exportCurrent = async (format: "markdown" | "json") => {
     if (!selectedConv) return;
@@ -684,22 +741,80 @@ export default function App() {
     setExporting(false);
   };
 
+  // AI 提取实时进度事件 → 「AI 记录」tab 日志（只收当前会话的）
+  useEffect(() => {
+    const un = listen<{ conversation_id: string; text: string }>("llm_extract_log", (e) => {
+      const cid = selectedConvIdRef.current;
+      if (cid && e.payload.conversation_id === cid) {
+        const t = new Date().toLocaleTimeString();
+        setExtractLog((log) => [...log, `[${t}] ${e.payload.text}`]);
+      }
+    });
+    return () => { void un.then((f) => f()); };
+  }, []);
+
   const extractKnowledge = async (engineArg?: unknown) => {
     if (!selectedConv) return;
     // 防御性归一化：本函数可能被直接挂到 onClick 上（详情页工具栏），
     // 第一个参数是事件对象而非引擎名——非法值一律回退到当前引擎
     const engine: KnowledgeEngine =
       engineArg === "llm" || engineArg === "rule" ? engineArg : knowledgeEngine;
+    const stamp = () => new Date().toLocaleTimeString();
+    const refreshRuns = async () => {
+      try {
+        const st = await invoke<{
+          last: LlmRunRecord | null;
+          history: LlmRunRecord[];
+          last_success_knowledge: ExtractionResult | null;
+        }>("llm_extract_status", { conversationId: selectedConv.id });
+        setLlmRuns(st.history ?? []);
+        setAiKnowledge(st.last_success_knowledge ?? null);
+      } catch { /* 历史拉取失败不阻塞弹窗 */ }
+    };
+    // 点开「知识」（非切引擎）：弹窗立即打开（骨架），数据并行拉取——
+    // 打开动作与任何后端工作（读存档/现场提取）彻底解耦，永不等待
+    if (engineArg !== "llm" && engineArg !== "rule") {
+      setKnowledge(null);
+      setKnowledgeOpen(true);
+      const convId = selectedConv.id;
+      const [stored] = await Promise.all([
+        invoke<ExtractionResult | null>("knowledge_get_stored", { conversationId: convId }).catch(() => null),
+        refreshRuns(),
+      ]);
+      // 默认视图恒为**规则引擎**结果（快、离线、确定性）；AI 内容在「AI 知识」tab
+      if (stored && !(stored.extractor ?? "").startsWith("llm:")) {
+        setKnowledge(stored);
+        setKnowledgeEngine("rule");
+        return;
+      }
+      // current 是 AI 版本或无存档 → 现场规则提取作默认视图（大会话 < 1s；骨架已显示；
+      // 规则结果落库成为 current，AI 版本进入版本历史且仍由「AI 知识」tab 展示）
+    }
+    if (engine === "llm") {
+      setExtractLog([
+        `[${stamp()}] 开始 AI 提取：${selectedConv.user_title ?? selectedConv.title ?? ""}`,
+      ]);
+    } else if (engineArg !== "llm" && engineArg !== "rule") {
+      setExtractLog([]);
+    }
     try {
       const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id, engine });
       setKnowledge(r);
       setKnowledgeEngine(engine);
+      if (engine === "llm") {
+        await refreshRuns();
+      }
       const empty = !r.summary && !(r.decisions ?? []).length && !(r.todos ?? []).length
         && !(r.errors ?? []).length && !(r.commands ?? []).length && !(r.files ?? []).length;
       if (empty) showToast("本会话未提取到知识要点（摘要/决策/TODO/错误/命令/文件 都为空）", "info");
     } catch (e) {
+      const reason = typeof e === "string" ? e : (e as { message?: string }).message ?? String(e);
+      if (engine === "llm") {
+        setExtractLog((log) => [...log, `[${stamp()}] ✗ 提取失败：${reason}`]);
+        await refreshRuns();
+      }
       // 提取失败不打断浏览：toast 呈现原因（此前弹 error-banner 会被误认为页面异常）
-      showToast(`知识提取失败：${typeof e === "string" ? e : (e as { message?: string }).message ?? String(e)}`, "error");
+      showToast(`知识提取失败：${reason}`, "error");
     }
   };
 
@@ -928,12 +1043,13 @@ export default function App() {
           </div>
         )}
         <ErrorBoundary>
+        {/* 页面结构（v1.3.0）：主内容区单独成层，底部终端 dock 与状态栏固定其下 */}
+        <div className="app-body-main">
 
         <div className="topbar">
           <button className="brand" onClick={() => setView("overview")} title="Threadock · 回到概览">
             <span className="brand-mark"><Icon name="logo" size={14} /></span>
             <span className="brand-name">Threadock</span>
-            <span className="brand-tag">v1.1.1</span>
           </button>
           {view === "chat" && (<>
             {syncing ? (
@@ -947,16 +1063,29 @@ export default function App() {
             ) : syncResult && <span className="sync-status done"><span className="dot" />{syncResult}</span>}
 
             <div className="search-box">
-              <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
-                value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && doSearch()}
-                onFocus={() => setHistoryOpen(true)}
-                onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
+              <div className="search-input-wrap">
+                <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
+                  value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Esc：先清空搜索内容（含搜索模式），停止传播避免触发全局 Esc
+                    if (e.key === "Escape" && searchQuery) {
+                      e.stopPropagation();
+                      clearSearchMode();
+                      return;
+                    }
+                    if (e.key === "Enter") doSearch();
+                  }}
+                  onFocus={() => setHistoryOpen(true)}
+                  onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
+                {searchQuery && (
+                  <button className="search-box-clear" title="清空搜索（Esc）"
+                    onClick={() => { clearSearchMode(); searchInputRef.current?.focus(); }}>✕</button>
+                )}
+              </div>
               <Icon name="search" size={14} className="search-icon" />
               <div className="search-actions">
                 <button onClick={() => doSearch()}>搜索</button>
               </div>
-              {searchGroups && <button onClick={clearSearchMode}>清除</button>}
               {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchGroups && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
                   {savedSearches.length > 0 && (
@@ -967,20 +1096,22 @@ export default function App() {
                   {savedSearches.map((s) => (
                     <button key={s.id} className="search-history-item" onClick={() => { setSearchQuery(s.query_text); setHistoryOpen(false); doSearch(s.query_text); }}>
                       <span className="search-history-q">⭐ {s.name}</span>
-                      <span className="search-history-hint saved-search-del" title="删除这条保存的搜索"
+                      <span className="search-history-del" title="删除这条保存的搜索"
                         onClick={(e) => { e.stopPropagation(); deleteSavedSearch(s.id); }}>×</span>
                     </button>
                   ))}
                   {searchHistory.length > 0 && (
                     <div className="search-history-head">
                       <span>最近搜索</span>
-                      <button className="kb-copy" onClick={clearSearchHistory} title="清空历史">清空</button>
+                      <button className="kb-copy" onClick={clearSearchHistory} title="清空全部历史">清空</button>
                     </div>
                   )}
-                  {searchHistory.map((q, i) => (
-                    <button key={i} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
+                  {searchHistory.map((q) => (
+                    <button key={q} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
                       <span className="search-history-q">{q}</span>
                       <span className="search-history-hint">↵</span>
+                      <span className="search-history-del" title="删除这条历史"
+                        onClick={(e) => { e.stopPropagation(); removeSearchHistory(q); }}>×</span>
                     </button>
                   ))}
                 </div>
@@ -989,6 +1120,15 @@ export default function App() {
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
               onSelect={() => { setImportMenu(false); importHandler(); }} />
           </>)}
+          {/* 右上角终端开关（所有视图常驻；chat 视图右侧已有同步/导入，非 chat 独占右侧） */}
+          <button
+            className={`topbar-terminal-toggle ${bottomOpen ? "active" : ""} ${view !== "chat" ? "solo" : ""}`}
+            onClick={toggleBottom}
+            title="底部终端面板（⌘J）"
+            data-testid="bottom-terminal-toggle"
+          >
+            <Icon name="terminal" size={14} />
+          </button>
           {syncProgress && syncProgress.total > 0 && (
             <div className={`sync-progress ${syncProgress.finished ? "done" : ""}`} title={`${syncProgress.detail} ${syncProgress.current}/${syncProgress.total}`}>
               <div
@@ -1050,14 +1190,18 @@ export default function App() {
           }}
         />
 
-        {knowledge && selectedConv && (
+        {knowledgeOpen && selectedConv && (
           <KnowledgeModal
+            key={selectedConv.id}
             knowledge={knowledge}
             conversationId={selectedConv.id}
             convTitle={selectedConv.user_title ?? selectedConv.title}
-            onClose={() => setKnowledge(null)}
+            onClose={() => { setKnowledgeOpen(false); setKnowledge(null); }}
             engine={knowledgeEngine}
             onReextract={extractKnowledge}
+            llmRuns={llmRuns}
+            extractLog={extractLog}
+            aiKnowledge={aiKnowledge}
             onJumpToConversation={async (cid) => {
               // 跨会话引用跳到其他会话：保留知识弹窗
               // 复用 selectConversation 走序号守卫（P0-3）
@@ -1199,7 +1343,7 @@ export default function App() {
               title="拖拽调整会话列表宽度"
             />
             {/* 右栏：命中步进条钉在滚动区域外（始终可见，不随内容滚走）+ 详情滚动区 */}
-            <div className="detail-col">
+            <div className="detail-col" onWheel={paneSwipe}>
               {/* 命中步进条：当前会话树（主对话+子对话）内的全部命中，↑/↓ 跨会话跳转 */}
               {hitNav && (
                 <div className="hit-nav-bar">
@@ -1277,7 +1421,15 @@ export default function App() {
             </div>
           </div>
         )}
+        </div>
         </ErrorBoundary>
+        <BottomTerminal
+          open={bottomOpen}
+          dark={theme === "dark"}
+          height={bottomHeight}
+          onClose={toggleBottom}
+          onHeightChange={resizeBottom}
+        />
         <StatusBar syncResult={syncResult} syncing={syncing} viewLabel={VIEW_LABEL[view]} />
       </div>
     </div>
