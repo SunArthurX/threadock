@@ -3,6 +3,42 @@
 ## [Unreleased]
 
 ### Added
+- **知识提取 rule-v2（TODO 完成态三分）**：TODO 判定 `pending`（待办）/
+  `done`（已完成——句内措辞 / `[x]` 勾选框 / 后文完成证据 gram 匹配）/
+  `stale`（过期——会话早期的叙事计划已被推进覆盖）；排除 system 角色注入
+  （TodoWrite 提醒等，真实语料实测 54% 命中为这类噪音）与「不需要/无需/
+  TodoList 自述」误判。知识库页 TODO 透传完成态、未完成优先入列、「隐藏
+  已完成」开关（默认开）；CLI 状态符号 ☐/☑/⊘。旧 rule-v1 存档自动重提取升级
+- **自动化任务三档分组**：运行中（真执行态）/ 已启用（cron·workflow 配置
+  态）/ 已结束（历史，默认折叠带分页）——修复 174 条 MiniMax 历史后台任务
+  被误判「进行中」；无元数据目录按产物推断（summary.txt → finished；
+  output.log 15 分钟内仍在写 → running），摘要首行入 detail
+- **LLM 提取兼容性修复（GLM / MiniMax）**：Anthropic 协议端点保存时拦截
+  （提示改填 OpenAI 兼容端点）；GLM 网关 HTTP 200 + error JSON 的真实原因
+  透传（不再是 `missing field choices`）；URL 归一化（粘贴完整端点不双拼、
+  MiniMax `chatcompletion_v2` 原样识别）；GLM 思考模型档位自适应
+  （glm-5+ 始终思考 → `low`、glm-4.5/4.6 → `disabled`，思考吃光 max_tokens
+  导致的空 content 修复）；400 降级重试按服务端点名摘参；MiniMax 预设 +
+  原生 `choices[].messages[]` 响应形态兼容；连接测试预算 8 → 1024
+- **AI 提取全链路**：提取超时下限 180s；输出预算按 prompt 版本自适应
+  （v3 经验导向 8192）；长会话转录**保头保尾**（头 70% + 尾 30%，结论不
+  丢）+ 单条消息超 2000 字符掐中段 + system/tool 剔除 + 默认上限 48k → 24k
+  （实测 116 万字符会话 97s/70 条 → 58s/17 条，输入 token 减半）；提取
+  结果**版本化落库**（规则/AI 统一，知识库页可见）；**AI 运行留痕**
+  （schema V15 `llm_extract_runs`，成功失败均记——失败原因可查）；实时
+  进度事件（输入就绪 → 调用模型 → 结果逐条推送到「AI 知识」tab）
+- **知识弹窗重构**：点「知识」零等待打开（骨架先行，数据后到并行拉取）；
+  主视图恒为规则引擎结果；「AI 知识」tab 独立展示最近一次 AI 提取的**经验**
+  （prompt-v3：每类 ≤5 宁缺毋滥——经验总结全文、精选决策、未解决事项、
+  踩坑与解法）+ 运行日志与历史；已成功提取后再点 AI 引擎先确认（防重复
+  花 token）
+- **规则引擎性能**：万级事件会话提取 12s → 0.4s（`extract_path` 每事件
+  编译正则改 `LazyLock` 缓存；候选/证据句去重提前；完成证据匹配改单调
+  指针 + gram 集合，等价语义下消 O(候选×证据×gram) 交叉）；新增性能基准
+  探针测试（`bench_rule`，防退化）
+- **设置弹窗宽度自适应**：560px 固定 → `min(720px, 100vw-48px)`，标签列
+  `clamp()` 流动、预设行可换行、输入框可收缩；「启用大模型提取」勾选即时
+  生效（失败自动回滚并提示原因）
 - **底部终端面板（ZCode/Codex 风格 bottom panel）**：topbar 右上角终端
   toggle（所有视图常驻）/ ⌘J 开关；真实 PTY（`portable-pty` 起 `$SHELL`，
   stdout base64 回传规避 UTF-8 分块截断）+ xterm.js 渲染；面板关闭仅隐藏
