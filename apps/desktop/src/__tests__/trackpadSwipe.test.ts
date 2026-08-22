@@ -5,35 +5,9 @@ import {
   SWIPE_IDLE_RESET_MS,
   SWIPE_THRESHOLD,
   hasHorizontalOverflow,
-  normalizeSwipeDelta,
   swipeInit,
   swipeStep,
 } from "../useTrackpadSwipe";
-
-describe("normalizeSwipeDelta（shift+滚轮 → 横向映射）", () => {
-  it("开启映射 + shift + 纵向主导：deltaY 取负作为横向位移", () => {
-    expect(normalizeSwipeDelta(0, 100, true, true)).toEqual({ dx: -100, dy: 0 });
-    expect(normalizeSwipeDelta(0, -80, true, true)).toEqual({ dx: 80, dy: 0 });
-  });
-  it("未按 shift 或未开启映射：原样返回", () => {
-    expect(normalizeSwipeDelta(0, 100, false, true)).toEqual({ dx: 0, dy: 100 });
-    expect(normalizeSwipeDelta(0, 100, true, false)).toEqual({ dx: 0, dy: 100 });
-  });
-  it("横向分量主导时（真横滑/触控板）不转换，避免重复计入", () => {
-    expect(normalizeSwipeDelta(-120, 10, true, true)).toEqual({ dx: -120, dy: 10 });
-  });
-  it("映射后的位移能走通 swipeStep：shift 下滚两格 → 触发下一会话", () => {
-    let s = swipeInit(0);
-    let fired = 0;
-    for (let i = 0; i < 3; i++) {
-      const n = normalizeSwipeDelta(0, 80, true, true);
-      const r = swipeStep(s, n.dx, n.dy, 100 + i * 50);
-      if (r.fire !== 0) fired = r.fire;
-      s = r.state;
-    }
-    expect(fired).toBe(1); // -80 ×3 = -240 过阈值（-110）
-  });
-});
 
 describe("swipeStep（纯决策）", () => {
   it("未过阈值只累积不触发", () => {

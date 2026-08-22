@@ -338,17 +338,12 @@ export default function App() {
     setSearchQuery("");
   };
 
-  // 触控板横滑切会话（左/右栏通用）：左滑下一会话、右滑上一会话，
+  // 触控板横滑切会话（右栏详情）：左滑下一会话、右滑上一会话，
   // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）；
-  // 左栏额外开启 shift+滚轮映射（macOS 鼠标横向滚动习惯 = 左右切会话）
+  // 左栏列表本身支持横向滚动（窄列看全标题），不参与横滑导航
   const paneSwipe = useTrackpadSwipe(
     () => navigateConv(1),
     () => navigateConv(-1),
-  );
-  const listPaneSwipe = useTrackpadSwipe(
-    () => navigateConv(1),
-    () => navigateConv(-1),
-    { shiftWheelAsHorizontal: true },
   );
 
   // ── effects ──
@@ -1179,7 +1174,7 @@ export default function App() {
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
           <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
-            <ScrollArea style={{ width: listWidth }} onWheel={listPaneSwipe}>
+            <ScrollArea style={{ width: listWidth }}>
               {searchGroups
                 ? <SearchResultsPanel groups={searchGroups} query={searchQuery} role={searchRole}
                     onRoleChange={(r) => { setSearchRole(r); void runSearch(searchQuery.trim(), r); }}

@@ -55,37 +55,16 @@ export function hasHorizontalOverflow(target: Element | null, bound: Element | n
   return false;
 }
 
-/**
- * shift+滚轮 → 横向位移归一（macOS 鼠标用户习惯：shift+下滚 = 向后看，等价左滑）。
- * 仅在开启映射且纵向分量主导时转换；其余场景原样返回。
- */
-export function normalizeSwipeDelta(
-  deltaX: number,
-  deltaY: number,
-  shiftKey: boolean,
-  mapShiftWheel: boolean,
-): { dx: number; dy: number } {
-  if (mapShiftWheel && shiftKey && Math.abs(deltaY) > Math.abs(deltaX)) {
-    return { dx: -deltaY, dy: 0 };
-  }
-  return { dx: deltaX, dy: deltaY };
-}
-
-/** 返回稳定的 onWheel 处理器；回调与选项经 ref 保鲜，不随渲染重建。 */
-export function useTrackpadSwipe(
-  onNext: () => void,
-  onPrev: () => void,
-  opts: { shiftWheelAsHorizontal?: boolean } = {},
-) {
+/** 返回稳定的 onWheel 处理器；回调经 ref 保鲜，不随渲染重建。 */
+export function useTrackpadSwipe(onNext: () => void, onPrev: () => void) {
   const state = useRef<SwipeState>(swipeInit());
-  const cbs = useRef({ onNext, onPrev, opts });
+  const cbs = useRef({ onNext, onPrev });
   useEffect(() => {
-    cbs.current = { onNext, onPrev, opts };
+    cbs.current = { onNext, onPrev };
   });
   return useCallback((e: ReactWheelEvent) => {
     if (hasHorizontalOverflow(e.target as Element | null, e.currentTarget as Element | null)) return;
-    const { dx, dy } = normalizeSwipeDelta(e.deltaX, e.deltaY, e.shiftKey, cbs.current.opts.shiftWheelAsHorizontal === true);
-    const { state: next, fire } = swipeStep(state.current, dx, dy, Date.now());
+    const { state: next, fire } = swipeStep(state.current, e.deltaX, e.deltaY, Date.now());
     state.current = next;
     if (fire === 1) cbs.current.onNext();
     else if (fire === -1) cbs.current.onPrev();

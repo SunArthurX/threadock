@@ -5159,6 +5159,15 @@ button {
 .provider-chip.active { background: var(--accent, #4f8cff); color: #fff; border-color: var(--accent); }
 .provider-chip.active { background: var(--accent, #4f8cff); color: #fff; border-color: var(--accent); }
 
+/* ── 会话列表横向滚动（v1.3.0）：列表列较窄时长标题不再截断，行区可左右滑动 ──
+   只作用于行区（.list-virtual-container），表头/搜索/工具栏固定不随动；
+   macOS 上 shift+滚轮 / 触控板横滑 即原生横向滚动 */
+.list-virtual-container { overflow-x: auto; }
+.list-virtual-container .list-item .title {
+  overflow: visible;
+  text-overflow: clip;
+}
+
 /* 列表项：去复选框后，padding 调整；pinned 状态左侧细金线 */
 .list-item { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid var(--border-subtle); transition: background var(--transition); border-left: 2px solid transparent; position: relative; }
 .list-item:hover { background: var(--bg-hover); }
