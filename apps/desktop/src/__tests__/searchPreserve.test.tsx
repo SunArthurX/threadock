@@ -128,4 +128,22 @@ describe("搜索模式：主对话分组 + 命中步进", () => {
     expect(container.querySelector(".hit-nav-bar")).toBeNull();
     expect(input.value).toBe("");
   });
+
+  it("搜索历史支持单条删除（×）并同步 localStorage", async () => {
+    localStorage.setItem("ch-search-history", JSON.stringify(["西游记", "rust 错误", "tauri"]));
+    const { container } = render(<App />);
+    const input = container.querySelector<HTMLInputElement>(".search-box input")!;
+    fireEvent.focus(input); // 打开历史下拉
+    await waitFor(() => expect(container.querySelectorAll(".search-history-item").length).toBe(3));
+
+    // 删除第一条（最近使用的「西游记」），stopPropagation 不应触发该行搜索
+    const del = container.querySelectorAll(".search-history-item")[0].querySelector(".search-history-del")!;
+    fireEvent.click(del);
+
+    await waitFor(() => expect(container.querySelectorAll(".search-history-item").length).toBe(2));
+    expect(JSON.parse(localStorage.getItem("ch-search-history") ?? "[]")).toEqual(["rust 错误", "tauri"]);
+    // 没有触发搜索（仍停留在普通会话列表）
+    expect(container.querySelectorAll(".search-group").length).toBe(0);
+    localStorage.removeItem("ch-search-history");
+  });
 });

@@ -339,10 +339,16 @@ export default function App() {
   };
 
   // 触控板横滑切会话（左/右栏通用）：左滑下一会话、右滑上一会话，
-  // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）
+  // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）；
+  // 左栏额外开启 shift+滚轮映射（macOS 鼠标横向滚动习惯 = 左右切会话）
   const paneSwipe = useTrackpadSwipe(
     () => navigateConv(1),
     () => navigateConv(-1),
+  );
+  const listPaneSwipe = useTrackpadSwipe(
+    () => navigateConv(1),
+    () => navigateConv(-1),
+    { shiftWheelAsHorizontal: true },
   );
 
   // ── effects ──
@@ -680,6 +686,17 @@ export default function App() {
     setSearchHistory([]);
     try { localStorage.removeItem(SEARCH_HISTORY_KEY); } catch { /* 静默 */ }
   };
+  // 单条删除：按内容删（列表内唯一），同步 localStorage
+  const removeSearchHistory = (q: string) => {
+    setSearchHistory((prev) => {
+      const next = prev.filter((x) => x !== q);
+      try {
+        if (next.length) localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+        else localStorage.removeItem(SEARCH_HISTORY_KEY);
+      } catch { /* 静默 */ }
+      return next;
+    });
+  };
 
   const exportCurrent = async (format: "markdown" | "json") => {
     if (!selectedConv) return;
@@ -988,20 +1005,22 @@ export default function App() {
                   {savedSearches.map((s) => (
                     <button key={s.id} className="search-history-item" onClick={() => { setSearchQuery(s.query_text); setHistoryOpen(false); doSearch(s.query_text); }}>
                       <span className="search-history-q">⭐ {s.name}</span>
-                      <span className="search-history-hint saved-search-del" title="删除这条保存的搜索"
+                      <span className="search-history-del" title="删除这条保存的搜索"
                         onClick={(e) => { e.stopPropagation(); deleteSavedSearch(s.id); }}>×</span>
                     </button>
                   ))}
                   {searchHistory.length > 0 && (
                     <div className="search-history-head">
                       <span>最近搜索</span>
-                      <button className="kb-copy" onClick={clearSearchHistory} title="清空历史">清空</button>
+                      <button className="kb-copy" onClick={clearSearchHistory} title="清空全部历史">清空</button>
                     </div>
                   )}
-                  {searchHistory.map((q, i) => (
-                    <button key={i} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
+                  {searchHistory.map((q) => (
+                    <button key={q} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
                       <span className="search-history-q">{q}</span>
                       <span className="search-history-hint">↵</span>
+                      <span className="search-history-del" title="删除这条历史"
+                        onClick={(e) => { e.stopPropagation(); removeSearchHistory(q); }}>×</span>
                     </button>
                   ))}
                 </div>
@@ -1160,7 +1179,7 @@ export default function App() {
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
           <div className="main" style={{ gridTemplateColumns: `${listWidth}px 6px 1fr` }}>
-            <ScrollArea style={{ width: listWidth }} onWheel={paneSwipe}>
+            <ScrollArea style={{ width: listWidth }} onWheel={listPaneSwipe}>
               {searchGroups
                 ? <SearchResultsPanel groups={searchGroups} query={searchQuery} role={searchRole}
                     onRoleChange={(r) => { setSearchRole(r); void runSearch(searchQuery.trim(), r); }}
