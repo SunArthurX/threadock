@@ -214,13 +214,14 @@ fn journey_llm_extraction_full_chain() {
 
     // 3. AI 引擎提取
     let conv_id = import_sample(&state, dir.path());
-    let k = tauri::async_runtime::block_on(extract_knowledge(
-        state.clone(),
+    let k = tauri::async_runtime::block_on(extract_knowledge_with(
+        &state,
+        None,
         conv_id.clone(),
         Some("llm".into()),
     ))
     .expect("llm extraction");
-    assert_eq!(k.extractor, "llm:mock-1@prompt-v1");
+    assert_eq!(k.extractor, "llm:mock-1@prompt-v3");
     assert!(k.summary.contains("WorkManager"), "摘要应来自模型输出");
     assert_eq!(k.decisions.len(), 1);
     assert_eq!(k.decisions[0].decision, "采用 WorkManager");
@@ -296,8 +297,9 @@ fn journey_llm_extraction_http_error_surfaces() {
     .expect("set llm config");
 
     let conv_id = import_sample(&state, dir.path());
-    let err = tauri::async_runtime::block_on(extract_knowledge(
-        state.clone(),
+    let err = tauri::async_runtime::block_on(extract_knowledge_with(
+        &state,
+        None,
         conv_id,
         Some("llm".into()),
     ))
@@ -333,8 +335,9 @@ fn journey_llm_extraction_garbage_reply_is_parse_error() {
     .expect("set llm config");
 
     let conv_id = import_sample(&state, dir.path());
-    let err = tauri::async_runtime::block_on(extract_knowledge(
-        state.clone(),
+    let err = tauri::async_runtime::block_on(extract_knowledge_with(
+        &state,
+        None,
         conv_id,
         Some("llm".into()),
     ))

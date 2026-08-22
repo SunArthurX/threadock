@@ -377,9 +377,30 @@ pub(crate) async fn hard_delete_conversation(
 #[tauri::command]
 pub(crate) async fn extract_knowledge(
     state: tauri::State<'_, DaemonState>,
+    app: tauri::AppHandle,
     conversation_id: String,
     engine: Option<String>,
 ) -> Result<ch_knowledge::ExtractionResult, String> {
+    extract_knowledge_with(&state, Some(&app), conversation_id, engine).await
+}
+
+/// 提取实现（command 薄壳注入 AppHandle；测试直调传 None 跳过事件）。
+pub(crate) async fn extract_knowledge_with(
+    state: &tauri::State<'_, DaemonState>,
+    app: Option<&tauri::AppHandle>,
+    conversation_id: String,
+    engine: Option<String>,
+) -> Result<ch_knowledge::ExtractionResult, String> {
+    /// 向「AI 记录」tab 推实时进度事件（前端按 conversation_id 过滤追加）。
+    fn emit_log(app: Option<&tauri::AppHandle>, conversation_id: &str, text: String) {
+        use tauri::Emitter as _;
+        if let Some(app) = app {
+            let _ = app.emit(
+                "llm_extract_log",
+                serde_json::json!({ "conversation_id": conversation_id, "text": text }),
+            );
+        }
+    }
     let input = run_blocking(|| {
         let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
         let conv = repo
@@ -398,10 +419,166 @@ pub(crate) async fn extract_knowledge(
             events,
         })
     })?;
-    match engine.as_deref().unwrap_or("rule") {
-        "llm" => run_blocking(|| super::llm_cmd::extract_with_llm(&state, &input)),
+    let result = match engine.as_deref().unwrap_or("rule") {
+        "llm" => {
+            // 运行留痕（成功/失败均记）：失败原因供「AI 记录」tab 展示，
+            // 最近一次成功是重复提取确认的依据
+            let started = std::time::Instant::now();
+            let input_messages = input.messages.len() as i64;
+            let input_chars = input
+                .messages
+                .iter()
+                .filter_map(|m| m.content_text.as_deref())
+                .map(|t| t.chars().count())
+                .sum::<usize>() as i64;
+            emit_log(
+                app,
+                &conversation_id,
+                format!(
+                    "输入就绪：{input_messages} 条消息 / {input_chars} 字符（转录只收 user/assistant、单条超 2000 字符掐中段、总量上限内保头保尾）"
+                ),
+            );
+            emit_log(
+                app,
+                &conversation_id,
+                "调用大模型…（思考型模型通常 30~120 秒）".into(),
+            );
+            let outcome = run_blocking(|| super::llm_cmd::extract_with_llm(state, &input));
+            let duration_ms = started.elapsed().as_millis() as i64;
+            match &outcome {
+                Ok(r) => emit_log(
+                    app,
+                    &conversation_id,
+                    format!(
+                        "✓ 提取成功：{} 条知识 · {}s · 引擎 {}",
+                        r.decisions.len()
+                            + r.todos.len()
+                            + r.errors.len()
+                            + r.commands.len()
+                            + r.files.len(),
+                        duration_ms / 1000,
+                        r.extractor
+                    ),
+                ),
+                Err(e) => emit_log(
+                    app,
+                    &conversation_id,
+                    format!("✗ 提取失败（{}s）：{e}", duration_ms / 1000),
+                ),
+            }
+            let rec = match &outcome {
+                Ok(r) => ch_storage::LlmRunRecord {
+                    id: ch_domain::new_id("lrun"),
+                    conversation_id: conversation_id.clone(),
+                    status: "success".into(),
+                    error: None,
+                    extractor: r.extractor.clone(),
+                    items_total: (r.decisions.len()
+                        + r.todos.len()
+                        + r.errors.len()
+                        + r.commands.len()
+                        + r.files.len()) as i64,
+                    input_messages,
+                    input_chars,
+                    duration_ms,
+                    created_at_ms: 0,
+                },
+                Err(e) => ch_storage::LlmRunRecord {
+                    id: ch_domain::new_id("lrun"),
+                    conversation_id: conversation_id.clone(),
+                    status: "failed".into(),
+                    error: Some(e.clone()),
+                    extractor: "llm".into(),
+                    items_total: 0,
+                    input_messages,
+                    input_chars,
+                    duration_ms,
+                    created_at_ms: 0,
+                },
+            };
+            if let Ok(repo) = state.repo.lock() {
+                let _ = repo.record_llm_run(&rec);
+            }
+            outcome
+        }
         _ => Ok(ch_knowledge::RuleExtractor::new().extract(&input)),
+    }?;
+    // 手动提取结果统一版本化落库（plan §13.5「保留版本」）：
+    // - AI 结果（`llm:{model}@prompt-v2`）用户付费跑出，不应只活在弹窗里；
+    // - 规则结果落为 rule-v2 版本，批量提取幂等跳过不会重复跑；
+    // 「知识」弹窗点开时优先读存档（秒开），重新提取即刷新存档
+    if let Ok(json) = serde_json::to_string(&result) {
+        if let Ok(repo) = state.repo.lock() {
+            let _ = repo.save_knowledge(&conversation_id, &result.extractor, &json);
+        }
     }
+    Ok(result)
+}
+
+/// 某会话已存的当前知识提取版本（批量/手动/AI 提取落库的），供「知识」弹窗秒开。
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct StoredKnowledge {
+    pub result: ch_knowledge::ExtractionResult,
+    pub extractor: String,
+    pub version: i64,
+    pub extracted_at_ms: i64,
+}
+
+/// 某会话的 AI 提取运行状态：最近一次（含成功/失败）+ 历史记录
+/// + 最近一次成功提取的**知识内容**（「AI 知识」tab 展示用，独立于主视图的规则结果）。
+#[derive(Debug, serde::Serialize)]
+pub(crate) struct LlmExtractStatus {
+    pub last: Option<ch_storage::LlmRunRecord>,
+    pub history: Vec<ch_storage::LlmRunRecord>,
+    pub last_success_knowledge: Option<ch_knowledge::ExtractionResult>,
+}
+
+#[tauri::command]
+pub(crate) async fn llm_extract_status(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<LlmExtractStatus, String> {
+    run_blocking(|| {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        let history = repo
+            .list_llm_runs(&conversation_id, 5)
+            .map_err(|e| storage_err(e))?;
+        // 最近一次成功的 AI 知识内容（版本行里 extractor 以 llm: 开头的最新版）
+        let last_success_knowledge = repo
+            .get_latest_llm_knowledge(&conversation_id)
+            .map_err(|e| storage_err(e))?
+            .and_then(|rec| serde_json::from_str(&rec.result_json).ok());
+        Ok(LlmExtractStatus {
+            last: history.first().cloned(),
+            history,
+            last_success_knowledge,
+        })
+    })
+}
+
+/// 读取会话当前知识版本；无存档返回 None（前端回退到现场提取）。
+#[tauri::command]
+pub(crate) async fn knowledge_get_stored(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<Option<StoredKnowledge>, String> {
+    run_blocking(|| {
+        let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+        let Some(rec) = repo
+            .get_knowledge(&conversation_id)
+            .map_err(|e| storage_err(e))?
+        else {
+            return Ok(None);
+        };
+        let result: ch_knowledge::ExtractionResult =
+            serde_json::from_str(&rec.result_json).map_err(|e| format!("知识存档损坏：{e}"))?;
+        Ok(Some(StoredKnowledge {
+            result,
+            extractor: rec.extractor,
+            version: rec.version,
+            extracted_at_ms: ch_storage::timestamp::to_millis(Some(rec.updated_at)).unwrap_or(0),
+        }))
+    })
 }
 
 /// 知识跨会话引用：给定文件/命令关键词，返回各关键词在多少个其他会话里被提到。

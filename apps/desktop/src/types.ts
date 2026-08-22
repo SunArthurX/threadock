@@ -54,11 +54,24 @@ export interface ConversationDetailDto {
   tags?: string[];
   conversation: Conversation; messages: Message[]; events: EventDto[]; completeness_label: string;
 }
+/** 一次 AI 提取运行记录（成功/失败均留痕，时间倒序）。 */
+export interface LlmRunRecord {
+  id: string;
+  conversation_id: string;
+  status: "success" | "failed" | string;
+  error: string | null;
+  extractor: string;
+  input_messages: number;
+  input_chars: number;
+  items_total: number;
+  duration_ms: number;
+  created_at_ms: number;
+}
 export interface ExtractionResult {
   summary: string;
   decisions: { decision: string }[];
-  todos: { text: string }[];
-  errors: { error: string }[];
+  todos: { text: string; status?: "pending" | "done" | "stale" }[];
+  errors: { error: string; solution?: string | null }[];
   commands: string[];
   files: { path: string }[];
   extractor: string;

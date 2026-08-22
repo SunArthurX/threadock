@@ -30,7 +30,7 @@ import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import { useTrackpadSwipe } from "./useTrackpadSwipe";
 import BottomTerminal from "./BottomTerminal";
 import type { ListScope } from "./ConversationList";
-import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, KnowledgeEngine } from "./types";
+import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, LlmRunRecord, KnowledgeEngine } from "./types";
 import { Icon, type IconName } from "./Icon";
 import { EmptyState } from "./EmptyState";
 
@@ -88,6 +88,19 @@ export default function App() {
   const [completenessLabel, setCompletenessLabel] = useState("");
   const [detailTags, setDetailTags] = useState<string[]>([]);
   const [knowledge, setKnowledge] = useState<ExtractionResult | null>(null);
+  /** 弹窗打开即渲染（数据可后到）：点「知识」零等待 */
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  /** 当前会话 id 的 ref（事件监听里取最新值，避免闭包陈旧） */
+  const selectedConvIdRef = useRef<string | null>(null);
+  // 渲染期不得写 ref（react-hooks/refs）：在 commit 后同步
+  useEffect(() => {
+    selectedConvIdRef.current = selectedConv?.id ?? null;
+  }, [selectedConv?.id]);
+  /** 本会话 AI 提取运行历史（最近在前）与当次事件日志（「AI 记录」tab 展示） */
+  const [llmRuns, setLlmRuns] = useState<LlmRunRecord[]>([]);
+  const [extractLog, setExtractLog] = useState<string[]>([]);
+  /** 最近一次成功 AI 提取的知识内容（「AI 知识」tab 独立数据，主视图恒为规则结果） */
+  const [aiKnowledge, setAiKnowledge] = useState<ExtractionResult | null>(null);
   // 知识提取引擎：rule 默认（离线确定性）；llm 需在设置中启用大模型
   const [knowledgeEngine, setKnowledgeEngine] = useState<KnowledgeEngine>("rule");
   const [childConvs, setChildConvs] = useState<Record<string, Conversation[]>>({});
@@ -725,22 +738,80 @@ export default function App() {
     setExporting(false);
   };
 
+  // AI 提取实时进度事件 → 「AI 记录」tab 日志（只收当前会话的）
+  useEffect(() => {
+    const un = listen<{ conversation_id: string; text: string }>("llm_extract_log", (e) => {
+      const cid = selectedConvIdRef.current;
+      if (cid && e.payload.conversation_id === cid) {
+        const t = new Date().toLocaleTimeString();
+        setExtractLog((log) => [...log, `[${t}] ${e.payload.text}`]);
+      }
+    });
+    return () => { void un.then((f) => f()); };
+  }, []);
+
   const extractKnowledge = async (engineArg?: unknown) => {
     if (!selectedConv) return;
     // 防御性归一化：本函数可能被直接挂到 onClick 上（详情页工具栏），
     // 第一个参数是事件对象而非引擎名——非法值一律回退到当前引擎
     const engine: KnowledgeEngine =
       engineArg === "llm" || engineArg === "rule" ? engineArg : knowledgeEngine;
+    const stamp = () => new Date().toLocaleTimeString();
+    const refreshRuns = async () => {
+      try {
+        const st = await invoke<{
+          last: LlmRunRecord | null;
+          history: LlmRunRecord[];
+          last_success_knowledge: ExtractionResult | null;
+        }>("llm_extract_status", { conversationId: selectedConv.id });
+        setLlmRuns(st.history ?? []);
+        setAiKnowledge(st.last_success_knowledge ?? null);
+      } catch { /* 历史拉取失败不阻塞弹窗 */ }
+    };
+    // 点开「知识」（非切引擎）：弹窗立即打开（骨架），数据并行拉取——
+    // 打开动作与任何后端工作（读存档/现场提取）彻底解耦，永不等待
+    if (engineArg !== "llm" && engineArg !== "rule") {
+      setKnowledge(null);
+      setKnowledgeOpen(true);
+      const convId = selectedConv.id;
+      const [stored] = await Promise.all([
+        invoke<ExtractionResult | null>("knowledge_get_stored", { conversationId: convId }).catch(() => null),
+        refreshRuns(),
+      ]);
+      // 默认视图恒为**规则引擎**结果（快、离线、确定性）；AI 内容在「AI 知识」tab
+      if (stored && !(stored.extractor ?? "").startsWith("llm:")) {
+        setKnowledge(stored);
+        setKnowledgeEngine("rule");
+        return;
+      }
+      // current 是 AI 版本或无存档 → 现场规则提取作默认视图（大会话 < 1s；骨架已显示；
+      // 规则结果落库成为 current，AI 版本进入版本历史且仍由「AI 知识」tab 展示）
+    }
+    if (engine === "llm") {
+      setExtractLog([
+        `[${stamp()}] 开始 AI 提取：${selectedConv.user_title ?? selectedConv.title ?? ""}`,
+      ]);
+    } else if (engineArg !== "llm" && engineArg !== "rule") {
+      setExtractLog([]);
+    }
     try {
       const r = await invoke<ExtractionResult>("extract_knowledge", { conversationId: selectedConv.id, engine });
       setKnowledge(r);
       setKnowledgeEngine(engine);
+      if (engine === "llm") {
+        await refreshRuns();
+      }
       const empty = !r.summary && !(r.decisions ?? []).length && !(r.todos ?? []).length
         && !(r.errors ?? []).length && !(r.commands ?? []).length && !(r.files ?? []).length;
       if (empty) showToast("本会话未提取到知识要点（摘要/决策/TODO/错误/命令/文件 都为空）", "info");
     } catch (e) {
+      const reason = typeof e === "string" ? e : (e as { message?: string }).message ?? String(e);
+      if (engine === "llm") {
+        setExtractLog((log) => [...log, `[${stamp()}] ✗ 提取失败：${reason}`]);
+        await refreshRuns();
+      }
       // 提取失败不打断浏览：toast 呈现原因（此前弹 error-banner 会被误认为页面异常）
-      showToast(`知识提取失败：${typeof e === "string" ? e : (e as { message?: string }).message ?? String(e)}`, "error");
+      showToast(`知识提取失败：${reason}`, "error");
     }
   };
 
@@ -1117,14 +1188,17 @@ export default function App() {
           }}
         />
 
-        {knowledge && selectedConv && (
+        {knowledgeOpen && selectedConv && (
           <KnowledgeModal
             knowledge={knowledge}
             conversationId={selectedConv.id}
             convTitle={selectedConv.user_title ?? selectedConv.title}
-            onClose={() => setKnowledge(null)}
+            onClose={() => { setKnowledgeOpen(false); setKnowledge(null); }}
             engine={knowledgeEngine}
             onReextract={extractKnowledge}
+            llmRuns={llmRuns}
+            extractLog={extractLog}
+            aiKnowledge={aiKnowledge}
             onJumpToConversation={async (cid) => {
               // 跨会话引用跳到其他会话：保留知识弹窗
               // 复用 selectConversation 走序号守卫（P0-3）

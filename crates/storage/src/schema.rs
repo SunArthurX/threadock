@@ -460,3 +460,22 @@ CREATE TABLE IF NOT EXISTS saved_searches (
     updated_at  INTEGER NOT NULL
 );
 ";
+
+/// V15：LLM 提取运行记录（成功与失败均留痕——失败原因供「AI 记录」tab 展示，
+/// 重复提取确认依据最近一次成功）。
+pub const SCHEMA_V15: &str = r"
+CREATE TABLE IF NOT EXISTS llm_extract_runs (
+    id              TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    error           TEXT,
+    extractor       TEXT NOT NULL,
+    input_messages  INTEGER NOT NULL DEFAULT 0,
+    input_chars     INTEGER NOT NULL DEFAULT 0,
+    items_total     INTEGER NOT NULL DEFAULT 0,
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    created_at      INTEGER NOT NULL,
+    FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_llm_runs_conv ON llm_extract_runs(conversation_id, created_at);
+";

@@ -96,6 +96,8 @@ pub fn run() {
             terminal_resize,
             terminal_kill,
             extract_knowledge,
+            knowledge_get_stored,
+            llm_extract_status,
             knowledge_xref,
             llm_config_get,
             llm_config_set,

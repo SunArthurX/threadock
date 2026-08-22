@@ -13,31 +13,38 @@ use std::sync::Arc;
 
 use ch_llm::{Chat, ChatRequest, LlmError};
 
-use crate::model::{Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem};
+use crate::model::{
+    Decision, ErrorItem, ExtractionInput, ExtractionResult, FileRef, TodoItem, TodoStatus,
+};
 
 /// Prompt 版本（随 `extractor` 字段落库，plan §13.5）。
-pub const PROMPT_VERSION: &str = "prompt-v1";
-/// 每类条目上限（防模型超长输出拖垮 UI）。
-const MAX_ITEMS: usize = 50;
+/// v3（2026-08 用户决策）：只提炼**可复用经验**（prompt 心得、踩坑与解法、关键决策），
+/// 每类 ≤5 条宁缺毋滥——v2 的全量六类提取条目多、耗时 90s+、费用高。
+pub const PROMPT_VERSION: &str = "prompt-v3";
+/// 每类条目上限（经验导向：少而精）。
+const MAX_ITEMS: usize = 10;
 /// 摘要字符上限。
 const MAX_SUMMARY_CHARS: usize = 2000;
-/// 单次请求生成 token 上限。
-const MAX_OUTPUT_TOKENS: u32 = 2048;
+/// 单次请求生成 token 上限（经验提炼输出量小；思考型模型的思考计入，
+/// 留思考余量）。计费只按实际生成算。
+const MAX_OUTPUT_TOKENS: u32 = 8192;
 
 /// system prompt：严格 JSON 输出契约（source 引用转录编号）。
-const SYSTEM_PROMPT: &str = r#"你是严格的会话纪要提取器。从「用户 ↔ AI 助手」的编号对话转录中提取结构化知识。
+const SYSTEM_PROMPT: &str = r#"你是会话经验提炼器。从「用户 ↔ AI 助手」的编号对话转录中，只提炼**可复用的经验**——这次对话教会了我们什么。
 只输出一个 JSON 对象，不要输出任何其他文字、解释或代码围栏。schema：
 {"summary": string,
  "decisions": [{"decision": string, "reason": string|null, "source": [int]}],
- "todos": [{"text": string, "source": [int]}],
+ "todos": [{"text": string, "status": "pending"|"done", "source": [int]}],
  "errors": [{"error": string, "solution": string|null, "source": [int]}],
  "commands": [string],
  "files": [{"path": string, "source": [int]}]}
-规则：
-- source 是转录中的消息编号数组（如 [1,3]），只引用真实依据，没有依据给 []。
-- 不编造：没有的内容对应字段给空数组或空串。
-- summary 概括会话主题与结论，不超过 500 字。
-- decisions/todos/errors 各选最重要的，不超过 20 条；commands/files 去重。"#;
+提炼原则（宁缺毋滥，每类最多 5 条）：
+- summary：本次对话的经验总结（≤300 字）——有效的 prompt 写法、验证过的方案选型结论、值得复用的教训；写干货，不要流水账。
+- decisions：跨会话仍有参考价值的关键决策（选型/架构/取舍），不复述临时操作。
+- todos：对话结束时**仍未解决**的事项；已完成的不要。
+- errors：踩过的坑 + 对应解法（solution 尽量给可操作的步骤）；没有解法的普通报错不要。
+- commands/files：只收对复现/修复该问题真正关键的，最多各 3 条，通常给空数组。
+- 排除框架注入的提醒文字与对 todo 工具的自述；不编造，没有就给空数组/空串。"#;
 
 /// LLM 提取器（传输注入，无状态）。
 pub struct LlmExtractor {
@@ -47,7 +54,7 @@ pub struct LlmExtractor {
 }
 
 impl LlmExtractor {
-    /// `model_label` 会记入 `extractor` 字段（`llm:{label}@prompt-v1`）。
+    /// `model_label` 会记入 `extractor` 字段（`llm:{label}@{PROMPT_VERSION}`）。
     #[must_use]
     pub fn new(chat: Arc<dyn Chat>, model_label: String, max_input_chars: usize) -> Self {
         Self {
@@ -85,7 +92,12 @@ impl LlmExtractor {
     }
 }
 
+/// 单条消息转录上限（超出掐中间保头尾）。
+const PER_MSG_LIMIT: usize = 2_000;
+
 /// 编号转录：`[n] role: text`，返回 (转录文本, 编号→消息 id)。
+/// 超长截断为**保头保尾**（头部 70% + 尾部 30%）：会话的结论/收尾（TODO 清单、
+/// 最终方案、错误解决）集中在尾部，纯掐头会把最有价值的部分丢掉。
 fn build_transcript(input: &ExtractionInput, max_chars: usize) -> (String, Vec<String>) {
     let mut ids: Vec<String> = Vec::new();
     let mut out = String::new();
@@ -98,6 +110,13 @@ fn build_transcript(input: &ExtractionInput, max_chars: usize) -> (String, Vec<S
         }
     }
     for m in &input.messages {
+        // 只转录 user/assistant：system 是框架注入提醒，tool 是原始输出，
+        // 对提取无价值且白占 token（大会话中占比可观）
+        let role = match m.role {
+            ch_domain::Role::User => "user",
+            ch_domain::Role::Assistant => "assistant",
+            _ => continue,
+        };
         let Some(text) = m.content_text.as_deref() else {
             continue;
         };
@@ -105,18 +124,30 @@ fn build_transcript(input: &ExtractionInput, max_chars: usize) -> (String, Vec<S
         if t.is_empty() {
             continue;
         }
-        ids.push(m.id.clone());
-        let role = match m.role {
-            ch_domain::Role::User => "user",
-            ch_domain::Role::Assistant => "assistant",
-            _ => "other",
+        // 单条消息截断（头 1500 + 尾 500）：超长转储（代码块/日志）中段无提取价值，
+        // 头部是意图、尾部是结论
+        let body = if t.chars().count() > PER_MSG_LIMIT {
+            let total = t.chars().count();
+            let head: String = t.chars().take(1_500).collect();
+            let tail: String = t.chars().skip(total - 500).collect();
+            format!(
+                "{head}\n…（本条消息超长，中间 {} 字符已省略）…\n{tail}",
+                total - 2_000
+            )
+        } else {
+            t.to_string()
         };
-        let _ = writeln!(out, "[{}] {}: {}", ids.len(), role, t);
+        ids.push(m.id.clone());
+        let _ = writeln!(out, "[{}] {}: {}", ids.len(), role, body);
     }
     if out.chars().count() > max_chars {
-        let truncated: String = out.chars().take(max_chars).collect();
-        out = truncated;
-        out.push_str("\n…（转录过长，已截断）");
+        let total = out.chars().count();
+        let head_len = max_chars * 7 / 10;
+        let tail_len = max_chars - head_len;
+        let skipped = total - head_len - tail_len;
+        let head: String = out.chars().take(head_len).collect();
+        let tail: String = out.chars().skip(total - tail_len).collect();
+        out = format!("{head}\n…（中间 {skipped} 字符已省略，以下为会话尾部）…\n{tail}");
     }
     (out, ids)
 }
@@ -195,6 +226,10 @@ fn parse_todos(v: &serde_json::Value, ids: &[String]) -> Vec<TodoItem> {
             .filter_map(|item| {
                 Some(TodoItem {
                     text: str_field(item, "text")?.to_string(),
+                    status: match item.get("status").and_then(serde_json::Value::as_str) {
+                        Some("done") => TodoStatus::Done,
+                        _ => TodoStatus::Pending,
+                    },
                     source_message_ids: map_ids(item.get("source"), ids),
                 })
             })
@@ -354,7 +389,7 @@ mod tests {
         let chat = MockChat::ok(FULL_JSON);
         let r = extractor(chat).extract(&input_2msgs()).expect("extract ok");
         assert_eq!(r.summary, "讨论 Tauri 后台任务方案");
-        assert_eq!(r.extractor, "llm:mock-model@prompt-v1");
+        assert_eq!(r.extractor, "llm:mock-model@prompt-v3");
         assert_eq!(
             r.decisions[0].source_message_ids,
             vec!["m2".to_string()],
@@ -406,6 +441,21 @@ mod tests {
     }
 
     #[test]
+    fn todo_status_parsed_and_defaulted() {
+        let chat = MockChat::ok(
+            r#"{"summary":"s","todos":[{"text":"写测试","status":"done","source":[2]},{"text":"重构","status":"pending"},{"text":"缺省态"}]}"#,
+        );
+        let r = extractor(chat).extract(&input_2msgs()).expect("extract ok");
+        assert_eq!(r.todos[0].status, TodoStatus::Done);
+        assert_eq!(r.todos[1].status, TodoStatus::Pending);
+        assert_eq!(
+            r.todos[2].status,
+            TodoStatus::Pending,
+            "无 status 默认 pending"
+        );
+    }
+
+    #[test]
     fn missing_fields_defaults() {
         let chat = MockChat::ok(r#"{"summary":"只有摘要"}"#);
         let r = extractor(chat).extract(&input_2msgs()).expect("extract ok");
@@ -442,16 +492,52 @@ mod tests {
             .expect("extract ok");
         assert!(r.summary.is_empty());
         assert!(r.todos.is_empty());
-        assert_eq!(r.extractor, "llm:mock-model@prompt-v1");
+        assert_eq!(r.extractor, "llm:mock-model@prompt-v3");
         assert!(chat.last_user_prompt().is_empty(), "空转录不应发起模型调用");
     }
 
     #[test]
+    fn transcript_skips_non_user_roles_and_truncates_long_message() {
+        // 输入瘦身（2026-08）：system/tool 不进转录；单条超长消息保头尾掐中间
+        let long_body = format!("{}{}", "开".repeat(1800), "尾".repeat(1800)); // 3600 字符
+        let mut sys = msg("s1", Role::System, "TODO 系统提醒");
+        sys.role = Role::System;
+        let input = ExtractionInput {
+            title: None,
+            messages: vec![
+                sys,
+                msg("m1", Role::User, &long_body),
+                msg("t1", ch_domain::Role::Tool, "tool output"),
+            ],
+            events: vec![],
+        };
+        let chat = MockChat::ok(FULL_JSON);
+        let _ = LlmExtractor::new(chat.clone(), "m".into(), 48_000)
+            .extract(&input)
+            .expect("extract ok");
+        let prompt = chat.last_user_prompt();
+        assert!(!prompt.contains("系统提醒"), "system 不进转录：{prompt}");
+        assert!(!prompt.contains("tool output"), "tool 不进转录：{prompt}");
+        assert!(
+            prompt.contains("本条消息超长，中间 1600 字符已省略"),
+            "{prompt}"
+        );
+        let head_probe: String = "开".repeat(30);
+        let tail_probe: String = "尾".repeat(30);
+        assert!(prompt.contains(&head_probe), "头部保留");
+        assert!(prompt.contains(&tail_probe), "尾部保留");
+        // 编号连续（跳过的角色不占号）
+        assert!(prompt.contains("[1] user: "), "{prompt}");
+        assert!(!prompt.contains("[2]"), "只应有 1 条转录消息：{prompt}");
+    }
+
+    #[test]
     fn transcript_numbers_and_truncates() {
-        let long: String = "字".repeat(3000);
+        let head = "开".repeat(2000);
+        let tail = "尾".repeat(2000);
         let input = ExtractionInput {
             title: Some("主题".into()),
-            messages: vec![msg("m1", Role::User, &long)],
+            messages: vec![msg("m1", Role::User, &format!("{head}{tail}"))],
             events: vec![],
         };
         let chat = MockChat::ok(FULL_JSON);
@@ -461,7 +547,24 @@ mod tests {
         let prompt = chat.last_user_prompt();
         assert!(prompt.contains("标题：主题"), "{prompt}");
         assert!(prompt.contains("[1] user: "), "{prompt}");
-        assert!(prompt.contains("已截断"), "{prompt}");
+        assert!(prompt.contains("已省略"), "{prompt}");
+        // 保头保尾：掐中间而不是掐尾——结论集中在尾部
+        let head_probe: String = head.chars().take(20).collect();
+        let tail_probe: String = tail.chars().take(20).collect();
+        assert!(prompt.contains(&head_probe), "头部必须保留");
+        assert!(prompt.contains(&tail_probe), "尾部必须保留：{prompt}");
+        let tail_full: String = tail
+            .chars()
+            .rev()
+            .take(20)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert!(
+            prompt.contains(&tail_full),
+            "尾部最后内容必须在（非掐尾截断）"
+        );
     }
 
     #[test]

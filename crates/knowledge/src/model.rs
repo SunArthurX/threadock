@@ -31,9 +31,26 @@ pub struct Decision {
     pub source_message_ids: Vec<String>,
 }
 
+/// TODO 完成态（rule-v2 起提取时判定）。
+///
+/// - `Pending`：待办——出现在会话末尾且无完成证据；
+/// - `Done`：已完成——自带完成措辞、勾选框 `[x]`，或后文有完成证据；
+/// - `Stale`：过期——会话早期的「接下来/需要」叙事计划，会话推进后已被覆盖。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum TodoStatus {
+    #[default]
+    Pending,
+    Done,
+    Stale,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TodoItem {
     pub text: String,
+    /// 旧记录（rule-v1）无此字段，反序列化回退为 [`TodoStatus::Pending`]。
+    #[serde(default)]
+    pub status: TodoStatus,
     pub source_message_ids: Vec<String>,
 }
 

@@ -3680,8 +3680,6 @@ button {
   color: var(--text-muted);
 }
 
-/* 资产详情弹窗 */
-.asset-detail-modal { width: min(520px, calc(100vw - 48px)); }
 .asset-detail-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border, rgba(255,255,255,0.06)); }
 .asset-detail-row:last-child { border-bottom: none; }
 .asset-detail-label { font-size: 11.5px; color: var(--text-muted); width: 70px; flex-shrink: 0; }
@@ -3856,7 +3854,8 @@ button {
   to   { opacity: 1; backdrop-filter: blur(2px); }
 }
 .settings-modal {
-  width: min(560px, calc(100vw - 48px));
+  /* 宽度自适应窗口：宽屏最大 720px（长 URL / 预设行不拥挤），窄窗自动收缩 */
+  width: min(720px, calc(100vw - 48px));
   max-height: min(640px, calc(100vh - 64px));
   display: flex;
   flex-direction: column;
@@ -3871,6 +3870,9 @@ button {
   from { opacity: 0; transform: translateY(12px) scale(0.96); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* 资产详情弹窗：置于 .settings-modal 之后定义宽度，避免被其 min(720px…) 覆盖 */
+.asset-detail-modal { width: min(520px, calc(100vw - 48px)); }
 .settings-header {
   display: flex;
   align-items: center;
@@ -3911,7 +3913,8 @@ button {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 0; font-size: 13.5px;
 }
-.settings-row > span:first-child { flex: 0 0 150px; opacity: .9; }
+.settings-row > span:first-child { flex: 0 0 clamp(120px, 22vw, 170px); opacity: .9; }
+.settings-row input { min-width: 0; } /* flex 子项收缩时输入框可跟随变窄（长 URL 场景） */
 .settings-value { opacity: .7; font-size: 12.5px; }
 .settings-hint {
   font-size: 12px;
@@ -4082,7 +4085,7 @@ button {
 }
 .search-history-item:hover .search-history-del { opacity: 1; }
 .search-history-del:hover { background: var(--danger-bg, rgba(229, 72, 77, 0.12)); color: var(--danger, #e5484d); }
-.settings-segment { display: flex; gap: 6px; }
+.settings-segment { display: flex; flex-wrap: wrap; gap: 6px; } /* 预设按钮行窄窗自动换行 */
 .settings-segment button {
   border: 1px solid var(--border, #444); background: transparent; color: inherit;
   border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px;
@@ -4394,7 +4397,17 @@ button {
 /* 知识弹窗 */
 /* 知识弹窗：可缩小（resize: both + min 尺寸限制，避免拖太小） */
 .knowledge-modal { width: min(620px, calc(100vw - 48px)); resize: both; overflow: auto; min-width: 320px; min-height: 240px; max-width: 90vw; max-height: 86vh; }
-.knowledge-modal-actions { display: flex; align-items: center; gap: 8px; }
+.knowledge-modal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* AI 重复提取确认条（已成功提取过后重点 AI 引擎时出现） */
+.knowledge-ai-confirm {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; padding: 6px 10px; margin-top: 4px;
+  border: 1px solid var(--border, #444); border-radius: 8px;
+  font-size: 12px; color: var(--text-muted, #aaa);
+  background: var(--bg-hover, rgba(127,127,127,0.08));
+}
+.ai-run-failed { border-left: 3px solid var(--danger, #e5484d); padding-left: 8px; }
+.ai-run-log { border: 1px dashed var(--border, #444); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
 .knowledge-modal-sub { font-size: 12px; opacity: .55; margin-left: 8px; font-weight: 400; }
 /* 弹窗内 dropdown 主题色一致：light 下用浅灰底 + dark 下用深色 */
 .knowledge-modal .list-dropdown-btn { background: var(--bg-2, transparent); color: var(--text); border: 1px solid var(--border); }

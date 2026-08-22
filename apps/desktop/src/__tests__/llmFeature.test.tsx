@@ -3,6 +3,8 @@
 // - 工具栏 onClick 直通事件对象 → MouseEvent 被当成 engine 传给 invoke（invalid args）
 // - AI 提取失败（未启用/网络错）后弹窗 switching 状态永不清除 → 按钮永久禁用
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import type { ExtractionResult } from "../types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import KnowledgeModal from "../KnowledgeModal";
 import ConversationDetail from "../ConversationDetail";
@@ -66,6 +68,128 @@ describe("KnowledgeModal 引擎切换", () => {
       expect(re).not.toBeDisabled();
     });
   });
+
+  it("已成功提取过后点 AI 引擎 → 确认条；再次提取才真正调用", async () => {
+    const onReextract = vi.fn(async () => {});
+    const runs = [{
+      id: "r1", conversation_id: "c1", status: "success", error: null,
+      extractor: "llm:glm-5.3@prompt-v2", input_messages: 10, input_chars: 12000,
+      items_total: 30, duration_ms: 45000, created_at_ms: Date.now(),
+    }];
+    render(
+      <KnowledgeModal
+        knowledge={knowledge}
+        onClose={() => {}}
+        onReextract={onReextract}
+        llmRuns={runs}
+      />,
+    );
+    fireEvent.click(screen.getByText("AI 引擎"));
+    // 确认条出现，未触发提取
+    expect(await screen.findByText(/已成功 AI 提取过/)).toBeTruthy();
+    expect(onReextract).not.toHaveBeenCalled();
+    // 点「再次提取」才调用
+    fireEvent.click(screen.getByText("再次提取"));
+    expect(onReextract).toHaveBeenCalledWith("llm");
+    // 等提取请求返回、按钮从「AI 提取中…」恢复后再走取消路径
+    await waitFor(() => expect(screen.getByText("AI 引擎")).toBeTruthy());
+    fireEvent.click(screen.getByText("AI 引擎"));
+    fireEvent.click(screen.getByText("取消"));
+    expect(screen.queryByText(/已成功 AI 提取过/)).toBeNull();
+    expect(onReextract).toHaveBeenCalledTimes(1);
+  });
+
+  it("失败或无记录时点 AI 引擎直接提取（无确认）", () => {
+    const onReextract = vi.fn(async () => {});
+    const failedRuns = [{
+      id: "r1", conversation_id: "c1", status: "failed", error: "网络请求失败：超时",
+      extractor: "llm", input_messages: 10, input_chars: 12000,
+      items_total: 0, duration_ms: 60000, created_at_ms: Date.now(),
+    }];
+    render(
+      <KnowledgeModal
+        knowledge={knowledge}
+        onClose={() => {}}
+        onReextract={onReextract}
+        llmRuns={failedRuns}
+      />,
+    );
+    fireEvent.click(screen.getByText("AI 引擎"));
+    expect(onReextract).toHaveBeenCalledWith("llm");
+    expect(screen.queryByText(/已成功 AI 提取过/)).toBeNull();
+  });
+
+  it("AI 记录 tab：成功统计与失败原因", async () => {
+    const runs = [
+      { id: "r2", conversation_id: "c1", status: "failed", error: "服务端错误 [1113]：余额不足",
+        extractor: "llm", input_messages: 8, input_chars: 900, items_total: 0, duration_ms: 900, created_at_ms: Date.now() },
+      { id: "r1", conversation_id: "c1", status: "success", error: null,
+        extractor: "llm:glm-5.3@prompt-v2", input_messages: 20, input_chars: 12000, items_total: 30, duration_ms: 45000, created_at_ms: Date.now() },
+    ];
+    render(
+      <KnowledgeModal
+        knowledge={knowledge}
+        onClose={() => {}}
+        onReextract={() => {}}
+        llmRuns={runs}
+        extractLog={["[12:00:01] 开始 AI 提取", "[12:00:02] 调用大模型…", "[12:01:30] ✗ 提取失败：余额不足"]}
+      />,
+    );
+    fireEvent.click(screen.getByText("AI 知识"));
+    // 失败原因（区分于日志行里的同名文案，取带「原因：」前缀的）
+    expect(await screen.findByText(/原因：服务端错误/)).toBeTruthy();
+    expect(screen.getByText(/本次提取日志/)).toBeTruthy();
+    expect(screen.getByText(/开始 AI 提取/)).toBeTruthy();
+    expect(screen.getByText(/45s/)).toBeTruthy();
+  });
+
+  it("knowledge=null 时渲染提取骨架（弹窗先开、数据后到）", () => {
+    render(
+      <KnowledgeModal
+        knowledge={null}
+        onClose={() => {}}
+        onReextract={() => {}}
+      />,
+    );
+    expect(screen.getByText(/正在读取\/提取知识/)).toBeTruthy();
+  });
+
+  it("「AI 知识」tab 用独立 aiKnowledge 展示经验（主视图恒为规则结果）", async () => {
+    const ai = {
+      ...knowledge,
+      extractor: "llm:glm-5.3@prompt-v3",
+      summary: "有效经验：给出失败上下文再让模型排查，比直接问更快",
+      decisions: [{ decision: "选 SQLite 而非 LMDB" }],
+      errors: [{ error: "链接超时", solution: "设置 connect_timeout=5s" }],
+    } as ExtractionResult;
+    const Holder = () => {
+      const [k] = useState<ExtractionResult>({ ...knowledge, extractor: "rule-v2" } as ExtractionResult);
+      const [aiK, setAiK] = useState<ExtractionResult | null>(null);
+      return (
+        <KnowledgeModal
+          knowledge={k}
+          onClose={() => {}}
+          onReextract={async () => {
+            // AI 提取成功：主视图仍是规则结果，AI 内容进 aiKnowledge
+            setAiK(ai);
+          }}
+          aiKnowledge={aiK}
+        />
+      );
+    };
+    render(<Holder />);
+    fireEvent.click(screen.getByText("AI 知识"));
+    // 未提取：引导提示
+    expect(screen.getByText(/还没有 AI 提取的经验/)).toBeTruthy();
+    fireEvent.click(screen.getByText("AI 引擎"));
+    await waitFor(() => expect(screen.getByText(/AI 经验/)).toBeTruthy());
+    // 经验总结 + 决策 + 坑与解法 内联展示
+    expect(screen.getByText(/给出失败上下文再让模型排查/)).toBeTruthy();
+    expect(screen.getByText(/选 SQLite 而非 LMDB/)).toBeTruthy();
+    expect(screen.getByText(/链接超时 → 设置 connect_timeout/)).toBeTruthy();
+  });
+
+
 
   it("llm: 结果显示模型徽标", () => {
     render(<KnowledgeModal knowledge={knowledge} onClose={() => {}} onReextract={() => {}} />);
@@ -163,6 +287,67 @@ describe("设置页 AI 提取（大模型）配置区", () => {
       const calls = vi.mocked(invoke).mock.calls.filter(([c]) => c === "llm_config_set");
       const last = calls[calls.length - 1]?.[1] as { input: { clear_api_key: boolean } };
       expect(last.input.clear_api_key).toBe(true);
+    });
+  });
+
+  /** 找到「启用大模型提取」行里的开关。 */
+  const enableToggle = () => {
+    const row = screen.getByText("启用大模型提取").closest(".settings-row");
+    return row?.querySelector('input[type="checkbox"]') as HTMLInputElement;
+  };
+
+  it("勾选「启用」立即提交生效，无需点保存（且不携带 api_key，保持已存密钥）", async () => {
+    render(<SettingsView {...base} />);
+    const toggle = await waitFor(enableToggle);
+    expect(toggle.checked).toBe(false);
+    // mount 的 llm_config_set 未发生；勾选后第一发 set 即携带 enabled:true
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const calls = vi.mocked(invoke).mock.calls.filter(([c]) => c === "llm_config_set");
+      expect(calls.length).toBeGreaterThan(0);
+      const last = calls[calls.length - 1]?.[1] as { input: Record<string, unknown> };
+      expect(last.input.enabled).toBe(true);
+      expect(last.input.api_key).toBeNull();
+      expect(last.input.clear_api_key).toBe(false);
+    });
+    await waitFor(() => expect(screen.getByText("✓ 已启用，立即生效")).toBeTruthy());
+  });
+
+  it("启用被后端拒绝（如端点未填）时回滚开关并显示原因", async () => {
+    // 按命令分派（不能用 once 队列：mount 还会发其它 invoke 抢占序号）
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "llm_config_get")
+        return {
+          enabled: false, base_url: "", model: "", timeout_secs: 60, max_input_chars: 48000,
+          has_api_key: false, api_key_masked: null, is_local: false, api_key_broken: false,
+        };
+      if (cmd === "llm_config_set") throw "配置无效：base_url 必须以 http:// 或 https:// 开头";
+      if (cmd === "app_setting_get") return null;
+      if (cmd === "governance_log_list") return [];
+      return {};
+    });
+    render(<SettingsView {...base} />);
+    const toggle = await waitFor(enableToggle);
+    fireEvent.click(toggle);
+    await waitFor(() => expect(screen.getByText(/base_url 必须/)).toBeTruthy());
+    // 校验失败必须回滚到未启用
+    expect(enableToggle().checked).toBe(false);
+    // 还原共享 mock（mockClear 不重置 implementation），避免影响后续用例
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === "llm_config_get")
+        return {
+          enabled: false, base_url: "", model: "", timeout_secs: 60, max_input_chars: 48000,
+          has_api_key: false, api_key_masked: null, is_local: false, api_key_broken: false,
+        };
+      if (cmd === "llm_config_set")
+        return {
+          enabled: true, base_url: "http://127.0.0.1:11434/v1", model: "qwen2.5:7b",
+          timeout_secs: 60, max_input_chars: 48000,
+          has_api_key: true, api_key_masked: "sk-***5678", is_local: true, api_key_broken: false,
+        };
+      if (cmd === "app_setting_get") return null;
+      if (cmd === "governance_log_list") return [];
+      return {};
     });
   });
 });

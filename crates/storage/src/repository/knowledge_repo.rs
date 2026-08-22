@@ -58,6 +58,37 @@ impl Repository {
         Ok(id)
     }
 
+    /// 该会话**最近一次 AI 提取**的知识内容（不限 is_current——规则结果落库后
+    /// AI 版本会让位 current，但「AI 知识」tab 仍要展示它）。
+    pub fn get_latest_llm_knowledge(
+        &self,
+        conversation_id: &str,
+    ) -> StorageResult<Option<KnowledgeRecord>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let row = conn
+            .query_row(
+                "SELECT id, conversation_id, version, extractor, result_json, created_at, updated_at
+                 FROM knowledge_extractions
+                 WHERE conversation_id = ?1 AND extractor LIKE 'llm:%'
+                 ORDER BY version DESC
+                 LIMIT 1",
+                params![conversation_id],
+                |r| {
+                    Ok(KnowledgeRecord {
+                        id: r.get(0)?,
+                        conversation_id: r.get(1)?,
+                        version: r.get(2)?,
+                        extractor: r.get(3)?,
+                        result_json: r.get(4)?,
+                        created_at: timestamp::from_millis(r.get(5)?).unwrap_or_else(now_utc),
+                        updated_at: timestamp::from_millis(r.get(6)?).unwrap_or_else(now_utc),
+                    })
+                },
+            )
+            .optional()?;
+        Ok(row)
+    }
+
     /// 获取某会话的当前知识提取结果（JSON 字符串 + 版本号）。
     pub fn get_knowledge(&self, conversation_id: &str) -> StorageResult<Option<KnowledgeRecord>> {
         let conn = self.conn.lock().expect("mutex poisoned");
