@@ -151,13 +151,8 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
 
-  // 会话切换（跨会话引用跳转）：tab 回「全部」、关确认条——
-  // 修复跳转后停留在旧 tab 看到空内容/骨架卡住的展示问题
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- 外部 prop（跳转目标会话）变化的派生状态重置
-  useEffect(() => {
-    setTab("all");
-    setConfirmingAi(false);
-  }, [conversationId]);
+  // 会话切换（跨会话引用跳转）由父组件以 key={conversationId} 重挂载本组件，
+  // tab/确认条随之重置——无需 effect 同步（React 正统：状态随 key 重建）
 
   // 跨会话引用：取 files + commands 中 Top 5（按出现频次）调用后端 xref
   const [xref, setXref] = useState<XrefEntry[]>([]);

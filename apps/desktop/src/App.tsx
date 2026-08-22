@@ -179,6 +179,8 @@ export default function App() {
   // 任何 await 之后置状态前比对「当前序号 === 函数入口捕获的序号」，避免快速 A→B 点击时
   // A 的稍后 await 回调把 B 的消息列表覆盖掉（P0-3）。
   const loadSeqRef = useRef(0);
+  /** selectConversation 的最新引用（声明在其后、navigateConv 要用——经 ref 转发消除先用后声明） */
+  const selectConversationRef = useRef<(c: Conversation, highlightId?: string) => Promise<void>>(async () => {});
   const [toastList, setToastList] = useState(toastSnapshot());
   useEffect(() => subscribeToasts(() => setToastList(toastSnapshot())), []);
   // 同步/导入进度（后端 sync_progress 事件驱动，顶部进度条展示）
@@ -337,7 +339,7 @@ export default function App() {
     else nextIdx = Math.max(0, Math.min(conversations.length - 1, curIdx + dir));
     const next = conversations[nextIdx];
     if (!next) return;
-    void selectConversation(next);
+    void selectConversationRef.current(next);
     // 滚动列表容器让该行可见
     requestAnimationFrame(() => {
       const el = document.querySelector(`[data-conv-row="${CSS.escape(next.id)}"]`) as HTMLElement | null;
@@ -623,6 +625,7 @@ export default function App() {
   };
 
   const selectConversation = async (c: Conversation, highlightId?: string) => {
+    selectConversationRef.current = selectConversation; // 最新引用供先声明的回调使用
     const seq = ++loadSeqRef.current;
     setSelectedConv(c);
     setHighlightMsgId(highlightId ?? null);
@@ -1190,6 +1193,7 @@ export default function App() {
 
         {knowledgeOpen && selectedConv && (
           <KnowledgeModal
+            key={selectedConv.id}
             knowledge={knowledge}
             conversationId={selectedConv.id}
             convTitle={selectedConv.user_title ?? selectedConv.title}
