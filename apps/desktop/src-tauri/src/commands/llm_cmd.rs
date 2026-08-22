@@ -528,6 +528,73 @@ mod tests {
     /// 真实 AI 提取端到端（副本库）：用已存配置对消息最多的会话跑一次 LLM 提取，
     /// 捕获实际错误（超时/截断/解析）。密钥仅内存解密，绝不打印。
     /// cargo test --lib real_glm_extract -- --ignored --nocapture
+    /// 高频读路径性能探针：主列表 / 详情消息 / FTS 搜索在真实库上的耗时。
+    /// cargo test --lib probe_hot_reads -- --ignored --nocapture
+    #[test]
+    #[ignore = "读本机真实库副本"]
+    fn probe_hot_reads() {
+        use std::time::Instant;
+        let app_dir = std::path::PathBuf::from(std::env::var("HOME").expect("no HOME"))
+            .join("Library/Application Support/com.threadock.desktop");
+        assert!(app_dir.join("threadock.db").exists(), "无真实数据");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::copy(
+            app_dir.join("threadock.db"),
+            dir.path().join("threadock.db"),
+        )
+        .expect("copy");
+        let state = ch_daemon::DaemonState::open(ch_daemon::DaemonStateConfig {
+            data_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("open");
+
+        // 1) 主列表
+        let t = Instant::now();
+        let convs = {
+            let repo = state.read_repo.lock().expect("mutex");
+            repo.list_conversations(None).expect("convs")
+        };
+        println!("list_conversations：{} 条 {:?}", convs.len(), t.elapsed());
+
+        // 2) 最大会话消息
+        let mut biggest = ("", 0usize);
+        {
+            let repo = state.read_repo.lock().expect("mutex");
+            for c in &convs {
+                let n = repo.list_messages(&c.id).map(|m| m.len()).unwrap_or(0);
+                if n > biggest.1 {
+                    biggest = (&c.id, n);
+                }
+            }
+        }
+        let t = Instant::now();
+        {
+            let repo = state.read_repo.lock().expect("mutex");
+            let msgs = repo.list_messages(biggest.0).expect("msgs");
+            println!(
+                "list_messages（最大会话 {} 条）：{:?}",
+                msgs.len(),
+                t.elapsed()
+            );
+        }
+
+        // 3) FTS 搜索（中文关键词 + 前缀）
+        let t = Instant::now();
+        let hits = {
+            let repo = state.read_repo.lock().expect("mutex");
+            repo.search(&ch_storage::SearchQuery {
+                query: "分页 *".into(),
+                provider: None,
+                workspace_id: None,
+                role: None,
+                limit: 50,
+            })
+            .expect("search")
+        };
+        println!("search（分页 *）：{} 命中 {:?}", hits.len(), t.elapsed());
+    }
+
     /// xref 探针：弹窗挂载即查的跨会话引用（12 关键词全库 FS）最坏耗时。
     /// cargo test --lib probe_xref -- --ignored --nocapture
     #[test]

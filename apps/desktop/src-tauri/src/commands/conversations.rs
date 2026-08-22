@@ -497,7 +497,9 @@ pub(crate) async fn extract_knowledge_with(
                 },
             };
             if let Ok(repo) = state.repo.lock() {
-                let _ = repo.record_llm_run(&rec);
+                if let Err(e) = repo.record_llm_run(&rec) {
+                    tracing::warn!(error = %e, "记录 AI 提取运行失败（不影响提取结果）");
+                }
             }
             outcome
         }
@@ -509,7 +511,10 @@ pub(crate) async fn extract_knowledge_with(
     // 「知识」弹窗点开时优先读存档（秒开），重新提取即刷新存档
     if let Ok(json) = serde_json::to_string(&result) {
         if let Ok(repo) = state.repo.lock() {
-            let _ = repo.save_knowledge(&conversation_id, &result.extractor, &json);
+            if let Err(e) = repo.save_knowledge(&conversation_id, &result.extractor, &json) {
+                // 落库失败不影响弹窗展示，但下次打开将重新提取——留日志可查
+                tracing::warn!(error = %e, "知识提取结果落库失败（下次打开会重提取）");
+            }
         }
     }
     Ok(result)
