@@ -36,10 +36,6 @@ export interface ImportResultDto {
   conversation_id: string; workspace_id: string | null;
   messages: number; events: number; completeness: string;
 }
-export interface SourceSession {
-  session_id: string; title: string; detail: string;
-  message_count: number | null; imported: boolean;
-}
 export interface EventDto {
   created_at_ms?: number | null;
   id: string; event_type: string; summary: string | null; sequence_number: number;
