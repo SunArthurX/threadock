@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- **底部终端面板（ZCode/Codex 风格 bottom panel）**：topbar 右上角终端
+  toggle（所有视图常驻）/ ⌘J 开关；真实 PTY（`portable-pty` 起 `$SHELL`，
+  stdout base64 回传规避 UTF-8 分块截断）+ xterm.js 渲染；面板关闭仅隐藏
+  （会话与回滚缓冲保留），「重启」kill 重开、清屏、退出标记；高度顶边
+  拖拽（Resizer 新增 axis="y"）并持久化，开合状态持久化；配色跟随明暗
+  主题。页面结构分层：主内容（`app-body-main`）→ 终端 dock → 状态栏
 - **搜索历史单条删除**：历史下拉每行 hover 出现 ×（保存的搜索同款交互），
   删除同步 localStorage；下拉样式升级为悬浮卡片——backdrop 模糊 + 双层
   阴影 + elevated 背景、分区标题带分隔线、行中性 hover、长查询省略号

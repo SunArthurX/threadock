@@ -5436,3 +5436,93 @@ button {
   color: var(--text-primary, #e6ebf5);
   pointer-events: none;
 }
+
+/* ── 底部终端 dock（v1.3.0，ZCode/Codex 风格 bottom panel）────────────── */
+/* 主内容单独成层：终端 dock 与状态栏固定其下（topbar 常驻所有视图） */
+.app-body-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* topbar 右上角终端开关 */
+.topbar-terminal-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-input, var(--bg-elevated));
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.topbar-terminal-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+.topbar-terminal-toggle.active {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+/* 非 chat 视图右侧无其它元素时，自己推到最右 */
+.topbar-terminal-toggle.solo { margin-left: auto; }
+
+/* dock 本体：closed 仅隐藏（xterm 画布与回滚缓冲保留） */
+.bottom-dock {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-subtle);
+  min-height: 0;
+}
+.bottom-dock.closed { display: none; }
+
+/* 横向拖拽条（Resizer axis="y"） */
+.resizer.resizer-h {
+  width: 100%;
+  height: 6px;
+  cursor: row-resize;
+}
+.resizer.resizer-h::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  width: auto;
+  height: 1px;
+}
+
+.bottom-dock-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.bottom-dock-exited {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(229, 72, 77, 0.14);
+  color: var(--danger);
+}
+.bottom-xterm {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 10px 8px;
+  overflow: hidden;
+}
+.bottom-xterm .xterm { height: 100%; }

@@ -28,6 +28,7 @@ import { loadNumberFormat, saveNumberFormat, loadCurrency, saveCurrency, loadDat
 import Resizer, { loadClampedNumber, saveNumber } from "./Resizer";
 import ScrollArea, { type ScrollAreaRef } from "./ScrollArea";
 import { useTrackpadSwipe } from "./useTrackpadSwipe";
+import BottomTerminal from "./BottomTerminal";
 import type { ListScope } from "./ConversationList";
 import type { Conversation, ConversationDetailDto, ExportOutput, ImportResultDto, SearchHitGroup, SearchResult, ExtractionResult, KnowledgeEngine } from "./types";
 import { Icon, type IconName } from "./Icon";
@@ -338,6 +339,20 @@ export default function App() {
     setSearchQuery("");
   };
 
+  // 底部终端 dock（ZCode/Codex 风格）：开合与高度持久化
+  const [bottomOpen, setBottomOpen] = useState<boolean>(() => localStorage.getItem("ch-bottom-open") === "1");
+  const [bottomHeight, setBottomHeight] = useState<number>(() => loadClampedNumber("ch-bottom-height", 300, 160, 720));
+  const toggleBottom = () => {
+    setBottomOpen((v) => {
+      localStorage.setItem("ch-bottom-open", v ? "0" : "1");
+      return !v;
+    });
+  };
+  const resizeBottom = (h: number) => {
+    setBottomHeight(h);
+    saveNumber("ch-bottom-height", h);
+  };
+
   // 触控板横滑切会话（右栏详情）：左滑下一会话、右滑上一会话，
   // 与 j/k 同走 navigateConv（加载详情 + 列表滚动到可见）；
   // 左栏列表本身支持横向滚动（窄列看全标题），不参与横滑导航
@@ -485,6 +500,12 @@ export default function App() {
         e.preventDefault();
         runManualSync();
         showToast("↻ 已触发数据刷新", "info", 2000);
+        return;
+      }
+      // ⌘J / Ctrl+J 开关底部终端面板（VSCode 惯例）
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        toggleBottom();
         return;
       }
       // ⌘1..8 直接跳页
@@ -948,6 +969,8 @@ export default function App() {
           </div>
         )}
         <ErrorBoundary>
+        {/* 页面结构（v1.3.0）：主内容区单独成层，底部终端 dock 与状态栏固定其下 */}
+        <div className="app-body-main">
 
         <div className="topbar">
           <button className="brand" onClick={() => setView("overview")} title="Threadock · 回到概览">
@@ -1024,6 +1047,15 @@ export default function App() {
             <ImportMenu open={importMenu} onToggle={() => setImportMenu(!importMenu)} onSync={runManualSync} syncing={syncing} newCount={newCount}
               onSelect={() => { setImportMenu(false); importHandler(); }} />
           </>)}
+          {/* 右上角终端开关（所有视图常驻；chat 视图右侧已有同步/导入，非 chat 独占右侧） */}
+          <button
+            className={`topbar-terminal-toggle ${bottomOpen ? "active" : ""} ${view !== "chat" ? "solo" : ""}`}
+            onClick={toggleBottom}
+            title="底部终端面板（⌘J）"
+            data-testid="bottom-terminal-toggle"
+          >
+            <Icon name="terminal" size={14} />
+          </button>
           {syncProgress && syncProgress.total > 0 && (
             <div className={`sync-progress ${syncProgress.finished ? "done" : ""}`} title={`${syncProgress.detail} ${syncProgress.current}/${syncProgress.total}`}>
               <div
@@ -1312,7 +1344,15 @@ export default function App() {
             </div>
           </div>
         )}
+        </div>
         </ErrorBoundary>
+        <BottomTerminal
+          open={bottomOpen}
+          dark={theme === "dark"}
+          height={bottomHeight}
+          onClose={toggleBottom}
+          onHeightChange={resizeBottom}
+        />
         <StatusBar syncResult={syncResult} syncing={syncing} viewLabel={VIEW_LABEL[view]} />
       </div>
     </div>
