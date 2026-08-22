@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.3.0] - 2026-08-22
+
+知识提取 rule-v2（TODO 完成态）+ AI 提取全链路重构（经验导向 prompt-v3 / 落库 / 实时日志）+ GLM/MiniMax 兼容修复 + 规则引擎 27 倍提速 + 自动化任务三档分组。
 
 ### Added
 - **知识提取 rule-v2（TODO 完成态三分）**：TODO 判定 `pending`（待办）/

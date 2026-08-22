@@ -1050,7 +1050,6 @@ export default function App() {
           <button className="brand" onClick={() => setView("overview")} title="Threadock · 回到概览">
             <span className="brand-mark"><Icon name="logo" size={14} /></span>
             <span className="brand-name">Threadock</span>
-            <span className="brand-tag">v1.1.1</span>
           </button>
           {view === "chat" && (<>
             {syncing ? (
