@@ -10,6 +10,13 @@
   覆盖率守护测试（源码新增 t() 文案缺译文即测试失败）+ en 渲染冒烟
 
 ### Fixed
+- **MiniMax 会话标题/父子关系错误（v2 元数据列化）**：v2 运行时把
+  title / parent_session_id / workspace_dir / created_at_ms 存为独立列，
+  record_json 里不再填充——适配器读旧 JSON 字段导致 27 个会话标题被
+  首条消息兜底顶替（「分析前端页面数量」变成「给我统一看一下这个
+  项目……」）、12 个子任务被当主任务（列表刷屏）。适配器三条查询
+  （discover×2 + parse）全部改为列优先 COALESCE 回退 JSON；启动时
+  检测 `minimax_col_migration` 标记，一次性全量重导修正存量
 - **MiniMax v2 无标题会话不同步**：v2 运行时生成的 `sessionType=branch`、
   无 `title` 但有大量真实消息的会话（最新一条 1389 行消息，另有一批
   08-16~08-19 同类）被「title IS NOT NULL」残根过滤整体挡在同步外。
