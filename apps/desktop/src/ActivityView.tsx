@@ -161,7 +161,7 @@ export function buildHeatGrid(cells: { day: string; calls: number; sessions?: nu
     cur.push(c ? { day: key, calls: c.calls, sessions: c.sessions ?? 0 } : { day: key, calls: 0, sessions: 0 });
     if (m0 !== lastMonth) {
       const en = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      labels.push({ col: colIdx, label: en[m0] ?? `${m0}月` });
+      labels.push({ col: colIdx, label: en[m0] ?? t("{__0__}月", { __0__: (m0) }) });
       lastMonth = m0;
     }
     if (cur.length === 7) {
@@ -422,9 +422,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         if (!path) return;
         // Tauri 2.x 通过 fs plugin 写文件；这里用 clipboard + 提示让用户保存到文件路径
         await navigator.clipboard.writeText(csv);
-        showToast(`✓ CSV 已复制到剪贴板，请粘贴到 ${path}`, "info", 8000);
+        showToast(t("✓ CSV 已复制到剪贴板，请粘贴到 {__0__}", { __0__: (path) }), "info", 8000);
       } catch (e) {
-        showToast(`保存失败：${String(e)}`, "error");
+        showToast(t("保存失败：{__0__}", { __0__: (String(e)) }), "error");
       }
     } else {
       try {
@@ -446,7 +446,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       const list = await invoke<Conversation[]>("list_conversations_by_date", { fromMs, toMs });
       setDayConvs(list);
     } catch (e) {
-      showToast(`查询失败：${String(e)}`, "error");
+      showToast(t("查询失败：{__0__}", { __0__: (String(e)) }), "error");
       setDayConvs(null);
     } finally {
       setDayConvsLoading(false);
@@ -490,9 +490,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                 className={`filter-chip ${days === d ? "active" : ""}`}
                 onClick={() => setDays(d)}
                 disabled={year !== "all"}
-                title={year !== "all" ? "切换到「全部」后可选" : "按天数查看"}
+                title={year !== "all" ? t("切换到「全部」后可选") : t("按天数查看")}
               >
-                {d === 365 ? "1 年" : `${d} 天`}
+                {d === 365 ? t("1 年") : t("{__0__} 天", { __0__: (d) })}
               </button>
             ))}
             {/* P1-C5: 日历年度选择 — 数据中出现的年份 ∪ 当前年；t("全部") 切回 90/180/365 */}
@@ -510,7 +510,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                 key={y}
                 className={`filter-chip ${year === y ? "active" : ""}`}
                 onClick={() => setYear(y)}
-                title={`只看 ${y} 年（Jan 1 ~ Dec 31）`}
+                title={t("只看 {__0__} 年（Jan 1 ~ Dec 31）", { __0__: (y) })}
               >
                 {y}
               </button>
@@ -530,7 +530,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
           <div className="kb-grid-section">
             <div className="kb-grid-section-label">{t("时间分布")}</div>
             <div className="kb-grid">
-              <div className="kb-stat kpi-secondary" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>{t("最活跃时段")}</span></div>
+              <div className="kb-stat kpi-secondary" title={t("{__0__} 次调用集中在 {__1__}:00", { __0__: (peak.calls), __1__: (peak.hour) })}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>{t("最活跃时段")}</span></div>
               <div className="kb-stat kpi-secondary" title={t("今日（最近 1 天）总调用")}><b>{todayStats.calls.toLocaleString()}</b><span>今日 · {todayStats.sessions} 会话</span></div>
               <div className="kb-stat kpi-secondary" title={t("最近 7 天总调用")}><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
               <div className="kb-stat kpi-secondary" title={t("最近 30 天总调用")}><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
@@ -557,7 +557,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
             : <InlineEmpty
                 message={t("暂无活动热力数据")}
                 hint={isEmpty
-                  ? "同步并使用 ZCode / Claude Code / Cursor / MiniMax / Codex 等 Agent 后，本页会按天聚合"
+                  ? t("同步并使用 ZCode / Claude Code / Cursor / MiniMax / Codex 等 Agent 后，本页会按天聚合")
                   : t("同步指标后生成热力")}
               />
         ) : (
@@ -599,7 +599,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                     style={{ marginLeft: "auto", fontSize: 11 }}
                     onClick={loadDayConvs}
                     disabled={dayConvsLoading}
-                    title={`查询 ${selectedCell.day} 的主任务会话列表`}
+                    title={t("查询 {__0__} 的主任务会话列表", { __0__: (selectedCell.day) })}
                   >
                     {dayConvsLoading ? t("查询中…") : dayConvs ? t("↻ 重新查询") : t("💬 查看当日会话")}
                   </button>
@@ -649,7 +649,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                             title={t("点击跳转到该会话")}
                           >
                             <span className="day-detail-conv-provider">{c.provider}</span>
-                            <span className="day-detail-conv-title">{c.user_title ?? c.title ?? "(无标题)"}</span>
+                            <span className="day-detail-conv-title">{c.user_title ?? c.title ?? t("(无标题)")}</span>
                             <span className="day-detail-conv-time">{formatTime(c.started_at_ms ?? null)}</span>
                           </div>
                         ))}
@@ -671,9 +671,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       <GanttConversations onJumpToConversation={onJumpToConversation} />
 
       <div className="ops-card">
-        <CardTitle icon="clock" sub={peak.calls > 0 ? `高峰 ${String(peak.hour).padStart(2, "0")}:00 · ${peak.calls.toLocaleString()} 次` : undefined}>{t("24 小时分布")}</CardTitle>
+        <CardTitle icon="clock" sub={peak.calls > 0 ? t("高峰 {__0__}:00 · {__1__} 次", { __0__: String(peak.hour).padStart(2, "0"), __1__: peak.calls.toLocaleString() }) : undefined}>{t("24 小时分布")}</CardTitle>
         {(stats?.hourly ?? []).length === 0
-          ? (stats === null ? <Skeleton variant="chart-bars" count={12} height={140} /> : <InlineEmpty message="暂无 24 小时分布数据" />)
+          ? (stats === null ? <Skeleton variant="chart-bars" count={12} height={140} /> : <InlineEmpty message={t("暂无 24 小时分布数据")} />)
           : (
           <>
             <div className="day-parts">
@@ -723,9 +723,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       </div>
 
       <div className="ops-card">
-        <CardTitle icon="wand" sub={toolRanking.curMonth ? `${toolRanking.curMonth.slice(2)} 月${toolRanking.prevMonth ? ` · 对比 ${toolRanking.prevMonth.slice(2)} 月` : ""}` : undefined}>{t("工具使用 Top 10")}</CardTitle>
+        <CardTitle icon="wand" sub={toolRanking.curMonth ? t("{__0__} 月", { __0__: toolRanking.curMonth.slice(2) }) + (toolRanking.prevMonth ? t(" · 对比 {__0__} 月", { __0__: toolRanking.prevMonth.slice(2) }) : "") : undefined}>{t("工具使用 Top 10")}</CardTitle>
         {toolRanking.items.length === 0 ? (
-          stats === null ? <Skeleton variant="list" count={6} /> : <InlineEmpty message="暂无工具使用排行" hint={t("导入并使用 Agent 后会按月统计")} />
+          stats === null ? <Skeleton variant="list" count={6} /> : <InlineEmpty message={t("暂无工具使用排行")} hint={t("导入并使用 Agent 后会按月统计")} />
         ) : (
           <div className="tool-rank-list">
             {toolRanking.items.map((tr, i) => {

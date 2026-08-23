@@ -70,7 +70,7 @@ export default function BottomTerminal({
     }).then((un) => unlistenRef.current.push(un)).catch(() => { /* 监听失败静默 */ });
     void listen("terminal-exit", () => {
       setExited(true);
-      term.write("\r\n\x1b[90m[进程已退出 · 点击 ↻ 重启]\x1b[0m\r\n");
+      term.write("\r\n\x1b[90m[" + t("进程已退出 · 点击 ↻ 重启") + "]\x1b[0m\r\n");
     }).then((un) => unlistenRef.current.push(un)).catch(() => { /* 静默 */ });
 
     dataSubRef.current = term.onData((data) => {

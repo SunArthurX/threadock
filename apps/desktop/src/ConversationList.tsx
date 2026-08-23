@@ -20,20 +20,20 @@ export type DateFilter = "all" | "today" | "week" | "month";
 /** 排序方式：最新活动（默认）/ 创建时间 / 标题字母序。 */
 export type SortBy = "updated" | "created" | "title";
 
-const DATE_FILTERS: { key: DateFilter; label: string; days: number | null }[] = [
+const DATE_FILTERS = (): { key: DateFilter; label: string; days: number | null }[] => [
   { key: "all", label: t("全部时间"), days: null },
   { key: "today", label: t("今日"), days: 1 },
   { key: "week", label: t("近 7 天"), days: 7 },
   { key: "month", label: t("近 30 天"), days: 30 },
 ];
 
-const SORT_OPTIONS: { key: SortBy; label: string; icon: string }[] = [
+const SORT_OPTIONS = (): { key: SortBy; label: string; icon: string }[] => [
   { key: "updated", label: t("最新活动"), icon: "🕐" },
   { key: "created", label: t("创建时间"), icon: "📅" },
   { key: "title", label: t("标题字母序"), icon: "🔤" },
 ];
 
-const SCOPE_OPTIONS: { key: ListScope; label: string; icon: string }[] = [
+const SCOPE_OPTIONS = (): { key: ListScope; label: string; icon: string }[] => [
   { key: "all", label: t("全部会话"), icon: "💬" },
   { key: "favorite", label: t("收藏"), icon: "★" },
   { key: "archived", label: t("已归档"), icon: "🗄" },
@@ -187,7 +187,7 @@ export default function ConversationList({
 
   // 日期过滤：基于 started_at_ms（前端内存过滤，不增加后端请求）
   const dateFiltered = useMemo(() => {
-    const cfg = DATE_FILTERS.find((d) => d.key === dateFilter);
+    const cfg = DATE_FILTERS().find((d) => d.key === dateFilter);
     if (!cfg?.days) return conversations;
     const cutoff = Date.now() - cfg.days * 86_400_000;
     return conversations.filter((c) => (c.started_at_ms ?? 0) >= cutoff);
@@ -308,7 +308,7 @@ export default function ConversationList({
     if (scope === "deleted") {
       items.push({
         icon: "↩",
-        label: `恢复此${isMulti ? ` ${targetCount} 条` : ""}会话`,
+        label: isMulti ? t("恢复这 {__0__} 条会话", { __0__: targetCount }) : t("恢复此会话"),
         onClick: () => {
           for (const id of targetIds) {
             const cc = conversations.find((x) => x.id === id);
@@ -320,7 +320,7 @@ export default function ConversationList({
     } else {
       items.push({
         icon: "🏷",
-        label: `加标签${isMulti ? `到 ${targetCount} 条` : ""}…`,
+        label: isMulti ? t("给 {__0__} 条加标签…", { __0__: targetCount }) : t("加标签…"),
         onClick: () => {
           // 打开内联输入（位置贴 context menu 下方），不在此处用 window.prompt 阻断流程
           setTagInput({ ids: targetIds, count: targetCount, value: "", x: c_x, y: c_y });
@@ -335,7 +335,7 @@ export default function ConversationList({
       });
       items.push({
         icon: "🗑",
-        label: isMulti ? `删除 ${targetCount} 条（带撤销）` : t("删除（带撤销）"),
+        label: isMulti ? t("删除 {__0__} 条（带撤销）", { __0__: (targetCount) }) : t("删除（带撤销）"),
         danger: true,
         onClick: () => {
           const fn = onBulkDelete ? (ids: string[]) => onBulkDelete(ids) : undefined;
@@ -396,7 +396,7 @@ export default function ConversationList({
     if (!tag) return;
     if (onBulkAddTag) {
       await onBulkAddTag(tagInput.ids, tag);
-      showToast(`✓ 已加标签 #${tag} 到 ${tagInput.count} 条`, "info");
+      showToast(t("✓ 已加标签 #{__0__} 到 {__1__} 条", { __0__: (tag), __1__: (tagInput.count) }), "info");
     }
   };
 
@@ -430,19 +430,19 @@ export default function ConversationList({
           <Dropdown
             label={t("视图")}
             value={scope}
-            options={SCOPE_OPTIONS}
+            options={SCOPE_OPTIONS()}
             onChange={onScopeChange}
           />
           <Dropdown
             label={t("日期")}
             value={dateFilter}
-            options={DATE_FILTERS}
+            options={DATE_FILTERS()}
             onChange={setDateFilter}
           />
           <Dropdown
             label={t("排序")}
             value={sortBy}
-            options={SORT_OPTIONS}
+            options={SORT_OPTIONS()}
             onChange={setSortBy}
             align="right"
           />
@@ -494,7 +494,7 @@ export default function ConversationList({
                 const tag = bulkTagInput.trim().replace(/^#+/, "").trim();
                 if (tag) {
                   onBulkAddTag?.([...selectedIds], tag);
-                  showToast(`✓ 已加标签 #${tag} 到 ${selectedIds.size} 条`, "info");
+                  showToast(t("✓ 已加标签 #{__0__} 到 {__1__} 条", { __0__: (tag), __1__: (selectedIds.size) }), "info");
                 }
                 setBulkTagInput("");
               }
@@ -502,7 +502,7 @@ export default function ConversationList({
             title={t("输入标签名后按 Enter（自动去 # 前缀）")}
           />
           <button className="bulk-btn" title={t("把这批会话拆分到一个新 Workspace（plan §4.3 手动拆分）")} onClick={() => {
-            const name = window.prompt(`把选中的 ${selectedIds.size} 条会话移到新 Workspace，输入名称：`);
+            const name = window.prompt(t("把选中的 {__0__} 条会话移到新 Workspace，输入名称：", { __0__: (selectedIds.size) }));
             if (!name?.trim()) return;
             onBulkSplit?.([...selectedIds], name.trim());
           }}>{t("📂 拆分到新 Workspace")}</button>
@@ -597,7 +597,7 @@ export default function ConversationList({
         <EmptyState icon="calendar" size="sm" title={t("当前日期范围无会话")} desc={t("试试「全部时间」")} />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length > 0 && searchFiltered.length === 0 && (
-        <EmptyState icon="search" size="sm" title={`无匹配「${listSearch}」的会话`} desc="清空搜索试试" />
+        <EmptyState icon="search" size="sm" title={t("无匹配「{__0__}」的会话", { __0__: (listSearch) })} desc={t("清空搜索试试")} />
       )}
 
       {ctxMenu && (

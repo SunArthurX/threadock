@@ -47,7 +47,7 @@ export default function PrivateNoteSection({ note, onChange }: PrivateNoteSectio
     };
   }, [text, note, onChange]);
 
-  const placeholder = "📝 私人笔记（不参与搜索/导出/统计）";
+  const placeholder = t("📝 私人笔记（不参与搜索/导出/统计）");
   return (
     <details className="private-note" open={!!note}>
       <summary>

@@ -197,7 +197,7 @@ export default function CostSection({
       {/* 超支预测（基于本月速率外推） */}
       {projection && (projTokenOver != null || projCostOver != null) && (
         <div className={`ops-card projection-card ${(projTokenOver ?? 0) > 0 || (projCostOver ?? 0) > 0 ? "over" : "ok"}`}>
-          <CardTitle icon="trending" sub={`按当前速率（本月 ${projection.dayOfMonth}/${projection.daysInMonth} 天）外推`}>{t("月末预测")}</CardTitle>
+          <CardTitle icon="trending" sub={t("按当前速率（本月 {__0__}/{__1__} 天）外推", { __0__: (projection.dayOfMonth), __1__: (projection.daysInMonth) })}>{t("月末预测")}</CardTitle>
           <div className="projection-grid">
             {projTokenOver != null && (
               <div className="projection-item">
@@ -206,8 +206,8 @@ export default function CostSection({
                 {budget.monthly_token_limit && (
                   <span className={`projection-delta ${projTokenOver > 0 ? "over" : "ok"}`}>
                     {projTokenOver > 0
-                      ? `超 ${formatTokens(projTokenOver)} （${((projTokenOver / budget.monthly_token_limit) * 100).toFixed(0)}%）`
-                      : `剩余 ${formatTokens(-projTokenOver)}`}
+                      ? t("超 {__0__} （{__1__}%）", { __0__: (formatTokens(projTokenOver)), __1__: (((projTokenOver / budget.monthly_token_limit) * 100).toFixed(0)) })
+                      : t("剩余 {__0__}", { __0__: (formatTokens(-projTokenOver)) })}
                   </span>
                 )}
               </div>
@@ -219,8 +219,8 @@ export default function CostSection({
                 {budget.monthly_cost_limit && (
                   <span className={`projection-delta ${projCostOver > 0 ? "over" : "ok"}`}>
                     {projCostOver > 0
-                      ? `超 ${formatCost(projCostOver)}`
-                      : `剩余 ${formatCost(-projCostOver)}`}
+                      ? t("超 {__0__}", { __0__: (formatCost(projCostOver)) })
+                      : t("剩余 {__0__}", { __0__: (formatCost(-projCostOver)) })}
                   </span>
                 )}
               </div>
@@ -242,7 +242,7 @@ export default function CostSection({
                   <td>{formatTokens(d.tokens)}</td>
                   <td>{formatCost(d.cost_usd)}</td>
                   <td>{d.requests.toLocaleString()}</td>
-                  {onJumpByDir && <td><button className="finding-btn" title={`查看目录 ${d.dir} 的会话`} onClick={(e) => { e.stopPropagation(); onJumpByDir(d.dir); }}>{t("→ 列表")}</button></td>}
+                  {onJumpByDir && <td><button className="finding-btn" title={t("查看目录 {__0__} 的会话", { __0__: (d.dir) })} onClick={(e) => { e.stopPropagation(); onJumpByDir(d.dir); }}>{t("→ 列表")}</button></td>}
                 </tr>
               ))}
             </tbody>
@@ -300,7 +300,7 @@ export default function CostSection({
                     <td>{formatTokens(m.input_tokens + m.output_tokens)}</td>
                     <td>{m.requests.toLocaleString()}</td>
                     <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
-                    {onJumpByModel && <td><button className="finding-btn" title={`查看模型 ${m.model} 的会话`} onClick={(e) => { e.stopPropagation(); onJumpByModel(m.model); }}>{t("→ 列表")}</button></td>}
+                    {onJumpByModel && <td><button className="finding-btn" title={t("查看模型 {__0__} 的会话", { __0__: (m.model) })} onClick={(e) => { e.stopPropagation(); onJumpByModel(m.model); }}>{t("→ 列表")}</button></td>}
                   </tr>
                 ))}
               </tbody>
@@ -312,7 +312,7 @@ export default function CostSection({
       {/* 本周 vs 上周 对比卡（无数据时隐藏） */}
       {wow && (
         <div className="ops-card">
-          <CardTitle icon="calendar" sub={timeseries && timeseries.length < 14 ? t("1 周数据 vs 前 1 周（数据较少）") : "成本按 $4/M tokens 中位估算"}>{t("本周 vs 上周")}</CardTitle>
+          <CardTitle icon="calendar" sub={timeseries && timeseries.length < 14 ? t("1 周数据 vs 前 1 周（数据较少）") : t("成本按 $4/M tokens 中位估算")}>{t("本周 vs 上周")}</CardTitle>
           <div className="wow-grid">
             <div className="wow-col">
               <div className="wow-label">{t("本周")}</div>

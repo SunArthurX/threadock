@@ -43,8 +43,8 @@ export default function BudgetBar(props: BudgetBarProps) {
   // P2-3: 仅在 warn/over 时把 bar 渲染为可点击（避免误触）
   const interactive = !!props.onClick && (state === "warning" || state === "over");
   const titleText = projectedCost != null && costLimit
-    ? `${interactive ? t("点击跳转到成本页 · ") : ""}当月 ${formatCost(costSoFar)} / 预算 ${formatCost(costLimit)} · 外推月底 ${formatCost(projectedCost)}`
-    : `${interactive ? t("点击跳转到成本页 · ") : ""}当月 ${formatTokens(tokensSoFar)} tokens`;
+    ? (interactive ? t("点击跳转到成本页 · ") : "") + t("当月 {__0__} / 预算 {__1__} · 外推月底 {__2__}", { __0__: formatCost(costSoFar), __1__: formatCost(costLimit), __2__: formatCost(projectedCost) })
+    : (interactive ? t("点击跳转到成本页 · ") : "") + t("当月 {__0__} tokens", { __0__: formatTokens(tokensSoFar) });
   return (
     <div
       className={`budget-bar ${state} ${interactive ? "clickable" : ""}`}

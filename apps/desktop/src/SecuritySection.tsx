@@ -48,9 +48,9 @@ export default function SecuritySection(p: Props) {
     if (ageMs < 0) return t("刚刚");
     const min = Math.floor(ageMs / 60_000);
     if (min < 1) return t("刚刚");
-    if (min < 60) return `${min} 分钟前`;
-    if (min < 1440) return `${Math.floor(min / 60)} 小时前`;
-    return `${Math.floor(min / 1440)} 天前`;
+    if (min < 60) return t("{__0__} 分钟前", { __0__: (min) });
+    if (min < 1440) return t("{__0__} 小时前", { __0__: (Math.floor(min / 60)) });
+    return t("{__0__} 天前", { __0__: (Math.floor(min / 1440)) });
   };
   const findings = (p.audit?.findings ?? []).filter((f) => p.auditKindFilter === "all" || f.kind === p.auditKindFilter);
   const anomalyPager = usePager(p.anomalies, 20);
@@ -70,10 +70,10 @@ export default function SecuritySection(p: Props) {
     const fps = visibleFindings.map((f) => f.fingerprint);
     try {
       await p.onBulkDisposeFindings(fps, status);
-      const label = status === "ignored" ? "忽略" : "标记为误报";
-      showToast(`✓ 已${label} ${fps.length} 条发现`, "info");
+      const label = status === "ignored" ? t("忽略") : t("标记为误报");
+      showToast(t("✓ 已{__0__} {__1__} 条发现", { __0__: (label), __1__: (fps.length) }), "info");
       p.onRefreshAfterDispose();
-    } catch (e) { showToast(`失败：${String(e)}`, "error"); }
+    } catch (e) { showToast(t("失败：{__0__}", { __0__: (String(e)) }), "error"); }
   };
 
   /** 策略规则 export 为 JSON 复制到剪贴板（用户可贴到 issue / 备份）。 */
@@ -82,7 +82,7 @@ export default function SecuritySection(p: Props) {
     const json = JSON.stringify(p.policies, null, 2);
     try {
       await navigator.clipboard.writeText(json);
-      showToast(`✓ 已复制 ${p.policies.length} 条策略规则（JSON）到剪贴板`, "info");
+      showToast(t("✓ 已复制 {__0__} 条策略规则（JSON）到剪贴板", { __0__: (p.policies.length) }), "info");
     } catch { showToast("剪贴板不可用", "error"); }
   };
   const importPolicies = async () => {
@@ -94,7 +94,7 @@ export default function SecuritySection(p: Props) {
   return (
     <>
       <div className="ops-card">
-        <CardTitle icon="alert" sub={`${p.anomalies.length} 项`}>{t("异常检测")}</CardTitle>
+        <CardTitle icon="alert" sub={t("{__0__} 项", { __0__: (p.anomalies.length) })}>{t("异常检测")}</CardTitle>
         {p.anomalies.length === 0 ? (
           p.loading ? <div className="sk-line" style={{ margin: 12 }} /> : <div className="ops-table-empty">{t("未检测到异常")}</div>
         ) : (
@@ -103,7 +103,7 @@ export default function SecuritySection(p: Props) {
             {anomalyPager.slice.map((a, i) => (
               <div key={i} className="ops-risky-row">
                 <span className={`risk-flag ${a.severity}`}>
-                  {a.kind === "error_spike" ? "错误尖峰" : a.kind === "retry_storm" ? "重试风暴" : "context超限"}
+                  {a.kind === "error_spike" ? t("错误尖峰") : a.kind === "retry_storm" ? t("重试风暴") : t("context超限")}
                 </span>
                 <span className="mono" style={{ fontSize: 11.5 }}>{a.detail}</span>
                 {a.source_session_id && (
@@ -125,7 +125,7 @@ export default function SecuritySection(p: Props) {
               扫描 {p.audit.scanned_messages.toLocaleString()} 消息 / {p.audit.scanned_tool_calls.toLocaleString()} 命令 ·
               <b className="text-danger"> 高危 {p.audit.high}</b> · <b>中危 {p.audit.medium}</b>
             </span>
-            <span className="ops-freshness" title={`扫描时间：${p.audit.generated_at}`}>扫描于 {relativeTime(p.audit.generated_at)}</span>
+            <span className="ops-freshness" title={t("扫描时间：{__0__}", { __0__: (p.audit.generated_at) })}>扫描于 {relativeTime(p.audit.generated_at)}</span>
           </>
         ) : null}>{t("安全审计")}</CardTitle>
         {/* P2-4: 首次访问引导 — 突出主操作 + 背景说明（无 audit 时显示） */}
@@ -166,7 +166,7 @@ export default function SecuritySection(p: Props) {
           <div className="audit-findings">
             {findings.slice(0, 50).map((f: AuditFinding, i) => (
               <div key={i} className="audit-finding-row" onClick={() => p.onJump(f.provider, f.source_conversation_id, f.message_id)}>
-                <span className={`risk-flag ${f.severity}`}>{SEV_LABEL[f.severity]}</span>
+                <span className={`risk-flag ${f.severity}`}>{t(SEV_LABEL[f.severity] ?? f.severity)}</span>
                 <span className={`badge source ${f.provider}`}>{meta(f.provider).label}</span>
                 <span className="audit-finding-rule mono">{f.rule}</span>
                 <span className="audit-finding-snippet mono">{f.snippet}</span>
@@ -207,9 +207,9 @@ export default function SecuritySection(p: Props) {
             <div className="policy-list">
               {p.policies.map((rule) => (
                 <div key={rule.id} className={`policy-row ${rule.enabled ? "" : "disabled"}`}>
-                  <span className={`risk-flag ${rule.severity}`}>{SEV_LABEL[rule.severity]}</span>
+                  <span className={`risk-flag ${rule.severity}`}>{t(SEV_LABEL[rule.severity] ?? rule.severity)}</span>
                   <span className="mono">{rule.name}</span>
-                  <span className="policy-kind">{rule.kind === "sensitive" ? "敏感" : "命令"}</span>
+                  <span className="policy-kind">{rule.kind === "sensitive" ? t("敏感") : t("命令")}</span>
                   <span className="mono policy-pattern">{rule.pattern}</span>
                   <label className="policy-toggle" title={rule.enabled ? t("点击停用（保留规则不扫描）") : t("点击启用")}>
                     <input type="checkbox" checked={rule.enabled} onChange={() => p.onTogglePolicyEnabled(rule)} />
@@ -224,7 +224,7 @@ export default function SecuritySection(p: Props) {
       </div>
 
       <div className="ops-card">
-        <CardTitle icon="bug" sub={`${p.risky.length} 次`}>{t("风险调用")}</CardTitle>
+        <CardTitle icon="bug" sub={t("{__0__} 次", { __0__: (p.risky.length) })}>{t("风险调用")}</CardTitle>
         <div className="ops-risky">
           {riskyPager.slice.map((r) => {
             const open = p.expandedRisk.has(r.id);
@@ -254,7 +254,7 @@ export default function SecuritySection(p: Props) {
               </div>
             );
           })}
-          {p.risky.length === 0 && <InlineEmpty message="无风险调用" hint={t("扫描时未发现 rm -rf / sudo 等危险命令")} />}
+          {p.risky.length === 0 && <InlineEmpty message={t("无风险调用")} hint={t("扫描时未发现 rm -rf / sudo 等危险命令")} />}
         </div>
         {pagerBar(riskyPager)}
       </div>

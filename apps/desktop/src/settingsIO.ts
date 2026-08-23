@@ -43,11 +43,11 @@ export function exportAllSettings(): string {
 export function importAllSettings(json: string, mode: "merge" | "replace" = "merge"): { applied: number; skipped: number } {
   let parsed: unknown;
   try { parsed = JSON.parse(json); } catch { throw new Error(t("JSON 解析失败")); }
-  if (!parsed || typeof parsed !== "object") throw new Error("JSON 根节点不是对象");
+  if (!parsed || typeof parsed !== "object") throw new Error(t("JSON 根节点不是对象"));
   const obj = parsed as { version?: number; prefs?: Record<string, unknown> };
-  if (typeof obj.version !== "number") throw new Error("缺少 version 字段");
-  if (obj.version > EXPORT_VERSION) throw new Error(`配置版本 ${obj.version} 高于当前支持 ${EXPORT_VERSION}`);
-  if (!obj.prefs || typeof obj.prefs !== "object") throw new Error("缺少 prefs 字段");
+  if (typeof obj.version !== "number") throw new Error(t("缺少 version 字段"));
+  if (obj.version > EXPORT_VERSION) throw new Error(t("配置版本 {__0__} 高于当前支持 {__1__}", { __0__: (obj.version), __1__: (EXPORT_VERSION) }));
+  if (!obj.prefs || typeof obj.prefs !== "object") throw new Error(t("缺少 prefs 字段"));
   const prefs = obj.prefs as Record<string, string | null | undefined>;
   // 防御：只接受白名单 key（防注入）
   const validKeys = new Set<string>(ALL_KEYS);

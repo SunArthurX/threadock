@@ -70,18 +70,18 @@ export default function WorkspaceSection() {
     if (!workspaces || workspaces.length < 2) return;
     const targets = workspaces.filter((w) => w.id !== ws.id);
     const idx = window.prompt(
-      `把「${ws.display_name}」合并到哪个 Workspace？输入序号：\n` +
+      t("把「{__0__}」合并到哪个 Workspace？输入序号：\n", { __0__: (ws.display_name) }) +
         targets.map((t, i) => `${i + 1}. ${t.display_name}`).join("\n"),
     );
     if (!idx) return;
     const n = Number(idx.trim());
     if (!Number.isInteger(n) || n < 1 || n > targets.length) { showToast("无效序号", "error"); return; }
     const target = targets[n - 1];
-    if (!window.confirm(`确定把「${ws.display_name}」的全部会话并入「${target.display_name}」？此操作会删除原 Workspace（已记入治理审计日志）。`)) return;
+    if (!window.confirm(t("确定把「{__0__}」的全部会话并入「{__1__}」？此操作会删除原 Workspace（已记入治理审计日志）。", { __0__: (ws.display_name), __1__: (target.display_name) }))) return;
     setBusy(true);
     try {
       const moved = await invoke<number>("workspace_merge", { sourceId: ws.id, targetId: target.id });
-      showToast(`✓ 已合并：迁移 ${moved} 条会话到「${target.display_name}」`, "info");
+      showToast(t("✓ 已合并：迁移 {__0__} 条会话到「{__1__}」", { __0__: (moved), __1__: (target.display_name) }), "info");
       await load();
     } catch (e) { showToast(String(e), "error"); } finally { setBusy(false); }
   };
@@ -101,7 +101,7 @@ export default function WorkspaceSection() {
       <h3>
         🗂 Workspace 管理
         <span className="settings-card-sub" style={{ marginLeft: 8 }}>
-          {workspaces.length} 个{lowCount > 0 ? ` · ${lowCount} 个低置信度待确认` : ""}
+          {workspaces.length} 个{lowCount > 0 ? t(" · {__0__} 个低置信度待确认", { __0__: (lowCount) }) : ""}
         </span>
       </h3>
       <div className="settings-hint">
@@ -117,7 +117,7 @@ export default function WorkspaceSection() {
               {conf != null && (
                 <span
                   className={`ws-conf-badge ${conf < LOW_CONFIDENCE ? "low" : "ok"}`}
-                  title={`该 Workspace 来源映射的最低匹配置信度 ${conf.toFixed(2)}（${conf < LOW_CONFIDENCE ? t("建议人工确认") : t("可信")}）`}
+                  title={t("该 Workspace 来源映射的最低匹配置信度 {__0__}（{__1__}）", { __0__: conf.toFixed(2), __1__: conf < LOW_CONFIDENCE ? t("建议人工确认") : t("可信") })}
                 >
                   {conf < LOW_CONFIDENCE ? `⚠ ${conf.toFixed(2)}` : `✓ ${conf.toFixed(2)}`}
                 </span>

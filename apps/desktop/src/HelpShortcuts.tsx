@@ -18,12 +18,12 @@ interface Group {
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const MOD = isMac ? "⌘" : "Ctrl";
 
-const GROUPS: Group[] = [
+const GROUPS = (): Group[] => [
   {
     title: t("全局"),
     items: [
-      { keys: `${MOD} K`, desc: "唤起 / 关闭命令面板（搜索会话/跳页）", scope: "global" },
-      { keys: `${MOD} ?`, desc: "唤起 / 关闭本快捷键速查", scope: "global" },
+      { keys: `${MOD} K`, desc: t("唤起 / 关闭命令面板（搜索会话/跳页）"), scope: "global" },
+      { keys: `${MOD} ?`, desc: t("唤起 / 关闭本快捷键速查"), scope: "global" },
       { keys: `${MOD} 1`, desc: t("跳到「对话」"), scope: "global" },
       { keys: `${MOD} 2`, desc: t("跳到「概览」"), scope: "global" },
       { keys: `${MOD} 3`, desc: t("跳到「成本」"), scope: "global" },
@@ -33,18 +33,18 @@ const GROUPS: Group[] = [
       { keys: `${MOD} 7`, desc: t("跳到「资产」"), scope: "global" },
       { keys: `${MOD} 8`, desc: t("跳到「项目」"), scope: "global" },
       { keys: `${MOD} R`, desc: t("手动刷新（重新拉取会话 + 指标）"), scope: "global" },
-      { keys: "Esc", desc: "关闭弹窗 / 取消选择", scope: "global" },
+      { keys: "Esc", desc: t("关闭弹窗 / 取消选择"), scope: "global" },
     ],
   },
   {
     title: t("对话列表"),
     items: [
       { keys: "Enter", desc: t("打开选中会话"), scope: "列表" },
-      { keys: "Space", desc: "勾选/取消多选", scope: "列表" },
+      { keys: "Space", desc: t("勾选/取消多选"), scope: "列表" },
       { keys: `${MOD} A`, desc: t("全选当前页"), scope: "列表" },
       { keys: `${MOD} D`, desc: t("删除选中（带撤销）"), scope: "列表" },
-      { keys: `${MOD} E`, desc: "归档/取消归档", scope: "列表" },
-      { keys: "F", desc: "收藏/取消收藏", scope: "列表" },
+      { keys: `${MOD} E`, desc: t("归档/取消归档"), scope: "列表" },
+      { keys: "F", desc: t("收藏/取消收藏"), scope: "列表" },
     ],
   },
   {
@@ -54,15 +54,15 @@ const GROUPS: Group[] = [
       { keys: `${MOD} K`, desc: t("知识提取"), scope: "详情" },
       { keys: `${MOD} E`, desc: t("导出当前会话"), scope: "详情" },
       { keys: "T", desc: t("切换时间线模式"), scope: "详情" },
-      { keys: "A", desc: "归档/取消归档", scope: "详情" },
-      { keys: "F", desc: "收藏/取消收藏", scope: "详情" },
+      { keys: "A", desc: t("归档/取消归档"), scope: "详情" },
+      { keys: "F", desc: t("收藏/取消收藏"), scope: "详情" },
     ],
   },
   {
-    title: "报告 / 治理",
+    title: t("报告 / 治理"),
     items: [
       { keys: "Enter", desc: t("打开选中的历史报告"), scope: "对话" },
-      { keys: "Esc", desc: "关闭报告 / 弹窗", scope: "对话" },
+      { keys: "Esc", desc: t("关闭报告 / 弹窗"), scope: "对话" },
     ],
   },
 ];
@@ -87,7 +87,7 @@ export default function HelpShortcuts({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <ScrollArea className="settings-body help-shortcuts-body">
-          {GROUPS.map((g) => (
+          {GROUPS().map((g) => (
             <section key={g.title} className="help-shortcuts-group">
               <h3>{g.title}</h3>
               <div className="help-shortcuts-table">

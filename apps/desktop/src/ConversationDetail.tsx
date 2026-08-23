@@ -116,7 +116,7 @@ export default function ConversationDetail({
       const cmd = await invoke<string | null>("resume_command", { conversationId: conv.id });
       if (!cmd) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
       const r = await copyToClipboard(cmd);
-      if (r.ok) showToast(`✓ 已复制：${cmd}`, "info");
+      if (r.ok) showToast(t("✓ 已复制：{__0__}", { __0__: (cmd) }), "info");
       else showToast(r.error ?? t("复制失败"), "error");
     } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
   };
@@ -125,10 +125,10 @@ export default function ConversationDetail({
     try {
       const cmd = await invoke<string | null>("resume_in_terminal", { conversationId: conv.id });
       if (cmd == null) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
-      showToast(`✓ 已在终端打开：${cmd}`, "info");
+      showToast(t("✓ 已在终端打开：{__0__}", { __0__: (cmd) }), "info");
     } catch (e) {
       // 打开失败（无终端/osascript 失败等）→ 回退复制，用户可手动粘贴
-      showToast(`终端打开失败（${typeof e === "string" ? e : String(e)}），已改为复制`, "error");
+      showToast(t("终端打开失败（{__0__}），已改为复制", { __0__: typeof e === "string" ? e : String(e) }), "error");
       await copyResumeCommand();
     }
   };
@@ -245,19 +245,19 @@ export default function ConversationDetail({
   /** 复制 message_id（排错用：粘到 issue 里能直接定位 DB 行）。 */
   const copyMsgId = async (id: string) => {
     const r = await copyToClipboard(id);
-    if (r.ok) showToast(`✓ message_id 已复制 (${id.slice(0, 12)}…)`, "info");
+    if (r.ok) showToast(t("✓ message_id 已复制 ({__0__}…)", { __0__: (id.slice(0, 12)) }), "info");
     else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 复制整条会话的纯文本（user + assistant 顺序拼接，无 metadata）。 */
   const copyAllMessages = async () => {
     const lines = visibleMsgs.map((m) => {
-      const role = m.role === "user" ? "我" : m.role === "assistant" ? "AI" : m.role;
+      const role = m.role === "user" ? t("我") : m.role === "assistant" ? "AI" : m.role;
       const ts = m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN") : "";
       return `[${ts}] ${role}:\n${m.content_text ?? ""}`;
     });
     const text = lines.join("\n\n");
     const r = await copyToClipboard(text);
-    if (r.ok) showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
+    if (r.ok) showToast(t("✓ 已复制 {__0__} 条消息", { __0__: (lines.length) }), "info");
     else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 切分消息文本为「代码块 + 普通文本」段 —— 委托给 messageRender.splitCodeBlocks（独立可测）。 */
@@ -279,7 +279,7 @@ export default function ConversationDetail({
               <div className="tl-dot" />
               <div className="tl-time">{m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
               <div className="tl-content">
-                <div className="tl-role">{m.role === "user" ? "👤 用户" : m.role === "assistant" ? "🤖 助手" : m.role}</div>
+                <div className="tl-role">{m.role === "user" ? t("👤 用户") : m.role === "assistant" ? t("🤖 助手") : m.role}</div>
                 <div className="tl-text">{(m.content_text ?? "").slice(0, 200)}</div>
                 {isCurrent && <span className="msg-match-marker" aria-hidden>🎯</span>}
               </div>
@@ -340,7 +340,7 @@ export default function ConversationDetail({
           />
         ) : (
           <span className="title-text">
-            {conv.user_title ?? conv.title ?? "(无标题)"}
+            {conv.user_title ?? conv.title ?? t("(无标题)")}
             {onRenameTitle && <span className="title-edit-hint" title={t("双击改标题")}>✎</span>}
           </span>
         )}
@@ -391,7 +391,7 @@ export default function ConversationDetail({
           onClick={() => setSearchOpen((v) => !v)}
           title={t("在此会话内搜索消息（⌘F）")}
         >{t("🔍 搜索消息")}</button>
-        <button className="action-btn" onClick={copyAllMessages} title={`复制 ${visibleMsgs.length} 条消息为纯文本`}>
+        <button className="action-btn" onClick={copyAllMessages} title={t("复制 {__0__} 条消息为纯文本", { __0__: (visibleMsgs.length) })}>
           📋 复制全部
         </button>
         <div className="download-dropdown">
@@ -427,7 +427,7 @@ export default function ConversationDetail({
             }}
           />
           <span className="msg-search-count">
-            {search.trim() ? (matches.length === 0 ? "无匹配" : `${searchIdx + 1} / ${matches.length}`) : ""}
+            {search.trim() ? (matches.length === 0 ? t("无匹配") : `${searchIdx + 1} / ${matches.length}`) : ""}
           </span>
           <button className="msg-search-btn" onClick={prevMatch} disabled={matches.length === 0}>↑</button>
           <button className="msg-search-btn" onClick={nextMatch} disabled={matches.length === 0}>↓</button>
@@ -500,7 +500,7 @@ export default function ConversationDetail({
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
           <div className="role">
             <span className={`avatar ${m.role}`}>{m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}</span>
-            <span className="role-label">{m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : m.role}</span>
+            <span className="role-label">{m.role === "user" ? t("用户") : m.role === "assistant" ? t("助手") : m.role}</span>
             {m.created_at_ms && <span className="msg-time">{formatTime(m.created_at_ms)}</span>}
           </div>
           <MessageBlock

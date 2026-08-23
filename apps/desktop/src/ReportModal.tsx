@@ -113,7 +113,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
               </div>
               {filteredHistory.length === 0 ? (
                 <div className="ops-table-empty" style={{ padding: 8 }}>
-                  {keyword ? `没有匹配「${keyword}」的报告` : t("暂无收藏")}
+                  {keyword ? t("没有匹配「{__0__}」的报告", { __0__: (keyword) }) : t("暂无收藏")}
                 </div>
               ) : (
                 <ScrollArea className="report-history-list">
@@ -154,7 +154,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
               className="report-frame"
               sandbox="allow-same-origin"
               srcDoc={html}
-              title={current ? `历史报告：${current}` : t("实时周报")}
+              title={current ? t("历史报告：{__0__}", { __0__: (current) }) : t("实时周报")}
             />
           )}
       </ScrollArea>

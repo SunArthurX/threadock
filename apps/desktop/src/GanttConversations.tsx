@@ -64,13 +64,13 @@ export function buildGanttRows(
 export function ganttSpanText(ms: number): string {
   if (ms < 1000) return t("≤1 秒");
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s} 秒`;
+  if (s < 60) return t("{__0__} 秒", { __0__: (s) });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟`;
+  if (m < 60) return t("{__0__} 分钟", { __0__: (m) });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时 ${m % 60} 分`;
+  if (h < 24) return t("{__0__} 小时 {__1__} 分", { __0__: (h), __1__: (m % 60) });
   const d = Math.floor(h / 24);
-  return `${d} 天 ${h % 24} 小时`;
+  return t("{__0__} 天 {__1__} 小时", { __0__: (d), __1__: (h % 24) });
 }
 
 /** ms → 「MM-DD HH:mm」（本地时区；数值毫秒构造 Date 在 WKWebView 安全）。 */
@@ -132,7 +132,7 @@ export default function GanttConversations({
       ? ((nowTick - range.fromMs) / Math.max(1, range.toMs - range.fromMs)) * 100
       : null;
   }, [range, nowTick]);
-  const daysLabel = days === 365 ? "1 年" : `${days} 天`;
+  const daysLabel = days === 365 ? t("1 年") : t("{__0__} 天", { __0__: (days) });
   const rangeText = useMemo(() => {
     const a = new Date(range.fromMs);
     const b = new Date(range.toMs);
@@ -147,7 +147,7 @@ export default function GanttConversations({
     <div className="ops-card">
       <CardTitle
         icon="chart"
-        sub={rangeText ? `近 ${daysLabel} · ${total.toLocaleString()} 个会话` : undefined}
+        sub={rangeText ? t("近 {__0__} · {__1__} 个会话", { __0__: (daysLabel), __1__: (total.toLocaleString()) }) : undefined}
         trailing={
           providers.length > 0 ? (
             <div className="gantt-legend">
@@ -171,9 +171,9 @@ export default function GanttConversations({
               className={`filter-chip ${days === d ? "active" : ""}`}
               onClick={() => setDays(d)}
               data-testid={`gantt-range-${d}`}
-              title={`查看最近 ${d === 365 ? "1 年" : `${d} 天`} 的会话时间跨度`}
+              title={t("查看最近 {__0__} 的会话时间跨度", { __0__: d === 365 ? t("1 年") : t("{__0__} 天", { __0__: d }) })}
             >
-              {d === 365 ? "1 年" : `${d} 天`}
+              {d === 365 ? t("1 年") : t("{__0__} 天", { __0__: (d) })}
             </button>
           ))}
         </div>
@@ -181,7 +181,7 @@ export default function GanttConversations({
       {showSkeleton ? (
         <Skeleton variant="list" count={6} />
       ) : rows.length === 0 ? (
-        <InlineEmpty message={`近 ${daysLabel}没有会话`} hint={t("切换更大的时间范围，或同步 Agent 数据后查看")} />
+        <InlineEmpty message={t("近 {__0__}没有会话", { __0__: (daysLabel) })} hint={t("切换更大的时间范围，或同步 Agent 数据后查看")} />
       ) : (
         <div className="gantt-wrap">
           <div className="gantt-axis">
@@ -208,11 +208,11 @@ export default function GanttConversations({
                   className="gantt-row"
                   data-testid="gantt-row"
                   onClick={() => onJumpToConversation?.(row.conv.id)}
-                  title={`${row.conv.user_title ?? row.conv.title ?? "(无标题)"} · ${m.label}`}
+                  title={`${row.conv.user_title ?? row.conv.title ?? t("(无标题)")} · ${m.label}`}
                 >
                   <div className="gantt-label">
                     <span className="gantt-label-dot" style={{ background: m.color }} />
-                    <span className="gantt-label-text">{row.conv.user_title ?? row.conv.title ?? "(无标题)"}</span>
+                    <span className="gantt-label-text">{row.conv.user_title ?? row.conv.title ?? t("(无标题)")}</span>
                   </div>
                   <div className="gantt-track">
                     {nowPct !== null && <div className="gantt-now" style={{ left: `${nowPct}%` }} data-testid="gantt-today" />}
@@ -236,7 +236,7 @@ export default function GanttConversations({
       )}
       {tip && (
         <div className="gantt-tooltip" style={{ left: tip.x + 14, top: tip.y + 14 }} data-testid="gantt-tooltip">
-          <div className="tooltip-title">{tip.row.conv.user_title ?? tip.row.conv.title ?? "(无标题)"}</div>
+          <div className="tooltip-title">{tip.row.conv.user_title ?? tip.row.conv.title ?? t("(无标题)")}</div>
           <div className="tooltip-row">
             <span className="tooltip-dot" style={{ background: meta(tip.row.conv.provider).color }} />
             <span>{meta(tip.row.conv.provider).label}</span>

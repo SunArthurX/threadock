@@ -63,7 +63,7 @@ function weekdayCN(day: string): string {
     return era * 146097 + doe - 719468;
   })();
   const dow = [t("日"), t("一"), t("二"), t("三"), t("四"), t("五"), t("六")][(seq + 4) % 7];
-  return `周${dow}`;
+  return t("周{__0__}", { __0__: (dow) });
 }
 
 interface HoverInfo {

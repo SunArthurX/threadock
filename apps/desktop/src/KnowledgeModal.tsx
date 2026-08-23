@@ -35,7 +35,7 @@ interface Props {
 type Tab = "all" | "summary" | "decisions" | "todos" | "errors" | "commands" | "files" | "airuns";
 interface XrefConv { id: string; title: string | null; provider: string; updated_at_ms: number | null }
 interface XrefEntry { keyword: string; kind: "file" | "command"; other_count: number; other_conversations: XrefConv[] }
-const TABS: { value: Tab; label: string; icon: string }[] = [
+const TABS = (): { value: Tab; label: string; icon: string }[] => [
   { value: "all", label: t("全部"), icon: "📚" },
   { value: "summary", label: t("摘要"), icon: "📖" },
   { value: "decisions", label: t("决策"), icon: "🎯" },
@@ -50,7 +50,7 @@ const TABS: { value: Tab; label: string; icon: string }[] = [
 async function copyOne(label: string, text: string) {
   try {
     await navigator.clipboard.writeText(text);
-    showToast(`✓ 已复制 ${label}`, "info");
+    showToast(t("✓ 已复制 {__0__}", { __0__: (label) }), "info");
   } catch { showToast("剪贴板不可用", "error"); }
 }
 
@@ -214,7 +214,7 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
       });
       if (typeof path !== "string") return;
       await invoke("save_text_file", { path, content });
-      showToast(`✓ 已导出 ${ext.toUpperCase()}（${(content.length / 1024).toFixed(1)} KB）`, "info");
+      showToast(t("✓ 已导出 {__0__}（{__1__} KB）", { __0__: (ext.toUpperCase()), __1__: ((content.length / 1024).toFixed(1)) }), "info");
     } catch (e) {
       showToast(`导出失败：${typeof e === "string" ? e : String(e)}`, "error");
     }
@@ -230,7 +230,7 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
             <Icon name="sparkle" size={15} /> 知识提取结果
             {convTitle && <span className="knowledge-modal-sub">{convTitle}</span>}
             {llmModel && (
-              <span className="badge" style={{ marginLeft: 8 }} title={`由 ${llmModel} 提取`}><Icon name="cpu" size={10} /> {llmModel}</span>
+              <span className="badge" style={{ marginLeft: 8 }} title={t("由 {__0__} 提取", { __0__: (llmModel) })}><Icon name="cpu" size={10} /> {llmModel}</span>
             )}
           </h2>
           <div className="knowledge-modal-actions">
@@ -253,7 +253,7 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
                     runExtract("llm");
                   }
                 }}
-              >{switching === "llm" ? "AI 提取中…" : <><Icon name="sparkle" size={11} />{t("AI 引擎")}</>}</button>
+              >{switching === "llm" ? t("AI 提取中…") : <><Icon name="sparkle" size={11} />{t("AI 引擎")}</>}</button>
             </div>
             {confirmingAi && llmRuns[0]?.status === "success" && (
               <div className="knowledge-ai-confirm">
@@ -303,17 +303,17 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
         {/* 类型筛选 tabs（带计数徽标） */}
         {!isEmpty && (
           <div className="knowledge-tabs">
-            {TABS.map((t) => (
+            {TABS().map((tb) => (
               <button
-                key={t.value}
-                className={`filter-chip ${tab === t.value ? "active" : ""} ${counts[t.value] === 0 && t.value !== "all" && t.value !== "airuns" ? "disabled" : ""}`}
-                onClick={() => setTab(t.value)}
-                disabled={counts[t.value] === 0 && t.value !== "all" && t.value !== "airuns"}
-                title={counts[t.value] === 0 ? `${t.label}（无内容）` : `只看${t.label}`}
+                key={tb.value}
+                className={`filter-chip ${tab === tb.value ? "active" : ""} ${counts[tb.value] === 0 && tb.value !== "all" && tb.value !== "airuns" ? "disabled" : ""}`}
+                onClick={() => setTab(tb.value)}
+                disabled={counts[tb.value] === 0 && tb.value !== "all" && tb.value !== "airuns"}
+                title={counts[tb.value] === 0 ? t("{__0__}（无内容）", { __0__: (tb.label) }) : t("只看{__0__}", { __0__: (tb.label) })}
               >
-                <span className="tab-icon">{t.icon}</span>
-                {t.label}
-                <span className="tab-count">{counts[t.value]}</span>
+                <span className="tab-icon">{tb.icon}</span>
+                {tb.label}
+                <span className="tab-count">{counts[tb.value]}</span>
               </button>
             ))}
           </div>
@@ -323,7 +323,7 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
           {conversationId && (xrefLoading || xref.length > 0) && (
             <div className="knowledge-xref">
               <div className="knowledge-label">
-                🔗 跨会话引用（{xrefLoading ? t("查询中…") : `${xref.length} 个文件/命令还在其他会话里出现`}）
+                🔗 跨会话引用（{xrefLoading ? t("查询中…") : t("{__0__} 个文件/命令还在其他会话里出现", { __0__: (xref.length) })}）
               </div>
               {xrefLoading ? (
                 <div className="sk-line" style={{ margin: 12 }} />
@@ -345,7 +345,7 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
                             title={t("点击跳转到该会话")}
                           >
                             <span className={`badge source ${c.provider}`}>{c.provider}</span>
-                            <span className="xref-conv-title">{c.title ?? "(无标题)"}</span>
+                            <span className="xref-conv-title">{c.title ?? t("(无标题)")}</span>
                           </button>
                         ))}
                       </div>
@@ -392,13 +392,13 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
                 📋 TODO（{(knowledge.todos ?? []).length}）
                 <button className="kb-copy" onClick={() => copyOne(t("TODO 列表"), todosMd)}>📋</button>
               </div>
-              {(knowledge.todos ?? []).map((t, i) => (
+              {(knowledge.todos ?? []).map((it, i) => (
                 <div
                   key={i}
                   className="knowledge-item"
-                  title={t.status === "stale" ? "过期：会话早期的计划，后续已被覆盖" : t.status === "done" ? "已完成：后文有完成证据" : "待办"}
+                  title={it.status === "stale" ? t("过期：会话早期的计划，后续已被覆盖") : it.status === "done" ? t("已完成：后文有完成证据") : t("待办")}
                 >
-                  {t.status === "done" ? "☑" : t.status === "stale" ? "⊘" : "☐"} {t.text}
+                  {it.status === "done" ? "☑" : it.status === "stale" ? "⊘" : "☐"} {it.text}
                 </div>
               ))}
             </div>
@@ -452,8 +452,8 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
                   {(aiKnowledge.decisions ?? []).slice(0, 5).map((d, i) => (
                     <div key={`d${i}`} className="knowledge-item">🎯 {d.decision}</div>
                   ))}
-                  {(aiKnowledge.todos ?? []).filter((t) => t.status !== "done" && t.status !== "stale").slice(0, 5).map((t, i) => (
-                    <div key={`t${i}`} className="knowledge-item">📋 待办：{t.text}</div>
+                  {(aiKnowledge.todos ?? []).filter((x) => x.status !== "done" && x.status !== "stale").slice(0, 5).map((it, i) => (
+                    <div key={`t${i}`} className="knowledge-item">📋 {t("待办")}：{it.text}</div>
                   ))}
                   {(aiKnowledge.errors ?? []).slice(0, 5).map((e, i) => (
                     <div key={`e${i}`} className="knowledge-item">⚠️ {e.error}{e.solution ? ` → ${e.solution}` : ""}</div>
@@ -483,10 +483,10 @@ export default function KnowledgeModal({ knowledge: knowledgeProp, conversationI
               ) : (
                 llmRuns.map((r) => (
                   <div key={r.id} className={`knowledge-item ${r.status === "failed" ? "ai-run-failed" : ""}`}>
-                    <b>{r.status === "success" ? "✓ 成功" : "✗ 失败"}</b>
+                    <b>{r.status === "success" ? t("✓ 成功") : t("✗ 失败")}</b>
                     {" "}{r.extractor.startsWith("llm:") ? r.extractor.slice(4).split("@")[0] : "AI"} · {r.duration_ms >= 1000 ? `${Math.round(r.duration_ms / 1000)}s` : `${r.duration_ms}ms`} ·{" "}
                     输入 {r.input_messages} 条消息/{r.input_chars >= 1000 ? `${Math.round(r.input_chars / 1000)}k` : r.input_chars} 字符
-                    {r.status === "success" ? ` · ${r.items_total} 条` : ""}
+                    {r.status === "success" ? t(" · {__0__} 条", { __0__: (r.items_total) }) : ""}
                     <span style={{ opacity: 0.55, marginLeft: 8 }}>{new Date(r.created_at_ms).toLocaleString()}</span>
                     {r.status === "failed" && r.error && (
                       <div style={{ color: "var(--danger, #e5484d)", fontSize: 12, marginTop: 4, whiteSpace: "pre-wrap" }}>原因：{r.error}</div>

@@ -31,7 +31,7 @@ export default function ImportMenu({ open, onToggle, onSelect, onSync, syncing, 
     <div className="import-dropdown">
       <button className="import-trigger" onClick={onToggle}>
         <Icon name="sync" size={12} /> 同步
-        {total > 0 && <span className="new-dot" title={`${total} 条待同步`} />}
+        {total > 0 && <span className="new-dot" title={t("{__0__} 条待同步", { __0__: (total) })} />}
         <Icon name="chevron-down" size={11} className="import-caret" />
       </button>
       {open && (

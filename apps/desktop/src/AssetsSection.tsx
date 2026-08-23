@@ -74,7 +74,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
     ) : null;
 
   const copyAssetField = async (label: string, text: string) => {
-    try { await navigator.clipboard.writeText(text); showToast(`✓ 已复制 ${label}`, "info"); }
+    try { await navigator.clipboard.writeText(text); showToast(t("✓ 已复制 {__0__}", { __0__: (label) }), "info"); }
     catch { showToast("剪贴板不可用", "error"); }
   };
 
@@ -97,7 +97,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
         {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
         {a.status && (
           <span className={`risk-flag ${bucket === "running" ? "medium" : "low"}`} title={
-            bucket === "running" ? "任务正在执行" : bucket === "configured" ? "已配置/启用（配置存在，非执行态）" : "任务已结束/停用"
+            bucket === "running" ? t("任务正在执行") : bucket === "configured" ? t("已配置/启用（配置存在，非执行态）") : t("任务已结束/停用")
           }>{a.status}</span>
         )}
         <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
@@ -119,12 +119,12 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
   return (
     <>
       <div className="ops-card">
-        <CardTitle icon="package" sub="skills / plugins / 内置技能" trailing={
+        <CardTitle icon="package" sub={t("skills / plugins / 内置技能")} trailing={
           <ListToolbar
             dense
             search={assetQuery}
             onSearch={setAssetQuery}
-            searchPlaceholder="搜索资产名 / 路径 / 说明…"
+            searchPlaceholder={t("搜索资产名 / 路径 / 说明…")}
             count={filteredAssets.length}
             countTotal={assets.length}
             countLabel={t("项")}
@@ -155,7 +155,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
                     title={t("点击查看详情")}
                   >
                     <span className={`asset-kind-chip kind-${a.kind}`}>
-                      {a.kind === "builtin_skill" ? "内置" : a.kind === "plugin" ? "插件" : a.kind === "mcp" ? "MCP" : "技能"}
+                      {a.kind === "builtin_skill" ? t("内置") : a.kind === "plugin" ? t("插件") : a.kind === "mcp" ? "MCP" : t("技能")}
                     </span>
                     <span className="asset-name mono" title={a.path ?? ""}>{a.name}</span>
                     {a.version && <span className="asset-ver mono">v{a.version}</span>}
@@ -169,7 +169,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
       </div>
 
       <div className="ops-card">
-        <CardTitle icon="stopwatch" sub={`${automations.length} 个 · cron / workflow / 后台任务`}>{t("自动化任务")}</CardTitle>
+        <CardTitle icon="stopwatch" sub={t("{__0__} 个 · cron / workflow / 后台任务", { __0__: (automations.length) })}>{t("自动化任务")}</CardTitle>
         {automations.length === 0 ? (
           loading ? <Skeleton variant="list" count={3} /> : <InlineEmpty message={t("暂无自动化任务")} hint={t("cron / workflow / 后台任务")} />
         ) : (<>
@@ -203,7 +203,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
               <h2>
                 <Icon name="package" size={18} /> 资产详情
                 <span className={`asset-kind-chip kind-${detail.kind}`} style={{ marginLeft: 8 }}>
-                  {detail.kind === "builtin_skill" ? "内置" : detail.kind === "plugin" ? "插件" : detail.kind === "mcp" ? "MCP" : "技能"}
+                  {detail.kind === "builtin_skill" ? t("内置") : detail.kind === "plugin" ? t("插件") : detail.kind === "mcp" ? "MCP" : t("技能")}
                 </span>
               </h2>
               <button className="settings-close" onClick={() => setDetail(null)}><Icon name="close" size={14} /></button>

@@ -16,14 +16,21 @@ vi.mock("@tauri-apps/api/core", () => ({
     return {};
   }),
 }));
+// ScrollArea 在 jsdom 下高度 0 导致虚拟化裁剪：mock 为直出
+vi.mock("../ScrollArea", () => ({
+  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+}));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(async () => () => {}),
 }));
 import SettingsView, { RESET_CONFIRM_TEXT } from "../SettingsView";
+const CONFIRM = RESET_CONFIRM_TEXT();
 
 const base = {
   theme: "dark" as const,
   onThemeChange: vi.fn(),
+  lang: "zh" as const,
+  onLangChange: vi.fn(),
   textSize: "sm" as const,
   onTextSizeChange: vi.fn(),
   syncIntervalMin: 10,
@@ -54,6 +61,14 @@ describe("SettingsView 外观与同步", () => {
     expect(base.onThemeChange).toHaveBeenCalledWith("light");
   });
 
+  it("语言段选：中文/English 切换触发回调", () => {
+    openSettings();
+    fireEvent.click(screen.getByText("English"));
+    expect(base.onLangChange).toHaveBeenCalledWith("en");
+    fireEvent.click(screen.getByText("中文"));
+    expect(base.onLangChange).toHaveBeenCalledWith("zh");
+  });
+
   it("同步间隔选择触发回调（含关闭）", () => {
     openSettings();
     const select = screen.getByDisplayValue("每 10 分钟") as HTMLSelectElement;
@@ -76,7 +91,7 @@ describe("SettingsView 重置确认（防误触）", () => {
     openSettings();
     const btn = screen.getByText(/重置.*之后的数据/) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
-    const input = screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`);
+    const input = screen.getByPlaceholderText(`请输入 ${CONFIRM}`);
     fireEvent.change(input, { target: { value: "reset" } });
     expect(screen.getByText(/重置.*之后的数据/)).toBeDisabled();
     fireEvent.change(input, { target: { value: "重 置" } });
@@ -85,22 +100,22 @@ describe("SettingsView 重置确认（防误触）", () => {
 
   it("输入「重置」后按钮可用，点击执行并清空输入", async () => {
     openSettings();
-    const input = screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`);
-    fireEvent.change(input, { target: { value: RESET_CONFIRM_TEXT } });
+    const input = screen.getByPlaceholderText(`请输入 ${CONFIRM}`);
+    fireEvent.change(input, { target: { value: CONFIRM } });
     const btn = screen.getByText(/重置.*之后的数据/) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     fireEvent.click(btn);
     await waitFor(() => expect(base.onReset).toHaveBeenCalledTimes(1));
     // 执行后清空确认词（再次误点不会重复触发）
-    expect((screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`) as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText(`请输入 ${CONFIRM}`) as HTMLInputElement).value).toBe("");
   });
 
   it("未选择日期时按钮禁用", () => {
     const { container } = render(<SettingsView {...base} />);
     const dateInput = container.querySelector('input[type="date"]') as HTMLInputElement;
     fireEvent.change(dateInput, { target: { value: "" } });
-    const input = screen.getByPlaceholderText(`请输入 ${RESET_CONFIRM_TEXT}`);
-    fireEvent.change(input, { target: { value: RESET_CONFIRM_TEXT } });
+    const input = screen.getByPlaceholderText(`请输入 ${CONFIRM}`);
+    fireEvent.change(input, { target: { value: CONFIRM } });
     const btns = screen.getAllByText(/重置/);
     const resetBtn = btns.find((b) => (b as HTMLButtonElement).disabled !== undefined) as HTMLButtonElement;
     expect(resetBtn).toBeTruthy();

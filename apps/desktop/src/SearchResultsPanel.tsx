@@ -38,7 +38,7 @@ export default function SearchResultsPanel({
       if (!sec) {
         sec = {
           rootId: g.root_conversation_id,
-          rootTitle: g.root_title ?? "(无标题)",
+          rootTitle: g.root_title ?? t("(无标题)"),
           provider: g.provider,
           rows: [],
           totalHits: 0,

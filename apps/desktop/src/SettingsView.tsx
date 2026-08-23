@@ -22,7 +22,7 @@ import ScrollArea from "./ScrollArea";
 import WorkspaceSection from "./WorkspaceSection";
 import { Icon } from "./Icon";
 /** 重置确认词：输入完全一致才允许执行（防误触）。 */
-export const RESET_CONFIRM_TEXT = t("重置");
+export const RESET_CONFIRM_TEXT = () => t("重置");
 
 /** 桌面端版本（与 package.json 对齐）。 */
 import pkg from "../package.json";
@@ -56,7 +56,7 @@ export async function fetchResetDateBounds(): Promise<{ earliest: string; today:
   }
 }
 
-const INTERVAL_OPTIONS: [number, string][] = [
+const INTERVAL_OPTIONS = (): [number, string][] => [
   [0, t("关闭")],
   [5, t("每 5 分钟")],
   [10, t("每 10 分钟")],
@@ -68,6 +68,8 @@ type GovernanceView = "overview" | "cost" | "security";
 interface Props {
   theme: "dark" | "light";
   onThemeChange: (t: "dark" | "light") => void;
+  lang: "zh" | "en";
+  onLangChange: (l: "zh" | "en") => void;
   textSize: "sm" | "md" | "lg" | "xl";
   onTextSizeChange: (s: "sm" | "md" | "lg" | "xl") => void;
   syncIntervalMin: number;
@@ -93,7 +95,7 @@ interface Props {
   onReapplyImportedPrefs?: () => void;
 }
 
-const RETENTION_OPTIONS: [number, string][] = [
+const RETENTION_OPTIONS = (): [number, string][] => [
   [0, t("关闭")],
   [30, t("30 天")],
   [90, t("90 天")],
@@ -106,7 +108,7 @@ function MiniProgress({ p }: { p: { current: number; total: number; detail: stri
   return (
     <span className="mini-progress" title={`${p.detail} ${p.current}/${p.total}`}>
       <span className="mini-progress-fill" style={{ width: `${Math.min(100, (p.current / p.total) * 100)}%` }} />
-      <span className="mini-progress-label">{p.detail === "done" ? "完成" : `${p.detail} ${p.current}/${p.total}`}</span>
+      <span className="mini-progress-label">{p.detail === "done" ? t("完成") : `${p.detail} ${p.current}/${p.total}`}</span>
     </span>
   );
 }
@@ -116,7 +118,7 @@ function openExternal(url: string) {
   openUrl(url).catch((e) => {
     // 非 Tauri 环境（纯 web dev server）走兜底
     try { window.open(url, "_blank", "noopener,noreferrer"); }
-    catch { showToast(`✗ 无法打开链接：${String(e)}`, "error", 3000); }
+    catch { showToast(t("✗ 无法打开链接：{__0__}", { __0__: (String(e)) }), "error", 3000); }
   });
 }
 
@@ -129,7 +131,7 @@ export function formatBytes(n: number): string {
 }
 
 /** 治理动作名 → 中文。 */
-export const GOVERNANCE_LABELS: Record<string, string> = {
+export const GOVERNANCE_LABELS = (): Record<string, string> => ({
   reset_all_data: t("重置全部数据"),
   gc_raw_store: t("清理孤儿数据"),
   rebuild_search_index: t("重建搜索索引"),
@@ -139,10 +141,10 @@ export const GOVERNANCE_LABELS: Record<string, string> = {
   archive_conversation: t("归档会话"),
   unarchive_conversation: t("取消归档"),
   audit_finding_disposition: t("审计发现处置"),
-};
+});
 
 export default function SettingsView({
-  theme, onThemeChange, textSize, onTextSizeChange, syncIntervalMin, onSyncIntervalChange,
+  theme, onThemeChange, lang, onLangChange, textSize, onTextSizeChange, syncIntervalMin, onSyncIntervalChange,
   retentionDays, onRetentionDaysChange, notifyOnExceed, onNotifyOnExceedChange,
   numberFormat, onNumberFormatChange, currency, onCurrencyChange, dateFormat, onDateFormatChange,
   onNavigate, onReset, resetting, onClose, onShowChangelog, onShowOnboarding, onReapplyImportedPrefs,
@@ -203,12 +205,12 @@ export default function SettingsView({
     setOpsSyncing(true); setOpsMsg(null);
     try {
       const r = await invoke<{ usage_written: number }>("ops_sync", { force: true });
-      setOpsMsg(`已写入 ${r.usage_written} 条用量记录`);
+      setOpsMsg(t("已写入 {__0__} 条用量记录", { __0__: (r.usage_written) }));
     } catch (e) { setOpsMsg(typeof e === "string" ? e : String(e)); }
     setOpsSyncing(false);
   };
 
-  const canReset = confirmText === RESET_CONFIRM_TEXT && !resetting && !!resetDate;
+  const canReset = confirmText === RESET_CONFIRM_TEXT() && !resetting && !!resetDate;
 
   const doReset = async () => {
     if (!canReset || !resetDate) return;
@@ -218,7 +220,7 @@ export default function SettingsView({
       });
       setConfirmText("");
       setRangePreview(null);
-      showToast(`✓ 已重置 ${resetDate} 之后的数据（${r.conversations} 会话 / ${r.messages} 消息），正在从源重新刷入…`, "info", 8000);
+      showToast(t("✓ 已重置 {__0__} 之后的数据（{__1__} 会话 / {__2__} 消息），正在从源重新刷入…", { __0__: (resetDate), __1__: (r.conversations), __2__: (r.messages) }), "info", 8000);
     } catch (e) {
       showToast(`重置失败：${typeof e === "string" ? e : String(e)}`, "error");
     }
@@ -244,6 +246,13 @@ export default function SettingsView({
               </div>
             </div>
             <div className="settings-row">
+              <span>{t("语言")}</span>
+              <div className="settings-segment">
+                <button className={lang === "zh" ? "active" : ""} onClick={() => onLangChange("zh")}>{t("中文")}</button>
+                <button className={lang === "en" ? "active" : ""} onClick={() => onLangChange("en")}>English</button>
+              </div>
+            </div>
+            <div className="settings-row">
               <span>
                 {t("字号")}
                 <small style={{ display: "block", fontSize: 11, color: "var(--text-faint)", fontWeight: 400, marginTop: 2 }}>
@@ -259,7 +268,7 @@ export default function SettingsView({
                     aria-checked={textSize === s}
                     className={`text-size-btn ${textSize === s ? "active" : ""}`}
                     onClick={() => onTextSizeChange(s)}
-                    title={["默认 (13.5px)", "稍大 (14.5px)", "大 (15.5px)", "特大 (16.5px)"][i]}
+                    title={[t("默认 (13.5px)"), t("稍大 (14.5px)"), t("大 (15.5px)"), t("特大 (16.5px)")][i]}
                   >
                     <span className="text-size-letter">A</span>
                     <span className="text-size-letter-size" style={{ fontSize: 8 + i * 1.5 }}>A</span>
@@ -308,7 +317,7 @@ export default function SettingsView({
                 value={syncIntervalMin}
                 onChange={(e) => onSyncIntervalChange(Number(e.target.value))}
               >
-                {INTERVAL_OPTIONS.map(([v, label]) => (
+                {INTERVAL_OPTIONS().map(([v, label]) => (
                   <option key={v} value={v}>{label}</option>
                 ))}
               </select>
@@ -385,7 +394,7 @@ export default function SettingsView({
                 setGcRunning(true); setGcResult(null);
                 try {
                   const r = await invoke<{ scanned: number; deleted: number; freed_bytes: number }>("gc_raw_store", {});
-                  setGcResult(`扫描 ${r.scanned} · 删除 ${r.deleted} · 释放 ${formatBytes(r.freed_bytes)}`);
+                  setGcResult(t("扫描 {__0__} · 删除 {__1__} · 释放 {__2__}", { __0__: (r.scanned), __1__: (r.deleted), __2__: (formatBytes(r.freed_bytes)) }));
                   setStorage(await invoke("storage_stats", {}));
                 } catch (e) { setGcResult(String(e)); }
                 setGcRunning(false);
@@ -398,7 +407,7 @@ export default function SettingsView({
                 setRebuildMsg(t("重建中…"));
                 try {
                   const r = await invoke<{ messages: number }>("rebuild_search_index", {});
-                  setRebuildMsg(`已重建 ${r.messages} 条消息的索引`);
+                  setRebuildMsg(t("已重建 {__0__} 条消息的索引", { __0__: (r.messages) }));
                 } catch (e) { setRebuildMsg(String(e)); }
               }}>{t("♻ 重建")}</button>
               <MiniProgress p={mini} />
@@ -407,7 +416,7 @@ export default function SettingsView({
             <div className="settings-row">
               <span>{t("保留策略（自动归档）")}</span>
               <select value={retentionDays} onChange={(e) => onRetentionDaysChange(Number(e.target.value))}>
-                {RETENTION_OPTIONS.map(([v, label]) => (
+                {RETENTION_OPTIONS().map(([v, label]) => (
                   <option key={v} value={v}>{label}</option>
                 ))}
               </select>
@@ -422,7 +431,7 @@ export default function SettingsView({
                 try {
                   const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
                   setLastWeekly(Date.now());
-                  setRebuildMsg(r.generated && r.path ? `已生成：${r.path}` : t("未到 7 天间隔，未生成"));
+                  setRebuildMsg(r.generated && r.path ? t("已生成：{__0__}", { __0__: (r.path) }) : t("未到 7 天间隔，未生成"));
                 } catch (e) { setRebuildMsg(String(e)); }
               }}>{t("立即生成")}</button>
             </div>
@@ -434,7 +443,7 @@ export default function SettingsView({
               ? <div className="settings-hint">{t("暂无记录")}</div>
               : govLog.map((l) => (
                 <div key={l.id} className="settings-row">
-                  <span>{GOVERNANCE_LABELS[l.action] ?? l.action}</span>
+                  <span>{GOVERNANCE_LABELS()[l.action] ?? l.action}</span>
                   <span className="settings-value">{formatTime(l.created_at)}</span>
                 </div>
               ))}
@@ -481,12 +490,12 @@ export default function SettingsView({
               </div>
             )}
             <div className="settings-row">
-              <span>输入「{RESET_CONFIRM_TEXT}」以确认</span>
+              <span>{t("输入「{__0__}」以确认", { __0__: RESET_CONFIRM_TEXT() })}</span>
               <input
                 className="settings-confirm-input"
                 type="text"
                 value={confirmText}
-                placeholder={`请输入 ${RESET_CONFIRM_TEXT}`}
+                placeholder={t("请输入 {__0__}", { __0__: RESET_CONFIRM_TEXT() })}
                 onChange={(e) => setConfirmText(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && doReset()}
               />
@@ -496,7 +505,7 @@ export default function SettingsView({
                 onClick={doReset}
                 style={resetting ? { cursor: "not-allowed" } : undefined}
               >
-                {resetting ? t("重置并重新刷入中…") : `重置并重新刷入 ${resetDate || ""} 之后的数据`}
+                {resetting ? t("重置并重新刷入中…") : t("重置并重新刷入 {__0__} 之后的数据", { __0__: resetDate || "" })}
               </button>
               <MiniProgress p={mini} />
             </div>
@@ -527,7 +536,7 @@ function AboutSection({
     { name: t("Rust 工具链"), version: "stable", role: t("后端运行时") },
   ];
   const links: { label: string; url: string; hint: string; icon: "globe" | "bug" | "history" | "chat" }[] = [
-    { label: t("项目主页"), url: "https://github.com/sunqingguang/threadock", hint: "README / 路线图", icon: "globe" },
+    { label: t("项目主页"), url: "https://github.com/sunqingguang/threadock", hint: t("README / 路线图"), icon: "globe" },
     { label: t("报告问题"), url: "https://github.com/sunqingguang/threadock/issues", hint: t("Bug 反馈与功能建议"), icon: "bug" },
     { label: t("更新日志"), url: "https://github.com/sunqingguang/threadock/releases", hint: t("各版本变更说明"), icon: "history" },
     { label: t("讨论"), url: "https://github.com/sunqingguang/threadock/discussions", hint: t("使用交流与最佳实践"), icon: "chat" },
@@ -591,7 +600,7 @@ function AboutSection({
             if (typeof path !== "string") return;
             const json = exportAllSettings();
             await invoke("save_text_file", { path, content: json });
-            showToast(`✓ 已导出配置（${(json.length / 1024).toFixed(1)} KB）`, "info", 4000);
+            showToast(t("✓ 已导出配置（{__0__} KB）", { __0__: ((json.length / 1024).toFixed(1)) }), "info", 4000);
           } catch (e) {
             showToast(`导出失败：${typeof e === "string" ? e : String(e)}`, "error");
           }
@@ -601,12 +610,12 @@ function AboutSection({
             const path = await open({ multiple: false, filters: [{ name: "JSON", extensions: ["json"] }] });
             if (typeof path !== "string") return;
             const content = await invoke<string>("read_text_file", { path });
-            const mode = window.confirm("选择导入模式：\n确定 = 合并（仅覆盖文件中的 key，保留其他）\n取消 = 完全替换（清空所有现有偏好）") ? "merge" : "replace";
+            const mode = window.confirm(t("选择导入模式：\n确定 = 合并（仅覆盖文件中的 key，保留其他）\n取消 = 完全替换（清空所有现有偏好）")) ? "merge" : "replace";
             const { applied, skipped } = importAllSettings(content, mode);
             onReapplyImportedPrefs?.(); // 立即热应用（不需刷新）
-            showToast(`✓ 已导入 ${applied} 项配置${skipped > 0 ? `（跳过 ${skipped} 项无效 key）` : ""}，已立即生效`, "info", 5000);
+            showToast(t("✓ 已导入 {__0__} 项配置{__1__}，已立即生效", { __0__: applied, __1__: skipped > 0 ? t("（跳过 {__0__} 项无效 key）", { __0__: skipped }) : "" }), "info", 5000);
           } catch (e) {
-            showToast(`导入失败：${typeof e === "string" ? e : String(e)}`, "error");
+            showToast(t("导入失败：{__0__}", { __0__: typeof e === "string" ? e : String(e) }), "error");
           }
         }} title={t("从 JSON 文件导入偏好（合并 / 替换 两种模式）")}>{t("⤒ 导入配置")}</button>
       </div>
@@ -645,7 +654,7 @@ function BackupSection() {  const [pw, setPw] = useState("");
             setBusy(true); setMsg(t("备份中…"));
             try {
               const r = await invoke<{ db_size: number; raw_count: number }>("backup_create", { path, password: pw });
-              setMsg(`✓ 已备份（库 ${(r.db_size / 1048576).toFixed(1)}MB · ${r.raw_count} 个归档）`);
+              setMsg(t("✓ 已备份（库 {__0__}MB · {__1__} 个归档）", { __0__: ((r.db_size / 1048576).toFixed(1)), __1__: (r.raw_count) }));
             } catch (e) { setMsg(String(e)); }
             setBusy(false);
           }}
@@ -660,7 +669,7 @@ function BackupSection() {  const [pw, setPw] = useState("");
 }
 
 /** LLM 预设：一键填入常见云端/本地端点。 */
-const LLM_PRESETS: { label: string; baseUrl: string; model: string; local?: boolean }[] = [
+const LLM_PRESETS = (): { label: string; baseUrl: string; model: string; local?: boolean }[] => [
   { label: "OpenAI", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
   { label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   { label: "GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
@@ -733,7 +742,7 @@ function LlmSection() {
     setBusy("test"); setMsg(null);
     try {
       const r = await invoke<{ ok: boolean; latency_ms: number; model: string }>("llm_test_connection", {});
-      setMsg(`✓ 连接成功（${r.model} · ${r.latency_ms}ms）`);
+      setMsg(t("✓ 连接成功（{__0__} · {__1__}ms）", { __0__: (r.model), __1__: (r.latency_ms) }));
     } catch (e) { setMsg(`✗ ${typeof e === "string" ? e : String(e)}`); }
     setBusy(null);
   };
@@ -771,7 +780,7 @@ function LlmSection() {
           {isLocal && <span className="badge" style={{ marginLeft: 6 }} title={t("本地推理端点，数据不出本机")}>{t("本地")}</span>}
         </span>
         <div className="settings-segment">
-          {LLM_PRESETS.map((p) => (
+          {LLM_PRESETS().map((p) => (
             <button
               key={p.label}
               className="action-btn"
@@ -810,7 +819,7 @@ function LlmSection() {
           style={{ flex: 1 }}
           type="password"
           value={apiKey}
-          placeholder={meta?.has_api_key ? `已存储（${meta.api_key_masked ?? t("无法解密")}）——输入新值覆盖` : t("本地推理可留空")}
+          placeholder={meta?.has_api_key ? t("已存储（{__0__}）——输入新值覆盖", { __0__: meta.api_key_masked ?? t("无法解密") }) : t("本地推理可留空")}
           onChange={(e) => setApiKey(e.target.value)}
           autoComplete="off"
         />
@@ -823,7 +832,7 @@ function LlmSection() {
       <div className="settings-row">
         <span>{t("操作")}</span>
         <button className="action-btn" disabled={busy !== null} onClick={() => save(false)}>
-          {busy === "save" ? "保存中…" : "💾 保存配置"}
+          {busy === "save" ? t("保存中…") : t("💾 保存配置")}
         </button>
         {meta?.has_api_key && (
           <button className="action-btn" disabled={busy !== null} onClick={() => save(true)} title={t("清除已存储的加密密钥")}>
@@ -831,7 +840,7 @@ function LlmSection() {
           </button>
         )}
         <button className="action-btn" disabled={busy !== null} onClick={test} title={t("对已保存的配置发起最小请求")}>
-          {busy === "test" ? "测试中…" : "🔌 测试连接"}
+          {busy === "test" ? t("测试中…") : t("🔌 测试连接")}
         </button>
         {msg && <span className="settings-value">{msg}</span>}
       </div>

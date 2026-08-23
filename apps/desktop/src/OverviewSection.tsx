@@ -88,10 +88,10 @@ export default function OverviewSection({
   const barData = timeseries.map((d) => ({ label: d.day, value: d.total_tokens }));
   const maxToolCalls = Math.max(...topTools.map((it) => it.calls), 1);
   const kpis = overview ? [
-    { label: t("模型请求"), num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话`, onClick: kpiClick("requests") },
+    { label: t("模型请求"), num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: t("{__0__} 会话", { __0__: (overview.session_count) }), onClick: kpiClick("requests") },
     { label: t("总 Tokens"), num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}`, onClick: kpiClick("tokens") },
     { label: t("估算成本"), num: overview.cost_usd, fmt: formatCost, sub: t("按定价"), onClick: kpiClick("cost") },
-    { label: t("危险操作"), num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 工具`, danger: overview.destructive_calls > 0, onClick: kpiClick("dangerous") },
+    { label: t("危险操作"), num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: t("{__0__} 工具", { __0__: (overview.total_tool_calls.toLocaleString()) }), danger: overview.destructive_calls > 0, onClick: kpiClick("dangerous") },
   ] : [];
 
   return (
@@ -150,33 +150,33 @@ export default function OverviewSection({
             <tbody>
               {byModel.map((m, i) => (
                 <tr key={i}>
-                  <td className="mono">{m.model === "(unknown)" ? `${meta(m.provider_id.replace("prov_","")).label} ·默认` : m.model}</td>
+                  <td className="mono">{m.model === "(unknown)" ? t("{__0__} ·默认", { __0__: meta(m.provider_id.replace("prov_","")).label }) : m.model}</td>
                   <td>{m.requests.toLocaleString()}</td>
                   <td>{formatTokens(m.input_tokens)}</td>
                   <td>{formatTokens(m.output_tokens)}</td>
                   <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
                 </tr>
               ))}
-              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? "加载中…" : "暂无模型明细"}</td></tr>}
+              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? t("加载中…") : t("暂无模型明细")}</td></tr>}
             </tbody>
           </table>
         </div>
         <div className={`ops-card ${hidden.has("tools") ? "card-hidden" : ""}`}>
           <CardTitle icon="wand" trailing={vis("tools")}>{t("工具调用 Top 10")}</CardTitle>
           <div className="ops-tools">
-            {topTools.map((t, i) => {
-              const share = (t.calls / maxToolCalls) * 100;
-              const tip = `${t.tool_name}\n${t.calls.toLocaleString()} 次调用 · 占比 ${share.toFixed(1)}%${t.destructive > 0 ? ` · ${t.destructive} 次危险` : ""}${t.errors > 0 ? ` · ${t.errors} 次错误` : ""}${t.avg_duration_ms > 0 ? ` · 平均 ${formatDuration(t.avg_duration_ms)}` : ""}`;
+            {topTools.map((tool, i) => {
+              const share = (tool.calls / maxToolCalls) * 100;
+              const tip = tool.tool_name + "\n" + t("{__0__} 次调用 · 占比 {__1__}%", { __0__: tool.calls.toLocaleString(), __1__: share.toFixed(1) }) + (tool.destructive > 0 ? t(" · {__0__} 次危险", { __0__: tool.destructive }) : "") + (tool.errors > 0 ? t(" · {__0__} 次错误", { __0__: tool.errors }) : "") + (tool.avg_duration_ms > 0 ? t(" · 平均 {__0__}", { __0__: formatDuration(tool.avg_duration_ms) }) : "");
               return (
                 <div key={i} className="ops-tool-row" data-tooltip={tip}>
-                  <span className={`ops-tool-name mono ${t.destructive > 0 ? "text-danger" : ""}`}>{t.tool_name}</span>
+                  <span className={`ops-tool-name mono ${tool.destructive > 0 ? "text-danger" : ""}`}>{tool.tool_name}</span>
                   <div className="ops-tool-bar-bg"><div className="ops-tool-bar" style={{ width: `${share}%` }} /></div>
-                  <span className="ops-tool-calls">{t.calls.toLocaleString()}</span>
-                  {t.destructive > 0 && <span className="badge completeness 有限">{t.destructive} 危险</span>}
+                  <span className="ops-tool-calls">{tool.calls.toLocaleString()}</span>
+                  {tool.destructive > 0 && <span className="badge completeness 有限">{tool.destructive} 危险</span>}
                 </div>
               );
             })}
-            {topTools.length === 0 && <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div>}
+            {topTools.length === 0 && <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div>}
           </div>
         </div>
       </div>
@@ -206,7 +206,7 @@ export default function OverviewSection({
 
       <div className={`ops-card ${hidden.has("health") ? "card-hidden" : ""}`}>
         <CardTitle icon="heart" trailing={vis("health")}>{t("Agent 健康度")}</CardTitle>
-        {health.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : (
+        {health.length === 0 ? <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div> : (
           <table className="ops-table">
             <thead><tr><th>Agent</th><th>{t("请求")}</th><th>{t("成功率")}</th><th>{t("错误率")}</th><th>{t("重试率")}</th><th>{t("稳定性")}</th></tr></thead>
             <tbody>
@@ -234,7 +234,7 @@ export default function OverviewSection({
           <CardTitle icon="zap" trailing={vis("latency")}>延迟 P50 / P95</CardTitle>
           <div className="ops-risky">
             {latency.map((l, i) => {
-              const tip = `${meta(l.provider).label}\nP50 ${formatDuration(l.p50_ms)} · P95 ${formatDuration(l.p95_ms)}\n平均 ${formatDuration(l.avg_ms)} · ${l.sample_count.toLocaleString()} 样本`;
+              const tip = t("{__0__}\nP50 {__1__} · P95 {__2__}\n平均 {__3__} · {__4__} 样本", { __0__: (meta(l.provider).label), __1__: (formatDuration(l.p50_ms)), __2__: (formatDuration(l.p95_ms)), __3__: (formatDuration(l.avg_ms)), __4__: (l.sample_count.toLocaleString()) });
               return (
                 <div key={i} className="ops-tool-row" data-tooltip={tip}>
                   <span className="ops-tool-name">{meta(l.provider).label}</span>
@@ -250,7 +250,7 @@ export default function OverviewSection({
 
       {waste.length > 0 && (
         <div className={`ops-card ${hidden.has("waste") ? "card-hidden" : ""}`}>
-          <CardTitle icon="flame" sub={`${waste.length} 个会话`} trailing={vis("waste")}>{t("Token 浪费检测")}</CardTitle>
+          <CardTitle icon="flame" sub={t("{__0__} 个会话", { __0__: (waste.length) })} trailing={vis("waste")}>{t("Token 浪费检测")}</CardTitle>
           <div className="ops-risky">
             {waste.map((w, i) => (
               <div key={i} className="ops-risky-row">
@@ -268,9 +268,9 @@ export default function OverviewSection({
 
       <div className={`ops-card ${hidden.has("cache") ? "card-hidden" : ""}`}>
         <CardTitle icon="database" trailing={vis("cache")}>{t("缓存命中率")}</CardTitle>
-        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : cacheStats.map((c) => {
+        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div> : cacheStats.map((c) => {
           const hitPct = (c.hit_rate * 100).toFixed(1);
-          const tip = `${meta(c.provider).label}\n命中率 ${hitPct}% · ${formatTokens(c.cache_read_tokens)} 缓存\n${formatTokens(c.input_tokens)} 总输入`;
+          const tip = t("{__0__}\n命中率 {__1__}% · {__2__} 缓存\n{__3__} 总输入", { __0__: (meta(c.provider).label), __1__: (hitPct), __2__: (formatTokens(c.cache_read_tokens)), __3__: (formatTokens(c.input_tokens)) });
           return (
             <div key={c.provider} className="ops-tool-row" data-tooltip={tip}>
               <span className="ops-tool-name">{meta(c.provider).label}</span>
@@ -289,7 +289,7 @@ export default function OverviewSection({
               data={cacheTrend.slice(-30).map((it) => ({
                 label: it.day.slice(5),
                 value: it.total_input > 0 ? (it.cache_read / it.total_input) * 100 : 0,
-                title: `${it.day} · 命中 ${((it.cache_read / it.total_input) * 100).toFixed(1)}% · ${formatTokens(it.cache_read)} / ${formatTokens(it.total_input)}`,
+                title: t("{__0__} · 命中 {__1__}% · {__2__} / {__3__}", { __0__: (it.day), __1__: (((it.cache_read / it.total_input) * 100).toFixed(1)), __2__: (formatTokens(it.cache_read)), __3__: (formatTokens(it.total_input)) }),
               }))}
               height={90}
               color="var(--c-codex, #2da44e)"

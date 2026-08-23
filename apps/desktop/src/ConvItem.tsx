@@ -42,7 +42,7 @@ function ConvItemImpl({
         )}
         {isChild && <span className="child-arrow">↳</span>}
         {isPinned && <span className="pin-star" title={t("已置顶（永远排最前）")}>📌</span>}
-        {conv.user_title ?? conv.title ?? "(无标题)"}
+        {conv.user_title ?? conv.title ?? t("(无标题)")}
       </div>
       <div className="meta">
         <span className={`badge source ${conv.provider}`}>{sourceLabel(conv.provider)}</span>

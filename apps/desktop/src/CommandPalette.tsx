@@ -10,14 +10,14 @@ import { Icon, type IconName } from "./Icon";
 
 export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
 
-const PAGES: { key: Page; icon: IconName; label: string; hint: string }[] = [
-  { key: "chat", icon: "chat", label: t("对话"), hint: "会话列表 / 搜索" },
+const PAGES = (): { key: Page; icon: IconName; label: string; hint: string }[] => [
+  { key: "chat", icon: "chat", label: t("对话"), hint: t("会话列表 / 搜索") },
   { key: "overview", icon: "overview", label: t("概览"), hint: t("治理总览") },
-  { key: "cost", icon: "cost", label: t("成本"), hint: "成本 / 预算" },
-  { key: "security", icon: "shield", label: t("安全"), hint: "审计 / 风险" },
-  { key: "assets", icon: "package", label: t("资产"), hint: "技能 / 插件 / MCP" },
-  { key: "knowledge", icon: "library", label: t("知识库"), hint: "决策 / TODO / 提示词" },
-  { key: "activity", icon: "calendar", label: t("活动"), hint: "热力图 / 时段 / 工具" },
+  { key: "cost", icon: "cost", label: t("成本"), hint: t("成本 / 预算") },
+  { key: "security", icon: "shield", label: t("安全"), hint: t("审计 / 风险") },
+  { key: "assets", icon: "package", label: t("资产"), hint: t("技能 / 插件 / MCP") },
+  { key: "knowledge", icon: "library", label: t("知识库"), hint: t("决策 / TODO / 提示词") },
+  { key: "activity", icon: "calendar", label: t("活动"), hint: t("热力图 / 时段 / 工具") },
   { key: "projects", icon: "folder", label: t("项目"), hint: t("按 source_dir 归并") },
 ];
 
@@ -31,10 +31,10 @@ export type CommandActionId =
   | "open_reports"
   | "show_changelog";
 
-const ACTIONS: { id: CommandActionId; icon: IconName; label: string; hint: string }[] = [
-  { id: "open_settings", icon: "settings", label: t("打开设置"), hint: "主题 / 同步 / 预算 / 重置" },
+const ACTIONS = (): { id: CommandActionId; icon: IconName; label: string; hint: string }[] => [
+  { id: "open_settings", icon: "settings", label: t("打开设置"), hint: t("主题 / 同步 / 预算 / 重置") },
   { id: "trigger_sync", icon: "sync", label: t("触发同步"), hint: t("立即从来源拉取最新会话") },
-  { id: "toggle_theme", icon: "moon", label: "切换主题 深/浅", hint: t("深色 ⇄ 浅色") },
+  { id: "toggle_theme", icon: "moon", label: t("切换主题 深/浅"), hint: t("深色 ⇄ 浅色") },
   { id: "show_shortcuts", icon: "keyboard", label: t("显示快捷键"), hint: t("列出所有全局快捷键") },
   { id: "open_reports", icon: "file", label: t("打开周报中心"), hint: t("历史周报列表") },
   { id: "show_changelog", icon: "sparkle", label: t("查看更新日志"), hint: t("本版本的变更说明") },
@@ -42,8 +42,8 @@ const ACTIONS: { id: CommandActionId; icon: IconName; label: string; hint: strin
 
 // 列表项的判别联合（P1-E3）
 type Command =
-  | { kind: "page"; page: typeof PAGES[number] }
-  | { kind: "action"; action: typeof ACTIONS[number] }
+  | { kind: "page"; page: ReturnType<typeof PAGES>[number] }
+  | { kind: "action"; action: ReturnType<typeof ACTIONS>[number] }
   | { kind: "conv"; conv: Conversation }
   | { kind: "reuse"; hit: {
       message_id: string;
@@ -167,11 +167,11 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
     // 短关键词（<2 字符）时不展示复用推荐：渲染层推导（替代 effect 里 setState 清空），
     // 顺带规避「在途请求返回后覆盖清空结果」的竞态。
     const shownReuse = q.trim().length >= 2 ? promptReuse : [];
-    const matchedPages: Command[] = PAGES.filter(
+    const matchedPages: Command[] = PAGES().filter(
       (p) => !ql || p.label.toLowerCase().includes(ql) || p.hint.toLowerCase().includes(ql) || p.key.toLowerCase().includes(ql),
     ).map((p) => ({ kind: "page", page: p }));
     const matchedActions: Command[] = ql
-      ? ACTIONS.filter(
+      ? ACTIONS().filter(
           (a) => a.label.toLowerCase().includes(ql) || a.hint.toLowerCase().includes(ql),
         ).map((a) => ({ kind: "action", action: a }))
       : [];
@@ -293,7 +293,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
           {/* 会话组 */}
           {items.some((i) => i.kind === "conv") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">最近会话（{items.filter((i) => i.kind === "conv").length}）</div>
+              <div className="cmd-group-title">{t("最近会话（{__0__}）", { __0__: items.filter((i) => i.kind === "conv").length })}</div>
               {items.map((it, i) => it.kind === "conv" ? (
                 <div
                   key={`c-${it.conv.id}`}
@@ -311,7 +311,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
                 >
                   <span className="cmd-row-icon">💬</span>
                   <span className="cmd-row-label">
-                    {it.conv.user_title ?? it.conv.title ?? "(无标题)"}
+                    {it.conv.user_title ?? it.conv.title ?? t("(无标题)")}
                   </span>
                   <span className="cmd-row-hint">
                     {it.conv.provider}{formatTime(it.conv.started_at_ms ?? null)}
