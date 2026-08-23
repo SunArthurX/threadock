@@ -282,6 +282,16 @@ pub fn parse_session(
             .get("msg_content")
             .and_then(|v| v.as_str())
             .unwrap_or("");
+
+        // 内部事件行（msg_type=3，如 todo_updated）：非用户消息，不进对话
+        // 正文（2026-08-23 真实库实测 465 条被当 user 消息污染 35 个会话；
+        // 判据双保险：msg_type=3 或 msg_content 是含 eventType 的协议 JSON）
+        if data.get("msg_type").and_then(serde_json::Value::as_i64) == Some(3)
+            || is_event_payload(content)
+        {
+            continue;
+        }
+
         let text = clean_content(content);
 
         // 优先用 data.timestamp（消息自身时间），否则用行的 created_at_ms
@@ -339,6 +349,15 @@ fn fallback_title(messages: &[RawMessage]) -> Option<String> {
                 head
             }
         })
+}
+
+/// `msg_content` 是否为内部事件协议 JSON（`{"eventType":...}`）。
+/// 防御 msg_type 语义漂移：即使 type 不是 3，事件载荷也不进对话正文。
+fn is_event_payload(content: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(content)
+        .ok()
+        .and_then(|v| v.get("eventType").cloned())
+        .is_some()
 }
 
 /// tool_calls[] → 事件（真实形态实测：{tool_name, tool_call_id,
@@ -580,6 +599,72 @@ mod tests {
             "无标题残根应排除"
         );
         assert_eq!(all[0].parent_session_id.as_deref(), Some("p1"));
+    }
+
+    /// 回归（2026-08-23 真实库发现）：msg_type=3 的内部事件行
+    /// （todo_updated 等，msg_content 是 {"eventType":...} JSON、role 为空）
+    /// 不是用户消息，不得进入对话正文。
+    #[test]
+    fn parse_skips_internal_event_rows() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("ev.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+             CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
+        )
+        .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO local_runtime_sessions VALUES ('e1', ?1, 3000)",
+            params![serde_json::json!({"sessionId":"e1","title":"事件会话"}).to_string()],
+        )
+        .expect("database connection failed");
+        // 用户消息（msg_type=1）
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('e1', 'u1', 'user', 1000, ?1)",
+            params![serde_json::json!({
+                "msg_type": 1, "msg_content": "正常的用户提问", "timestamp": 1000
+            })
+            .to_string()],
+        )
+        .expect("database connection failed");
+        // 内部事件行：msg_type=3 + eventType JSON + role 为空（真实形态）
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('e1', 'todo_1', NULL, 2000, ?1)",
+            params![serde_json::json!({
+                "msg_type": 3,
+                "msg_content": serde_json::json!({
+                    "eventType": "todo_updated", "todos": []
+                })
+                .to_string(),
+                "timestamp": 2000
+            })
+            .to_string()],
+        )
+        .expect("database connection failed");
+        // 防御形态：无 msg_type 但载荷是 eventType JSON
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('e1', 'ev_2', NULL, 2500, ?1)",
+            params![serde_json::json!({
+                "msg_content": serde_json::json!({"eventType": "plan_sync"}).to_string(),
+                "timestamp": 2500
+            })
+            .to_string()],
+        )
+        .expect("database connection failed");
+        drop(conn);
+
+        let raw = parse_session(&db, "e1").expect("parse failed");
+        assert_eq!(raw.messages.len(), 1, "只有真实用户消息进入正文");
+        assert_eq!(raw.messages[0].text.as_deref(), Some("正常的用户提问"));
+        assert!(raw.messages.iter().all(|m| !m
+            .text
+            .as_deref()
+            .unwrap_or("")
+            .contains("eventType")));
     }
 
     /// 回归（2026-08-23 真实库发现）：MiniMax v2 运行时会生成

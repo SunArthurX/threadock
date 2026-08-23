@@ -479,3 +479,11 @@ CREATE TABLE IF NOT EXISTS llm_extract_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_llm_runs_conv ON llm_extract_runs(conversation_id, created_at);
 ";
+
+/// V16：清洗 MiniMax 内部事件消息存量（2026-08-23）：适配器曾把 msg_type=3
+/// 的 todo_updated 等事件 JSON 当 user 消息入库（真实库实测 465 条 / 35 会话）。
+/// 适配器已修复不再写入；本迁移删除存量——FTS 由 messages_ad_fts 触发器联动
+/// 清理，tantivy 索引随重建（schema 时间字段迁移/手动重建索引）自然排除。
+pub const SCHEMA_V16: &str = r#"
+DELETE FROM messages WHERE content_text LIKE '{"eventType"%';
+"#;
