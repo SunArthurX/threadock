@@ -1,6 +1,7 @@
 // 单条消息渲染（高亮 + 复制 + 折叠 + 代码块）。
 // 提取为 React.memo 子组件：避免搜索/高亮 props 变化时整列重渲。
 import { memo, useMemo, type ReactNode } from "react";
+import { t } from "./i18n";
 import type { Message } from "./types";
 import { COLLAPSE_THRESHOLD } from "./types";
 import { splitCodeBlocks } from "./messageRender";
@@ -43,7 +44,7 @@ interface HighlightedSeg {
 function MessageBlockImpl({
   message, isMatch, searchQuery, isCollapsed, onToggleCollapse, onCopyMessage, onCopyMsgId,
 }: MessageBlockProps) {
-  const text = message.content_text ?? "(空)";
+  const text = message.content_text ?? t("(空)");
   const isLong = text.length > COLLAPSE_THRESHOLD;
   // 拆分代码块：缓存到组件内（同一 m.id + 文本不重算）
   const segs = useMemo(() => splitCodeBlocks(text), [text]);
@@ -80,7 +81,7 @@ function MessageBlockImpl({
                 <button
                   className="msg-action-btn"
                   onClick={() => onCopyMessage(h.content)}
-                  title="复制代码块"
+                  title={t("复制代码块")}
                 >📋</button>
               </div>
               <pre className="msg-code-pre"><code>{h.node}</code></pre>
@@ -95,11 +96,11 @@ function MessageBlockImpl({
       <div className="msg-actions">
         {isLong && (
           <button className="msg-action-btn" onClick={() => onToggleCollapse(message.id)}>
-            {isCollapsed ? `展开剩余 ${text.length - COLLAPSE_THRESHOLD} 字 ▾` : "收起 ▴"}
+            {isCollapsed ? t("展开剩余 {__0__} 字 ▾", { __0__: (text.length - COLLAPSE_THRESHOLD) }) : t("收起 ▴")}
           </button>
         )}
-        <button className="msg-action-btn" onClick={() => onCopyMessage(text)} title="复制本条消息">📋</button>
-        <button className="msg-action-btn" onClick={() => onCopyMsgId(message.id)} title="复制 message_id（排错）">🆔</button>
+        <button className="msg-action-btn" onClick={() => onCopyMessage(text)} title={t("复制本条消息")}>📋</button>
+        <button className="msg-action-btn" onClick={() => onCopyMsgId(message.id)} title={t("复制 message_id（排错）")}>🆔</button>
       </div>
       {isMatch && <div className="msg-match-marker" aria-hidden>🎯</div>}
     </>

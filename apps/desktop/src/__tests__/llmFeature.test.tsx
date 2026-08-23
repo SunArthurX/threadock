@@ -231,7 +231,7 @@ describe("详情页 知识 按钮", () => {
 
 describe("设置页 AI 提取（大模型）配置区", () => {
   const base = {
-    theme: "dark" as const, onThemeChange: vi.fn(),
+    theme: "dark" as const, onThemeChange: vi.fn(), lang: "zh" as const, onLangChange: () => {},
     textSize: "sm" as const, onTextSizeChange: vi.fn(),
     syncIntervalMin: 10, onSyncIntervalChange: vi.fn(),
     retentionDays: 0, onRetentionDaysChange: vi.fn(),

@@ -1,5 +1,6 @@
 // 活动节律页（持续优化）：tool_daily/工作日-周末拆分/查看当日会话/24h 自定义 tooltip
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { BarChart } from "./charts";
@@ -46,33 +47,33 @@ export function activityToCsv(s: {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const out: string[] = [];
-  out.push("# 每日热力");
-  out.push("日期,工具调用,活跃会话");
+  out.push(t("# 每日热力"));
+  out.push(t("日期,工具调用,活跃会话"));
   s.heatmap.forEach((c) => out.push([c.day, c.calls, c.sessions].map(esc).join(",")));
   out.push("");
-  out.push("# 24h 整体");
-  out.push("小时,调用");
+  out.push(t("# 24h 整体"));
+  out.push(t("小时,调用"));
   s.hourly.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
   if (s.hourly_weekday?.length) {
     out.push("");
-    out.push("# 24h 工作日");
-    out.push("小时,调用");
+    out.push(t("# 24h 工作日"));
+    out.push(t("小时,调用"));
     s.hourly_weekday.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
   }
   if (s.hourly_weekend?.length) {
     out.push("");
-    out.push("# 24h 周末");
-    out.push("小时,调用");
+    out.push(t("# 24h 周末"));
+    out.push(t("小时,调用"));
     s.hourly_weekend.forEach((h) => out.push([h.hour, h.calls].map(esc).join(",")));
   }
   out.push("");
-  out.push("# 工具月度趋势");
-  out.push("月份,工具,调用");
+  out.push(t("# 工具月度趋势"));
+  out.push(t("月份,工具,调用"));
   s.tools_trend.forEach((t) => out.push([t.month, t.tool, t.calls].map(esc).join(",")));
   if (s.tool_daily?.length) {
     out.push("");
-    out.push("# 工具日级（限最近 90 天）");
-    out.push("日期,工具,调用");
+    out.push(t("# 工具日级（限最近 90 天）"));
+    out.push(t("日期,工具,调用"));
     s.tool_daily.forEach((t) => out.push([t.day, t.tool, t.calls].map(esc).join(",")));
   }
   return "\uFEFF" + out.join("\n");
@@ -160,7 +161,7 @@ export function buildHeatGrid(cells: { day: string; calls: number; sessions?: nu
     cur.push(c ? { day: key, calls: c.calls, sessions: c.sessions ?? 0 } : { day: key, calls: 0, sessions: 0 });
     if (m0 !== lastMonth) {
       const en = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      labels.push({ col: colIdx, label: en[m0] ?? `${m0}月` });
+      labels.push({ col: colIdx, label: en[m0] ?? t("{__0__}月", { __0__: (m0) }) });
       lastMonth = m0;
     }
     if (cur.length === 7) {
@@ -178,15 +179,15 @@ export function buildHeatGrid(cells: { day: string; calls: number; sessions?: nu
 
 /** 时段分组（凌晨/上午/下午/晚上）。 */
 export function dayPart(hour: number): string {
-  if (hour < 6) return "凌晨";
-  if (hour < 12) return "上午";
-  if (hour < 18) return "下午";
-  return "晚上";
+  if (hour < 6) return t("凌晨");
+  if (hour < 12) return t("上午");
+  if (hour < 18) return t("下午");
+  return t("晚上");
 }
 
 /** 中文星期几。 */
 export function weekdayCN(day: string): string {
-  const names = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+  const names = [t("周日"), t("周一"), t("周二"), t("周三"), t("周四"), t("周五"), t("周六")];
   return names[new Date(day + "T00:00:00").getDay()];
 }
 
@@ -370,7 +371,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
 
   // 时段汇总
   const parts = (() => {
-    const m = new Map<string, number>([["凌晨", 0], ["上午", 0], ["下午", 0], ["晚上", 0]]);
+    const m = new Map<string, number>([[t("凌晨"), 0], [t("上午"), 0], [t("下午"), 0], [t("晚上"), 0]]);
     for (const h of stats?.hourly ?? []) {
       m.set(dayPart(h.hour), (m.get(dayPart(h.hour)) ?? 0) + h.calls);
     }
@@ -421,9 +422,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         if (!path) return;
         // Tauri 2.x 通过 fs plugin 写文件；这里用 clipboard + 提示让用户保存到文件路径
         await navigator.clipboard.writeText(csv);
-        showToast(`✓ CSV 已复制到剪贴板，请粘贴到 ${path}`, "info", 8000);
+        showToast(t("✓ CSV 已复制到剪贴板，请粘贴到 {__0__}", { __0__: (path) }), "info", 8000);
       } catch (e) {
-        showToast(`保存失败：${String(e)}`, "error");
+        showToast(t("保存失败：{__0__}", { __0__: (String(e)) }), "error");
       }
     } else {
       try {
@@ -445,7 +446,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       const list = await invoke<Conversation[]>("list_conversations_by_date", { fromMs, toMs });
       setDayConvs(list);
     } catch (e) {
-      showToast(`查询失败：${String(e)}`, "error");
+      showToast(t("查询失败：{__0__}", { __0__: (String(e)) }), "error");
       setDayConvs(null);
     } finally {
       setDayConvsLoading(false);
@@ -472,15 +473,15 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         <CardTitle icon="calendar" sub={rangeText} trailing={stats ? (
           <>
             <button className="action-btn" onClick={() => exportCsv(false)}
-              title="把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）">
+              title={t("把热力+时段+工具明细复制为 CSV（Excel 友好 UTF-8 BOM）")}>
               <Icon name="copy" size={12} /> 复制 CSV
             </button>
             <button className="action-btn" onClick={() => exportCsv(true)}
-              title="弹文件选择对话框，把 CSV 保存到磁盘（实际写入需要 clipboard 兜底）">
+              title={t("弹文件选择对话框，把 CSV 保存到磁盘（实际写入需要 clipboard 兜底）")}>
               <Icon name="save" size={12} /> 保存 CSV
             </button>
           </>
-        ) : null}>活动节律</CardTitle>
+        ) : null}>{t("活动节律")}</CardTitle>
         <div className="ops-range-wrap">
           <div className="ops-range">
             {([90, 180, 365] as const).map((d) => (
@@ -489,27 +490,27 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                 className={`filter-chip ${days === d ? "active" : ""}`}
                 onClick={() => setDays(d)}
                 disabled={year !== "all"}
-                title={year !== "all" ? "切换到「全部」后可选" : "按天数查看"}
+                title={year !== "all" ? t("切换到「全部」后可选") : t("按天数查看")}
               >
-                {d === 365 ? "1 年" : `${d} 天`}
+                {d === 365 ? t("1 年") : t("{__0__} 天", { __0__: (d) })}
               </button>
             ))}
-            {/* P1-C5: 日历年度选择 — 数据中出现的年份 ∪ 当前年；"全部" 切回 90/180/365 */}
+            {/* P1-C5: 日历年度选择 — 数据中出现的年份 ∪ 当前年；t("全部") 切回 90/180/365 */}
             <span style={{ width: 1, height: 16, background: "var(--border-default, rgba(148,163,199,0.18))", margin: "0 2px" }} />
             <button
               key="all-years"
               className={`filter-chip ${year === "all" ? "active" : ""}`}
               onClick={() => { setYear("all"); setDays(365); }}
-              title="按右上 90/180/365 天查看"
+              title={t("按右上 90/180/365 天查看")}
             >
-              全部
+              {t("全部")}
             </button>
             {yearOptions.map((y) => (
               <button
                 key={y}
                 className={`filter-chip ${year === y ? "active" : ""}`}
                 onClick={() => setYear(y)}
-                title={`只看 ${y} 年（Jan 1 ~ Dec 31）`}
+                title={t("只看 {__0__} 年（Jan 1 ~ Dec 31）", { __0__: (y) })}
               >
                 {y}
               </button>
@@ -518,21 +519,21 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         </div>
         <div className="kb-grid-grouped">
           <div className="kb-grid-section">
-            <div className="kb-grid-section-label">活动度量</div>
+            <div className="kb-grid-section-label">{t("活动度量")}</div>
             <div className="kb-grid">
-              <div className="kb-stat kpi-primary" title="统计范围内全部工具调用次数"><b>{totalCalls.toLocaleString()}</b><span>工具调用</span></div>
-              <div className="kb-stat kpi-primary" title="至少有 1 次调用的天数"><b>{activeDays}</b><span>活跃天数</span></div>
-              <div className="kb-stat kpi-primary" title="总调用 ÷ 活跃天数"><b>{avgPerDay.toLocaleString()}</b><span>日均调用</span></div>
-              <div className="kb-stat kpi-primary" title="从今天或昨天起算的连续活跃天数"><b>{streak} 天</b><span><Icon name="flame" size={11} /> 连续活跃</span></div>
+              <div className="kb-stat kpi-primary" title={t("统计范围内全部工具调用次数")}><b>{totalCalls.toLocaleString()}</b><span>{t("工具调用")}</span></div>
+              <div className="kb-stat kpi-primary" title={t("至少有 1 次调用的天数")}><b>{activeDays}</b><span>{t("活跃天数")}</span></div>
+              <div className="kb-stat kpi-primary" title={t("总调用 ÷ 活跃天数")}><b>{avgPerDay.toLocaleString()}</b><span>{t("日均调用")}</span></div>
+              <div className="kb-stat kpi-primary" title={t("从今天或昨天起算的连续活跃天数")}><b>{streak} 天</b><span><Icon name="flame" size={11} />{t("连续活跃")}</span></div>
             </div>
           </div>
           <div className="kb-grid-section">
-            <div className="kb-grid-section-label">时间分布</div>
+            <div className="kb-grid-section-label">{t("时间分布")}</div>
             <div className="kb-grid">
-              <div className="kb-stat kpi-secondary" title={`${peak.calls} 次调用集中在 ${peak.hour}:00`}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>最活跃时段</span></div>
-              <div className="kb-stat kpi-secondary" title="今日（最近 1 天）总调用"><b>{todayStats.calls.toLocaleString()}</b><span>今日 · {todayStats.sessions} 会话</span></div>
-              <div className="kb-stat kpi-secondary" title="最近 7 天总调用"><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
-              <div className="kb-stat kpi-secondary" title="最近 30 天总调用"><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
+              <div className="kb-stat kpi-secondary" title={t("{__0__} 次调用集中在 {__1__}:00", { __0__: (peak.calls), __1__: (peak.hour) })}><b>{String(peak.hour).padStart(2, "0")}:00</b><span>{t("最活跃时段")}</span></div>
+              <div className="kb-stat kpi-secondary" title={t("今日（最近 1 天）总调用")}><b>{todayStats.calls.toLocaleString()}</b><span>今日 · {todayStats.sessions} 会话</span></div>
+              <div className="kb-stat kpi-secondary" title={t("最近 7 天总调用")}><b>{week7Stats.calls.toLocaleString()}</b><span>近 7 天 · {week7Stats.sessions} 会话</span></div>
+              <div className="kb-stat kpi-secondary" title={t("最近 30 天总调用")}><b>{month30Stats.calls.toLocaleString()}</b><span>近 30 天 · {month30Stats.sessions} 会话</span></div>
             </div>
           </div>
         </div>
@@ -542,22 +543,22 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
         <CardTitle icon="calendar" sub={`${totalCalls.toLocaleString()} contributions in the last ${days} days`} trailing={
           <ListToolbar
             dense
-            filterLabel="维度"
+            filterLabel={t("维度")}
             filterValue={toolFilter === "all" ? "__all__" : toolFilter}
             onFilterChange={(v) => setToolFilter(v === "__all__" ? "all" : v)}
-            filterOptions={[{ value: "__all__", label: "全部工具" }, ...toolList.map((t) => ({ value: t, label: t }))]}
+            filterOptions={[{ value: "__all__", label: t("全部工具") }, ...toolList.map((t) => ({ value: t, label: t }))]}
             count={totalCalls}
-            countLabel="次调用"
+            countLabel={t("次调用")}
           />
-        }>活动热力图</CardTitle>
+        }>{t("活动热力图")}</CardTitle>
         {grid.cols.length === 0 ? (
           stats === null
             ? <Skeleton variant="heatmap" />
             : <InlineEmpty
-                message="暂无活动热力数据"
+                message={t("暂无活动热力数据")}
                 hint={isEmpty
-                  ? "同步并使用 ZCode / Claude Code / Cursor / MiniMax / Codex 等 Agent 后，本页会按天聚合"
-                  : "同步指标后生成热力"}
+                  ? t("同步并使用 ZCode / Claude Code / Cursor / MiniMax / Codex 等 Agent 后，本页会按天聚合")
+                  : t("同步指标后生成热力")}
               />
         ) : (
           <div className="heatmap-wrap">
@@ -591,27 +592,27 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                 <div className="day-detail-head">
                   <span className="day-detail-date">{selectedCell.day}</span>
                   <span className="day-detail-weekday">{weekdayCN(selectedCell.day)}</span>
-                  {isWeekend(selectedCell.day) && <span className="day-detail-weekday" style={{ background: "rgba(244,114,182,0.18)", color: "#f472b6" }}>周末</span>}
-                  {selectedCell.day === todayKey && <span className="day-detail-weekday" style={{ background: "rgba(96,165,250,0.18)", color: "#60a5fa" }}>今天</span>}
+                  {isWeekend(selectedCell.day) && <span className="day-detail-weekday" style={{ background: "rgba(244,114,182,0.18)", color: "#f472b6" }}>{t("周末")}</span>}
+                  {selectedCell.day === todayKey && <span className="day-detail-weekday" style={{ background: "rgba(96,165,250,0.18)", color: "#60a5fa" }}>{t("今天")}</span>}
                   <button
                     className="action-btn"
                     style={{ marginLeft: "auto", fontSize: 11 }}
                     onClick={loadDayConvs}
                     disabled={dayConvsLoading}
-                    title={`查询 ${selectedCell.day} 的主任务会话列表`}
+                    title={t("查询 {__0__} 的主任务会话列表", { __0__: (selectedCell.day) })}
                   >
-                    {dayConvsLoading ? "查询中…" : dayConvs ? "↻ 重新查询" : "💬 查看当日会话"}
+                    {dayConvsLoading ? t("查询中…") : dayConvs ? t("↻ 重新查询") : t("💬 查看当日会话")}
                   </button>
-                  <button className="day-detail-close" onClick={() => { setSelectedDay(null); setDayConvs(null); }}>✕ 关闭</button>
+                  <button className="day-detail-close" onClick={() => { setSelectedDay(null); setDayConvs(null); }}>{t("✕ 关闭")}</button>
                 </div>
                 <div className="day-detail-stats">
-                  <div className="day-detail-stat"><b>{selectedCell.calls.toLocaleString()}</b><span>工具调用</span></div>
-                  <div className="day-detail-stat"><b>{selectedCell.sessions}</b><span>活跃会话</span></div>
-                  <div className="day-detail-stat"><b>{selectedCell.sessions > 0 ? (selectedCell.calls / selectedCell.sessions).toFixed(1) : "0"}</b><span>平均每次会话</span></div>
+                  <div className="day-detail-stat"><b>{selectedCell.calls.toLocaleString()}</b><span>{t("工具调用")}</span></div>
+                  <div className="day-detail-stat"><b>{selectedCell.sessions}</b><span>{t("活跃会话")}</span></div>
+                  <div className="day-detail-stat"><b>{selectedCell.sessions > 0 ? (selectedCell.calls / selectedCell.sessions).toFixed(1) : "0"}</b><span>{t("平均每次会话")}</span></div>
                 </div>
                 {selectedDayTools.length > 0 ? (
                   <>
-                    <div className="day-detail-tools-title">当日工具分布（最常调用 Top 5）</div>
+                    <div className="day-detail-tools-title">{t("当日工具分布（最常调用 Top 5）")}</div>
                     <div className="day-detail-tools">
                       {selectedDayTools.map((t) => (
                         <div key={t.tool} className="day-detail-tool-row">
@@ -626,7 +627,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                   </>
                 ) : (
                   <div className="ops-table-empty" style={{ padding: "10px 0" }}>
-                    当日暂无工具分布数据（点击「查看当日会话」看真实会话）
+                    {t("当日暂无工具分布数据（点击「查看当日会话」看真实会话）")}
                   </div>
                 )}
                 {dayConvs && (
@@ -636,7 +637,7 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                     </div>
                     {dayConvs.length === 0 ? (
                       <div className="ops-table-empty" style={{ padding: "10px 0" }}>
-                        当日没有主任务会话（仅子任务或无 started_at 数据）
+                        {t("当日没有主任务会话（仅子任务或无 started_at 数据）")}
                       </div>
                     ) : (
                       <ScrollArea className="day-detail-conv-list">
@@ -645,10 +646,10 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
                             key={c.id}
                             className="day-detail-conv-row"
                             onClick={() => onJumpToConversation?.(c.id)}
-                            title="点击跳转到该会话"
+                            title={t("点击跳转到该会话")}
                           >
                             <span className="day-detail-conv-provider">{c.provider}</span>
-                            <span className="day-detail-conv-title">{c.user_title ?? c.title ?? "(无标题)"}</span>
+                            <span className="day-detail-conv-title">{c.user_title ?? c.title ?? t("(无标题)")}</span>
                             <span className="day-detail-conv-time">{formatTime(c.started_at_ms ?? null)}</span>
                           </div>
                         ))}
@@ -670,9 +671,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       <GanttConversations onJumpToConversation={onJumpToConversation} />
 
       <div className="ops-card">
-        <CardTitle icon="clock" sub={peak.calls > 0 ? `高峰 ${String(peak.hour).padStart(2, "0")}:00 · ${peak.calls.toLocaleString()} 次` : undefined}>24 小时分布</CardTitle>
+        <CardTitle icon="clock" sub={peak.calls > 0 ? t("高峰 {__0__}:00 · {__1__} 次", { __0__: String(peak.hour).padStart(2, "0"), __1__: peak.calls.toLocaleString() }) : undefined}>{t("24 小时分布")}</CardTitle>
         {(stats?.hourly ?? []).length === 0
-          ? (stats === null ? <Skeleton variant="chart-bars" count={12} height={140} /> : <InlineEmpty message="暂无 24 小时分布数据" />)
+          ? (stats === null ? <Skeleton variant="chart-bars" count={12} height={140} /> : <InlineEmpty message={t("暂无 24 小时分布数据")} />)
           : (
           <>
             <div className="day-parts">
@@ -685,9 +686,9 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
               ))}
             </div>
             <div className="hourly-split">
-              <div className="hourly-split-item"><span className="hourly-split-dot wd" /> 工作日（周一~五）</div>
-              <div className="hourly-split-item"><span className="hourly-split-dot we" /> 周末（周六~日）</div>
-              <div className="hourly-split-item" style={{ marginLeft: "auto", opacity: 0.6 }}>悬停柱子看明细</div>
+              <div className="hourly-split-item"><span className="hourly-split-dot wd" />{t("工作日（周一~五）")}</div>
+              <div className="hourly-split-item"><span className="hourly-split-dot we" />{t("周末（周六~日）")}</div>
+              <div className="hourly-split-item" style={{ marginLeft: "auto", opacity: 0.6 }}>{t("悬停柱子看明细")}</div>
             </div>
             <BarChart
               data={hourlyChart.map((h) => ({ label: h.label, value: h.value, className: h.className }))}
@@ -722,24 +723,24 @@ export default function ActivityView({ onJumpToConversation }: { onJumpToConvers
       </div>
 
       <div className="ops-card">
-        <CardTitle icon="wand" sub={toolRanking.curMonth ? `${toolRanking.curMonth.slice(2)} 月${toolRanking.prevMonth ? ` · 对比 ${toolRanking.prevMonth.slice(2)} 月` : ""}` : undefined}>工具使用 Top 10</CardTitle>
+        <CardTitle icon="wand" sub={toolRanking.curMonth ? t("{__0__} 月", { __0__: toolRanking.curMonth.slice(2) }) + (toolRanking.prevMonth ? t(" · 对比 {__0__} 月", { __0__: toolRanking.prevMonth.slice(2) }) : "") : undefined}>{t("工具使用 Top 10")}</CardTitle>
         {toolRanking.items.length === 0 ? (
-          stats === null ? <Skeleton variant="list" count={6} /> : <InlineEmpty message="暂无工具使用排行" hint="导入并使用 Agent 后会按月统计" />
+          stats === null ? <Skeleton variant="list" count={6} /> : <InlineEmpty message={t("暂无工具使用排行")} hint={t("导入并使用 Agent 后会按月统计")} />
         ) : (
           <div className="tool-rank-list">
-            {toolRanking.items.map((t, i) => {
-              const dCls = !toolRanking.prevMonth ? "flat" : t.delta > 0.05 ? "up" : t.delta < -0.05 ? "down" : "flat";
+            {toolRanking.items.map((tr, i) => {
+              const dCls = !toolRanking.prevMonth ? "flat" : tr.delta > 0.05 ? "up" : tr.delta < -0.05 ? "down" : "flat";
               const dText = !toolRanking.prevMonth
                 ? "—"
-                : t.delta > 0.05 ? `↑ ${(t.delta * 100).toFixed(0)}%`
-                : t.delta < -0.05 ? `↓ ${Math.abs(t.delta * 100).toFixed(0)}%`
-                : "持平";
+                : tr.delta > 0.05 ? `↑ ${(tr.delta * 100).toFixed(0)}%`
+                : tr.delta < -0.05 ? `↓ ${Math.abs(tr.delta * 100).toFixed(0)}%`
+                : t("持平");
               return (
-                <div key={t.tool} className="tool-rank-row">
+                <div key={tr.tool} className="tool-rank-row">
                   <span className={`tool-rank-num ${i < 3 ? "top" : ""}`}>{i + 1}</span>
-                  <span className="tool-rank-name">{t.tool}</span>
-                  <div className="tool-rank-bar"><div className="tool-rank-fill" style={{ width: `${t.barWidth}%` }} /></div>
-                  <span className="tool-rank-count">{t.calls.toLocaleString()}</span>
+                  <span className="tool-rank-name">{tr.tool}</span>
+                  <div className="tool-rank-bar"><div className="tool-rank-fill" style={{ width: `${tr.barWidth}%` }} /></div>
+                  <span className="tool-rank-count">{tr.calls.toLocaleString()}</span>
                   <span className={`tool-rank-delta ${dCls}`}>{dText}</span>
                 </div>
               );

@@ -1,5 +1,6 @@
 // 概览 Section：KPI + 图表 + 模型/工具榜 + 缓存 + 健康 + 延迟 + 浪费 + 对比
 import { useState } from "react";
+import { t } from "./i18n";
 import { BarChart, DonutChart, formatTokens, formatCost, formatDuration } from "./charts";
 import { AnimatedKpi } from "./OverviewCards";
 import { CardTitle } from "./CardTitle";
@@ -69,14 +70,14 @@ export default function OverviewSection({
 }: Props) {
   const kpiClick = (key: "requests" | "dangerous" | "cost" | "tokens") => () => onKpiJump?.(key);
   const jumpBtn = (provider: string, sessionId: string) => onJump ? (
-    <button className="finding-btn" title="跳转到对应会话" onClick={() => onJump(provider, sessionId)}>→ 会话</button>
+    <button className="finding-btn" title={t("跳转到对应会话")} onClick={() => onJump(provider, sessionId)}>{t("→ 会话")}</button>
   ) : null;
   const [hidden, setHidden] = useState<Set<string>>(loadHiddenCards);
   /** 卡片标题右侧的显隐切换（点标题栏切换，随 localStorage 持久化）。 */
   const vis = (key: CardKey) => (
     <span
       className="card-visibility"
-      title={hidden.has(key) ? "显示此卡片" : "隐藏此卡片"}
+      title={hidden.has(key) ? t("显示此卡片") : t("隐藏此卡片")}
       onClick={(e) => { e.stopPropagation(); setHidden(toggleHiddenCard(key)); }}
     >
       {hidden.has(key) ? "▣" : "◠"}
@@ -85,12 +86,12 @@ export default function OverviewSection({
   const donutSlices = byProvider.filter((p) => p.total_tokens > 0)
     .map((p) => ({ label: meta(p.provider).label, value: p.total_tokens, color: meta(p.provider).color }));
   const barData = timeseries.map((d) => ({ label: d.day, value: d.total_tokens }));
-  const maxToolCalls = Math.max(...topTools.map((t) => t.calls), 1);
+  const maxToolCalls = Math.max(...topTools.map((it) => it.calls), 1);
   const kpis = overview ? [
-    { label: "模型请求", num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: `${overview.session_count} 会话`, onClick: kpiClick("requests") },
-    { label: "总 Tokens", num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}`, onClick: kpiClick("tokens") },
-    { label: "估算成本", num: overview.cost_usd, fmt: formatCost, sub: "按定价", onClick: kpiClick("cost") },
-    { label: "危险操作", num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: `${overview.total_tool_calls.toLocaleString()} 工具`, danger: overview.destructive_calls > 0, onClick: kpiClick("dangerous") },
+    { label: t("模型请求"), num: overview.total_requests, fmt: (v: number) => Math.round(v).toLocaleString(), sub: t("{__0__} 会话", { __0__: (overview.session_count) }), onClick: kpiClick("requests") },
+    { label: t("总 Tokens"), num: overview.total_tokens, fmt: formatTokens, sub: `in ${formatTokens(overview.input_tokens)} / out ${formatTokens(overview.output_tokens)}`, onClick: kpiClick("tokens") },
+    { label: t("估算成本"), num: overview.cost_usd, fmt: formatCost, sub: t("按定价"), onClick: kpiClick("cost") },
+    { label: t("危险操作"), num: overview.destructive_calls, fmt: (v: number) => String(Math.round(v)), sub: t("{__0__} 工具", { __0__: (overview.total_tool_calls.toLocaleString()) }), danger: overview.destructive_calls > 0, onClick: kpiClick("dangerous") },
   ] : [];
 
   return (
@@ -103,12 +104,12 @@ export default function OverviewSection({
           className="action-btn"
           onClick={() => setHidden(setAllHidden(false))}
           disabled={hidden.size === 0}
-        ><Icon name="chevrons-up" size={11} /> 全部展开</button>
+        ><Icon name="chevrons-up" size={11} />{t("全部展开")}</button>
         <button
           className="action-btn"
           onClick={() => setHidden(setAllHidden(true))}
           disabled={hidden.size === CARD_KEYS.length}
-        ><Icon name="chevrons-down" size={11} /> 全部收起</button>
+        ><Icon name="chevrons-down" size={11} />{t("全部收起")}</button>
         <span className="card-toolbar-count">
           已隐藏 <b>{hidden.size}</b> / {CARD_KEYS.length}
         </span>
@@ -120,7 +121,7 @@ export default function OverviewSection({
 
       <div className="ops-charts">
         <div className={`ops-card ${hidden.has("provider") ? "card-hidden" : ""}`}>
-          <CardTitle icon="globe" trailing={vis("provider")}>Agent 用量分布</CardTitle>
+          <CardTitle icon="globe" trailing={vis("provider")}>{t("Agent 用量分布")}</CardTitle>
           <div className="ops-donut-wrap">
             <DonutChart slices={donutSlices} />
             <div className="ops-legend">
@@ -136,46 +137,46 @@ export default function OverviewSection({
           </div>
         </div>
         <div className={`ops-card ops-card-wide ${hidden.has("trend") ? "card-hidden" : ""}`}>
-          <CardTitle icon="trend-up" trailing={vis("trend")}>每日 Tokens 趋势</CardTitle>
+          <CardTitle icon="trend-up" trailing={vis("trend")}>{t("每日 Tokens 趋势")}</CardTitle>
           <BarChart data={barData} />
         </div>
       </div>
 
       <div className="ops-tables">
         <div className={`ops-card ${hidden.has("model") ? "card-hidden" : ""}`}>
-          <CardTitle icon="cpu" trailing={vis("model")}>模型明细</CardTitle>
+          <CardTitle icon="cpu" trailing={vis("model")}>{t("模型明细")}</CardTitle>
           <table className="ops-table">
-            <thead><tr><th>模型</th><th>请求</th><th>输入</th><th>输出</th><th>错误</th></tr></thead>
+            <thead><tr><th>{t("模型")}</th><th>{t("请求")}</th><th>{t("输入")}</th><th>{t("输出")}</th><th>{t("错误")}</th></tr></thead>
             <tbody>
               {byModel.map((m, i) => (
                 <tr key={i}>
-                  <td className="mono">{m.model === "(unknown)" ? `${meta(m.provider_id.replace("prov_","")).label} ·默认` : m.model}</td>
+                  <td className="mono">{m.model === "(unknown)" ? t("{__0__} ·默认", { __0__: meta(m.provider_id.replace("prov_","")).label }) : m.model}</td>
                   <td>{m.requests.toLocaleString()}</td>
                   <td>{formatTokens(m.input_tokens)}</td>
                   <td>{formatTokens(m.output_tokens)}</td>
                   <td className={m.errors > 0 ? "text-danger" : ""}>{m.errors}</td>
                 </tr>
               ))}
-              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? "加载中…" : "暂无模型明细"}</td></tr>}
+              {byModel.length === 0 && <tr><td colSpan={5} className="ops-table-empty">{loading ? t("加载中…") : t("暂无模型明细")}</td></tr>}
             </tbody>
           </table>
         </div>
         <div className={`ops-card ${hidden.has("tools") ? "card-hidden" : ""}`}>
-          <CardTitle icon="wand" trailing={vis("tools")}>工具调用 Top 10</CardTitle>
+          <CardTitle icon="wand" trailing={vis("tools")}>{t("工具调用 Top 10")}</CardTitle>
           <div className="ops-tools">
-            {topTools.map((t, i) => {
-              const share = (t.calls / maxToolCalls) * 100;
-              const tip = `${t.tool_name}\n${t.calls.toLocaleString()} 次调用 · 占比 ${share.toFixed(1)}%${t.destructive > 0 ? ` · ${t.destructive} 次危险` : ""}${t.errors > 0 ? ` · ${t.errors} 次错误` : ""}${t.avg_duration_ms > 0 ? ` · 平均 ${formatDuration(t.avg_duration_ms)}` : ""}`;
+            {topTools.map((tool, i) => {
+              const share = (tool.calls / maxToolCalls) * 100;
+              const tip = tool.tool_name + "\n" + t("{__0__} 次调用 · 占比 {__1__}%", { __0__: tool.calls.toLocaleString(), __1__: share.toFixed(1) }) + (tool.destructive > 0 ? t(" · {__0__} 次危险", { __0__: tool.destructive }) : "") + (tool.errors > 0 ? t(" · {__0__} 次错误", { __0__: tool.errors }) : "") + (tool.avg_duration_ms > 0 ? t(" · 平均 {__0__}", { __0__: formatDuration(tool.avg_duration_ms) }) : "");
               return (
                 <div key={i} className="ops-tool-row" data-tooltip={tip}>
-                  <span className={`ops-tool-name mono ${t.destructive > 0 ? "text-danger" : ""}`}>{t.tool_name}</span>
+                  <span className={`ops-tool-name mono ${tool.destructive > 0 ? "text-danger" : ""}`}>{tool.tool_name}</span>
                   <div className="ops-tool-bar-bg"><div className="ops-tool-bar" style={{ width: `${share}%` }} /></div>
-                  <span className="ops-tool-calls">{t.calls.toLocaleString()}</span>
-                  {t.destructive > 0 && <span className="badge completeness 有限">{t.destructive} 危险</span>}
+                  <span className="ops-tool-calls">{tool.calls.toLocaleString()}</span>
+                  {tool.destructive > 0 && <span className="badge completeness 有限">{tool.destructive} 危险</span>}
                 </div>
               );
             })}
-            {topTools.length === 0 && <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div>}
+            {topTools.length === 0 && <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div>}
           </div>
         </div>
       </div>
@@ -183,19 +184,19 @@ export default function OverviewSection({
       {benchmark.length > 1 && (
         <div className={`ops-card ${hidden.has("benchmark") ? "card-hidden" : ""}`}>
           <CardTitle icon="compass" trailing={<>
-            <button className="action-btn" onClick={onWeeklyReport}>导出周报</button>
-            <button className="action-btn" onClick={onOpenReports} title="应用内查看当前周报与历史报告">报告中心</button>
+            <button className="action-btn" onClick={onWeeklyReport}>{t("导出周报")}</button>
+            <button className="action-btn" onClick={onOpenReports} title={t("应用内查看当前周报与历史报告")}>{t("报告中心")}</button>
             {vis("benchmark")}
-          </>}>Agent 横向对比</CardTitle>
+          </>}>{t("Agent 横向对比")}</CardTitle>
           <div style={{ overflowX: "auto" }}>
             <table className="ops-table">
-              <thead><tr><th>指标</th>{benchmark.map((b, i) => <th key={i}>{meta(b.provider).label}</th>)}</tr></thead>
+              <thead><tr><th>{t("指标")}</th>{benchmark.map((b, i) => <th key={i}>{meta(b.provider).label}</th>)}</tr></thead>
               <tbody>
-                <tr><td style={{ fontWeight: 600 }}>请求</td>{benchmark.map((b, i) => <td key={i}>{b.total_requests.toLocaleString()}</td>)}</tr>
+                <tr><td style={{ fontWeight: 600 }}>{t("请求")}</td>{benchmark.map((b, i) => <td key={i}>{b.total_requests.toLocaleString()}</td>)}</tr>
                 <tr><td style={{ fontWeight: 600 }}>Tokens</td>{benchmark.map((b, i) => <td key={i}>{formatTokens(b.total_tokens)}</td>)}</tr>
-                <tr><td style={{ fontWeight: 600 }}>成本</td>{benchmark.map((b, i) => <td key={i}>{formatCost(b.cost_usd)}</td>)}</tr>
-                <tr><td style={{ fontWeight: 600 }}>成功率</td>{benchmark.map((b, i) => <td key={i} style={{ color: b.success_rate > 95 ? "var(--c-codex)" : b.success_rate > 80 ? "var(--warn)" : "var(--danger)" }}>{b.success_rate.toFixed(1)}%</td>)}</tr>
-                <tr><td style={{ fontWeight: 600 }}>缓存命中</td>{benchmark.map((b, i) => <td key={i}>{b.cache_hit_rate.toFixed(1)}%</td>)}</tr>
+                <tr><td style={{ fontWeight: 600 }}>{t("成本")}</td>{benchmark.map((b, i) => <td key={i}>{formatCost(b.cost_usd)}</td>)}</tr>
+                <tr><td style={{ fontWeight: 600 }}>{t("成功率")}</td>{benchmark.map((b, i) => <td key={i} style={{ color: b.success_rate > 95 ? "var(--c-codex)" : b.success_rate > 80 ? "var(--warn)" : "var(--danger)" }}>{b.success_rate.toFixed(1)}%</td>)}</tr>
+                <tr><td style={{ fontWeight: 600 }}>{t("缓存命中")}</td>{benchmark.map((b, i) => <td key={i}>{b.cache_hit_rate.toFixed(1)}%</td>)}</tr>
                 <tr><td style={{ fontWeight: 600 }}>$/会话</td>{benchmark.map((b, i) => <td key={i}>${b.cost_per_session.toFixed(2)}</td>)}</tr>
               </tbody>
             </table>
@@ -204,10 +205,10 @@ export default function OverviewSection({
       )}
 
       <div className={`ops-card ${hidden.has("health") ? "card-hidden" : ""}`}>
-        <CardTitle icon="heart" trailing={vis("health")}>Agent 健康度</CardTitle>
-        {health.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : (
+        <CardTitle icon="heart" trailing={vis("health")}>{t("Agent 健康度")}</CardTitle>
+        {health.length === 0 ? <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div> : (
           <table className="ops-table">
-            <thead><tr><th>Agent</th><th>请求</th><th>成功率</th><th>错误率</th><th>重试率</th><th>稳定性</th></tr></thead>
+            <thead><tr><th>Agent</th><th>{t("请求")}</th><th>{t("成功率")}</th><th>{t("错误率")}</th><th>{t("重试率")}</th><th>{t("稳定性")}</th></tr></thead>
             <tbody>
               {health.map((h, i) => (
                 <tr key={i}>
@@ -233,7 +234,7 @@ export default function OverviewSection({
           <CardTitle icon="zap" trailing={vis("latency")}>延迟 P50 / P95</CardTitle>
           <div className="ops-risky">
             {latency.map((l, i) => {
-              const tip = `${meta(l.provider).label}\nP50 ${formatDuration(l.p50_ms)} · P95 ${formatDuration(l.p95_ms)}\n平均 ${formatDuration(l.avg_ms)} · ${l.sample_count.toLocaleString()} 样本`;
+              const tip = t("{__0__}\nP50 {__1__} · P95 {__2__}\n平均 {__3__} · {__4__} 样本", { __0__: (meta(l.provider).label), __1__: (formatDuration(l.p50_ms)), __2__: (formatDuration(l.p95_ms)), __3__: (formatDuration(l.avg_ms)), __4__: (l.sample_count.toLocaleString()) });
               return (
                 <div key={i} className="ops-tool-row" data-tooltip={tip}>
                   <span className="ops-tool-name">{meta(l.provider).label}</span>
@@ -249,7 +250,7 @@ export default function OverviewSection({
 
       {waste.length > 0 && (
         <div className={`ops-card ${hidden.has("waste") ? "card-hidden" : ""}`}>
-          <CardTitle icon="flame" sub={`${waste.length} 个会话`} trailing={vis("waste")}>Token 浪费检测</CardTitle>
+          <CardTitle icon="flame" sub={t("{__0__} 个会话", { __0__: (waste.length) })} trailing={vis("waste")}>{t("Token 浪费检测")}</CardTitle>
           <div className="ops-risky">
             {waste.map((w, i) => (
               <div key={i} className="ops-risky-row">
@@ -266,10 +267,10 @@ export default function OverviewSection({
       )}
 
       <div className={`ops-card ${hidden.has("cache") ? "card-hidden" : ""}`}>
-        <CardTitle icon="database" trailing={vis("cache")}>缓存命中率</CardTitle>
-        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? "加载中…" : "暂无"}</div> : cacheStats.map((c) => {
+        <CardTitle icon="database" trailing={vis("cache")}>{t("缓存命中率")}</CardTitle>
+        {cacheStats.length === 0 ? <div className="ops-table-empty">{loading ? t("加载中…") : t("暂无")}</div> : cacheStats.map((c) => {
           const hitPct = (c.hit_rate * 100).toFixed(1);
-          const tip = `${meta(c.provider).label}\n命中率 ${hitPct}% · ${formatTokens(c.cache_read_tokens)} 缓存\n${formatTokens(c.input_tokens)} 总输入`;
+          const tip = t("{__0__}\n命中率 {__1__}% · {__2__} 缓存\n{__3__} 总输入", { __0__: (meta(c.provider).label), __1__: (hitPct), __2__: (formatTokens(c.cache_read_tokens)), __3__: (formatTokens(c.input_tokens)) });
           return (
             <div key={c.provider} className="ops-tool-row" data-tooltip={tip}>
               <span className="ops-tool-name">{meta(c.provider).label}</span>
@@ -283,28 +284,28 @@ export default function OverviewSection({
         })}
         {cacheTrend.length > 1 && (
           <>
-            <div className="ops-card-subtitle">每日命中趋势（缓存占输入比）</div>
+            <div className="ops-card-subtitle">{t("每日命中趋势（缓存占输入比）")}</div>
             <BarChart
-              data={cacheTrend.slice(-30).map((t) => ({
-                label: t.day.slice(5),
-                value: t.total_input > 0 ? (t.cache_read / t.total_input) * 100 : 0,
-                title: `${t.day} · 命中 ${((t.cache_read / t.total_input) * 100).toFixed(1)}% · ${formatTokens(t.cache_read)} / ${formatTokens(t.total_input)}`,
+              data={cacheTrend.slice(-30).map((it) => ({
+                label: it.day.slice(5),
+                value: it.total_input > 0 ? (it.cache_read / it.total_input) * 100 : 0,
+                title: t("{__0__} · 命中 {__1__}% · {__2__} / {__3__}", { __0__: (it.day), __1__: (((it.cache_read / it.total_input) * 100).toFixed(1)), __2__: (formatTokens(it.cache_read)), __3__: (formatTokens(it.total_input)) }),
               }))}
               height={90}
               color="var(--c-codex, #2da44e)"
               renderTooltip={(d) => {
-                const t = cacheTrend.find((x) => x.day.slice(5) === d.label);
-                if (!t) return <div className="tooltip-title">{d.label}</div>;
-                const pct = (t.cache_read / t.total_input) * 100;
+                const hit = cacheTrend.find((x) => x.day.slice(5) === d.label);
+                if (!hit) return <div className="tooltip-title">{d.label}</div>;
+                const pct = (hit.cache_read / hit.total_input) * 100;
                 return (
                   <>
-                    <div className="tooltip-title">{t.day}</div>
+                    <div className="tooltip-title">{hit.day}</div>
                     <div className="tooltip-row">
                       <span style={{ color: "var(--c-codex, #2da44e)", fontWeight: 600 }}>{pct.toFixed(1)}%</span>
-                      <span className="tooltip-sub">命中</span>
+                      <span className="tooltip-sub">{t("命中")}</span>
                     </div>
                     <div className="tooltip-sub" style={{ marginTop: 2 }}>
-                      {formatTokens(t.cache_read)} / {formatTokens(t.total_input)}
+                      {formatTokens(hit.cache_read)} / {formatTokens(hit.total_input)}
                     </div>
                   </>
                 );

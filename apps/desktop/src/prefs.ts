@@ -1,5 +1,7 @@
 // 用户偏好：数字格式 + 货币 + 日期格式（localStorage 持久化）。
 // 这些偏好只影响展示，不影响后端存储。
+import { t } from "./i18n";
+
 export type NumberFormat = "raw" | "k" | "wan" | "yi";
 export type Currency = "USD" | "CNY";
 export type DateFormat = "relative" | "absolute" | "iso";
@@ -38,14 +40,14 @@ export function saveDateFormat(v: DateFormat) {
 }
 
 /** 货币符号 + 与 USD 的换算系数（粗略实时估值：1 USD ≈ 7.2 CNY，可后续接汇率 API 替换）。 */
-const CURRENCY_META: Record<Currency, { symbol: string; perUsd: number; label: string }> = {
-  USD: { symbol: "$", perUsd: 1, label: "美元 (USD)" },
-  CNY: { symbol: "¥", perUsd: 7.2, label: "人民币 (CNY)" },
-};
+const CURRENCY_META = (): Record<Currency, { symbol: string; perUsd: number; label: string }> => ({
+  USD: { symbol: "$", perUsd: 1, label: t("美元 (USD)") },
+  CNY: { symbol: "¥", perUsd: 7.2, label: t("人民币 (CNY)") },
+});
 
 /** 把美元金额按当前货币偏好换算 + 格式化。 */
 export function formatCostPref(usd: number, currency: Currency = loadCurrency()): string {
-  const meta = CURRENCY_META[currency];
+  const meta = CURRENCY_META()[currency];
   const v = usd * meta.perUsd;
   return `${meta.symbol}${v.toFixed(v < 10 ? 3 : 2)}`;
 }
@@ -59,13 +61,13 @@ export function formatTokensPref(n: number, fmt: NumberFormat = loadNumberFormat
     return n.toString();
   }
   if (fmt === "wan") {
-    if (Math.abs(n) >= 100_000_000) return (n / 100_000_000).toFixed(2) + "亿";
-    if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + "万";
+    if (Math.abs(n) >= 100_000_000) return (n / 100_000_000).toFixed(2) + t("亿");
+    if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + t("万");
     return n.toLocaleString();
   }
   // yi
   if (Math.abs(n) >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
-  if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + "万";
+  if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + t("万");
   return n.toLocaleString();
 }
 
@@ -82,16 +84,16 @@ export function formatTimePref(ms: number | null | undefined, fmt: DateFormat = 
   }
   // relative
   const diff = Date.now() - ms;
-  if (diff < 0) return "刚刚";
+  if (diff < 0) return t("刚刚");
   const s = Math.floor(diff / 1000);
-  if (s < 60) return `${s} 秒前`;
+  if (s < 60) return t("{__0__} 秒前", { __0__: (s) });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} 分钟前`;
+  if (m < 60) return t("{__0__} 分钟前", { __0__: (m) });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} 小时前`;
+  if (h < 24) return t("{__0__} 小时前", { __0__: (h) });
   const d = Math.floor(h / 24);
-  if (d < 30) return `${d} 天前`;
+  if (d < 30) return t("{__0__} 天前", { __0__: (d) });
   const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} 个月前`;
-  return `${Math.floor(mo / 12)} 年前`;
+  if (mo < 12) return t("{__0__} 个月前", { __0__: (mo) });
+  return t("{__0__} 年前", { __0__: (Math.floor(mo / 12)) });
 }

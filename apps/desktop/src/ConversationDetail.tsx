@@ -1,5 +1,6 @@
 // 会话详情组件（消息/时间线/事件/知识提取/导出/内搜索/复制/原始视图/来源应用）
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { Message, EventDto, Conversation, sourceLabel, formatTime, eventTypeLabel } from "./types";
 import { showToast } from "./toast";
@@ -115,8 +116,8 @@ export default function ConversationDetail({
       const cmd = await invoke<string | null>("resume_command", { conversationId: conv.id });
       if (!cmd) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
       const r = await copyToClipboard(cmd);
-      if (r.ok) showToast(`✓ 已复制：${cmd}`, "info");
-      else showToast(r.error ?? "复制失败", "error");
+      if (r.ok) showToast(t("✓ 已复制：{__0__}", { __0__: (cmd) }), "info");
+      else showToast(r.error ?? t("复制失败"), "error");
     } catch (e) { showToast(typeof e === "string" ? e : String(e), "error"); }
   };
   /** 直接在系统终端新窗口执行恢复命令；失败/不支持时回退为复制。 */
@@ -124,10 +125,10 @@ export default function ConversationDetail({
     try {
       const cmd = await invoke<string | null>("resume_in_terminal", { conversationId: conv.id });
       if (cmd == null) { showToast("该来源不支持恢复命令（仅 claude-code / codex CLI 支持）", "info"); return; }
-      showToast(`✓ 已在终端打开：${cmd}`, "info");
+      showToast(t("✓ 已在终端打开：{__0__}", { __0__: (cmd) }), "info");
     } catch (e) {
       // 打开失败（无终端/osascript 失败等）→ 回退复制，用户可手动粘贴
-      showToast(`终端打开失败（${typeof e === "string" ? e : String(e)}），已改为复制`, "error");
+      showToast(t("终端打开失败（{__0__}），已改为复制", { __0__: typeof e === "string" ? e : String(e) }), "error");
       await copyResumeCommand();
     }
   };
@@ -244,19 +245,19 @@ export default function ConversationDetail({
   /** 复制 message_id（排错用：粘到 issue 里能直接定位 DB 行）。 */
   const copyMsgId = async (id: string) => {
     const r = await copyToClipboard(id);
-    if (r.ok) showToast(`✓ message_id 已复制 (${id.slice(0, 12)}…)`, "info");
+    if (r.ok) showToast(t("✓ message_id 已复制 ({__0__}…)", { __0__: (id.slice(0, 12)) }), "info");
     else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 复制整条会话的纯文本（user + assistant 顺序拼接，无 metadata）。 */
   const copyAllMessages = async () => {
     const lines = visibleMsgs.map((m) => {
-      const role = m.role === "user" ? "我" : m.role === "assistant" ? "AI" : m.role;
+      const role = m.role === "user" ? t("我") : m.role === "assistant" ? "AI" : m.role;
       const ts = m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN") : "";
       return `[${ts}] ${role}:\n${m.content_text ?? ""}`;
     });
     const text = lines.join("\n\n");
     const r = await copyToClipboard(text);
-    if (r.ok) showToast(`✓ 已复制 ${lines.length} 条消息`, "info");
+    if (r.ok) showToast(t("✓ 已复制 {__0__} 条消息", { __0__: (lines.length) }), "info");
     else showToast(`剪贴板不可用：${r.error ?? "unknown"}`, "error", 6000);
   };
   /** 切分消息文本为「代码块 + 普通文本」段 —— 委托给 messageRender.splitCodeBlocks（独立可测）。 */
@@ -278,7 +279,7 @@ export default function ConversationDetail({
               <div className="tl-dot" />
               <div className="tl-time">{m.created_at_ms ? new Date(m.created_at_ms).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) : ""}</div>
               <div className="tl-content">
-                <div className="tl-role">{m.role === "user" ? "👤 用户" : m.role === "assistant" ? "🤖 助手" : m.role}</div>
+                <div className="tl-role">{m.role === "user" ? t("👤 用户") : m.role === "assistant" ? t("🤖 助手") : m.role}</div>
                 <div className="tl-text">{(m.content_text ?? "").slice(0, 200)}</div>
                 {isCurrent && <span className="msg-match-marker" aria-hidden>🎯</span>}
               </div>
@@ -322,14 +323,14 @@ export default function ConversationDetail({
       <h2
         className={editingTitle ? "editing" : ""}
         onDoubleClick={() => { if (onRenameTitle) { setTitleDraft(conv.user_title ?? ""); setEditingTitle(true); } }}
-        title={onRenameTitle ? "双击改标题（自定义后展示你的标题）" : undefined}
+        title={onRenameTitle ? t("双击改标题（自定义后展示你的标题）") : undefined}
       >
         {editingTitle ? (
           <input
             className="title-input"
             value={titleDraft}
             autoFocus
-            placeholder="自定义标题（空 = 恢复原始）"
+            placeholder={t("自定义标题（空 = 恢复原始）")}
             onChange={(e) => setTitleDraft(e.target.value)}
             onBlur={submitTitle}
             onKeyDown={(e) => {
@@ -339,8 +340,8 @@ export default function ConversationDetail({
           />
         ) : (
           <span className="title-text">
-            {conv.user_title ?? conv.title ?? "(无标题)"}
-            {onRenameTitle && <span className="title-edit-hint" title="双击改标题">✎</span>}
+            {conv.user_title ?? conv.title ?? t("(无标题)")}
+            {onRenameTitle && <span className="title-edit-hint" title={t("双击改标题")}>✎</span>}
           </span>
         )}
         {completenessLabel && <span className={`badge completeness ${completenessLabel}`}>{completenessLabel}</span>}
@@ -349,53 +350,53 @@ export default function ConversationDetail({
         来源: {sourceLabel(conv.provider)} · 模型: {conv.model ?? "unknown"}
         {conv.completeness_score != null && ` · ${(conv.completeness_score * 100).toFixed(0)}%`}
         {conv.started_at_ms && ` · ${formatTime(conv.started_at_ms)}`}
-        {conv.source_parent_id && " · 子任务"}
+        {conv.source_parent_id && t(" · 子任务")}
       </div>
       <div className="detail-actions">
         {/* 收藏 / 归档 已移至右键菜单（避免顶栏拥挤，参考 macOS 设计） */}
         <button className={`action-btn ${timelineMode ? "active" : ""}`} onClick={onToggleTimeline}>
-          {timelineMode ? "💬 消息" : "🕐 时间线"}
+          {timelineMode ? t("💬 消息") : t("🕐 时间线")}
         </button>
         <button
           className={`action-btn ${rawView ? "active" : ""}`}
           onClick={toggleRawView}
-          title="切换原始视图：显示 Raw Store 里的未标准化原始归档（plan P2-3）"
+          title={t("切换原始视图：显示 Raw Store 里的未标准化原始归档（plan P2-3）")}
         >
-          {rawView ? "🔤 统一视图" : "🗂 原始视图"}
+          {rawView ? t("🔤 统一视图") : t("🗂 原始视图")}
         </button>
-        <button className="action-btn" onClick={openSourceApp} title="打开该会话的来源应用（Cursor / ZCode / MiniMax Code）">
+        <button className="action-btn" onClick={openSourceApp} title={t("打开该会话的来源应用（Cursor / ZCode / MiniMax Code）")}>
           ↗ 来源应用
         </button>
         <button
           className="action-btn"
           onClick={() => void resumeInTerminal()}
           onContextMenu={(e) => { e.preventDefault(); void copyResumeCommand(); }}
-          title="在系统终端新窗口直接执行恢复命令（仅 claude-code / codex CLI 来源；右击复制命令文本）"
+          title={t("在系统终端新窗口直接执行恢复命令（仅 claude-code / codex CLI 来源；右击复制命令文本）")}
         >
           ⏯ 恢复会话
         </button>
         <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
-          {loading ? "提取中…" : <><Icon name="sparkle" size={12} /> 知识</>}
+          {loading ? t("提取中…") : <><Icon name="sparkle" size={12} />{t("知识")}</>}
         </button>
-        <button className="action-btn" onClick={onRescanAudit} title="用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出">🔍 重扫</button>
+        <button className="action-btn" onClick={onRescanAudit} title={t("用审计规则扫描此会话（敏感信息 + 危险命令），结果以通知弹出")}>{t("🔍 重扫")}</button>
         <button
           className={`action-btn ${onlyUser ? "active" : ""}`}
           onClick={() => setOnlyUser(!onlyUser)}
-          title="开启后仅展示我自己发出的消息（消息视图与时间线同时生效）"
+          title={t("开启后仅展示我自己发出的消息（消息视图与时间线同时生效）")}
         >
           👤 仅用户消息
         </button>
         <button
           className="action-btn"
           onClick={() => setSearchOpen((v) => !v)}
-          title="在此会话内搜索消息（⌘F）"
-        >🔍 搜索消息</button>
-        <button className="action-btn" onClick={copyAllMessages} title={`复制 ${visibleMsgs.length} 条消息为纯文本`}>
+          title={t("在此会话内搜索消息（⌘F）")}
+        >{t("🔍 搜索消息")}</button>
+        <button className="action-btn" onClick={copyAllMessages} title={t("复制 {__0__} 条消息为纯文本", { __0__: (visibleMsgs.length) })}>
           📋 复制全部
         </button>
         <div className="download-dropdown">
           <button className="action-btn" disabled={exporting} onClick={() => setDownloadOpen(!downloadOpen)}>
-            {exporting ? "导出中…" : "⤓ 下载 ▾"}
+            {exporting ? t("导出中…") : t("⤓ 下载 ▾")}
           </button>
           {downloadOpen && (
             <>
@@ -415,7 +416,7 @@ export default function ConversationDetail({
             ref={searchInputRef}
             className="msg-search-input"
             value={search}
-            placeholder="在消息中搜索关键词…"
+            placeholder={t("在消息中搜索关键词…")}
             onChange={(e) => { setSearch(e.target.value); setSearchIdx(0); }}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -426,26 +427,26 @@ export default function ConversationDetail({
             }}
           />
           <span className="msg-search-count">
-            {search.trim() ? (matches.length === 0 ? "无匹配" : `${searchIdx + 1} / ${matches.length}`) : ""}
+            {search.trim() ? (matches.length === 0 ? t("无匹配") : `${searchIdx + 1} / ${matches.length}`) : ""}
           </span>
           <button className="msg-search-btn" onClick={prevMatch} disabled={matches.length === 0}>↑</button>
           <button className="msg-search-btn" onClick={nextMatch} disabled={matches.length === 0}>↓</button>
-          <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); setSearchIdx(0); }} title="关闭（Esc）">✕</button>
+          <button className="msg-search-btn" onClick={() => { setSearchOpen(false); setSearch(""); setSearchIdx(0); }} title={t("关闭（Esc）")}>✕</button>
         </div>
       )}
       {/* 标签行始终显示（含输入框 + 自动补全） */}
       {(
         <div className="tag-row">
-          {tags.map((t) => (
-            <span key={t} className="tag-chip" title="点击移除标签" onClick={() => onRemoveTag(t)}>
-              #{t} <span className="tag-x">✕</span>
+          {tags.map((tag) => (
+            <span key={tag} className="tag-chip" title={t("点击移除标签")} onClick={() => onRemoveTag(tag)}>
+              #{tag} <span className="tag-x">✕</span>
             </span>
           ))}
           <div className="tag-input-wrap">
             <input
               className="tag-input"
               value={tagInput}
-              placeholder="+ 标签"
+              placeholder={t("+ 标签")}
               onChange={(e) => { setTagInput(e.target.value); setSugIdx(0); }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && tagInput.trim()) { onAddTag(tagInput.trim()); setTagInput(""); setSugIdx(0); setShowSuggest(false); }
@@ -477,20 +478,20 @@ export default function ConversationDetail({
       {onNoteChange && (
         <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />
       )}
-      {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载对话内容…</span></div>}
+      {loading && <div className="panel-loading"><div className="spinner spinner-sm" /><span>{t("加载对话内容…")}</span></div>}
       {/* 回到顶部：向下滚超过 400px 出现（与底部 ↓ 按钮对称） */}
       {showJumpTop && (
-        <button className="jump-top-btn" onClick={jumpToTop} title="回到顶部">↑</button>
+        <button className="jump-top-btn" onClick={jumpToTop} title={t("回到顶部")}>↑</button>
       )}
       {/* 原始视图（plan P2-3）：Raw Store 未标准化归档，只读展示 */}
       {rawView && !loading && (
         rawContent === null
-          ? <div className="empty">该会话没有原始归档（直读导入的来源不落 Raw Store）</div>
+          ? <div className="empty">{t("该会话没有原始归档（直读导入的来源不落 Raw Store）")}</div>
           : <pre className="raw-payload-view">{rawContent}</pre>
       )}
       {!rawView && timelineMode && !loading && renderTimeline()}
       {!rawView && !timelineMode && !loading && eventGroups.orphan.length > 0 && (
-        <MessageEvents events={eventGroups.orphan} label="会话前置事件" />
+        <MessageEvents events={eventGroups.orphan} label={t("会话前置事件")} />
       )}
       {!rawView && !timelineMode && visibleMsgs.map((m) => {
         const isMatch = !!search.trim() && currentMatch?.kind === "msg" && currentMatch?.id === m.id;
@@ -499,7 +500,7 @@ export default function ConversationDetail({
         <div key={m.id} id={`msg-${m.id}`} className={`message ${m.role} ${highlightMsgId === m.id ? "highlighted" : ""} ${isMatch ? "current-match" : ""}`}>
           <div className="role">
             <span className={`avatar ${m.role}`}>{m.role === "user" ? "U" : m.role === "assistant" ? "AI" : m.role[0]?.toUpperCase()}</span>
-            <span className="role-label">{m.role === "user" ? "用户" : m.role === "assistant" ? "助手" : m.role}</span>
+            <span className="role-label">{m.role === "user" ? t("用户") : m.role === "assistant" ? t("助手") : m.role}</span>
             {m.created_at_ms && <span className="msg-time">{formatTime(m.created_at_ms)}</span>}
           </div>
           <MessageBlock
@@ -516,7 +517,7 @@ export default function ConversationDetail({
         );
       })}
       {showJumpBottom && (
-        <button className="jump-bottom-btn" onClick={jumpToBottom} title="滚到底部">↓</button>
+        <button className="jump-bottom-btn" onClick={jumpToBottom} title={t("滚到底部")}>↓</button>
       )}
     </div>
   );

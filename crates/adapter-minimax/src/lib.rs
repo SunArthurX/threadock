@@ -80,14 +80,18 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
     // 只选 parentSessionId 为 null 且有标题的主任务（过滤 runtime 无标题残根）
     let mut stmt = conn.prepare(
         "SELECT s.session_id, s.record_json, s.updated_at_ms,
+                COALESCE(s.title, json_extract(s.record_json, '$.title')) AS v_title,
+                COALESCE(s.parent_session_id, json_extract(s.record_json, '$.parentSessionId')) AS v_parent,
+                COALESCE(s.workspace_dir, json_extract(s.record_json, '$.workspaceDir')) AS v_ws,
+                COALESCE(s.created_at_ms, json_extract(s.record_json, '$.createdAtMs')) AS v_created,
                 (SELECT count(*) FROM local_runtime_message_rows m WHERE m.session_id = s.session_id) AS msg_count,
                 (SELECT count(*) FROM local_runtime_sessions c
-                 WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id) AS child_count,
+                 WHERE COALESCE(c.parent_session_id, json_extract(c.record_json, '$.parentSessionId')) = s.session_id) AS child_count,
                 (SELECT COALESCE(MAX(c.updated_at_ms), s.updated_at_ms) FROM local_runtime_sessions c
-                 WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id) AS max_child_updated
+                 WHERE COALESCE(c.parent_session_id, json_extract(c.record_json, '$.parentSessionId')) = s.session_id) AS max_child_updated
          FROM local_runtime_sessions s
-         WHERE json_extract(s.record_json, '$.parentSessionId') IS NULL
-           AND (json_extract(s.record_json, '$.title') IS NOT NULL
+         WHERE COALESCE(s.parent_session_id, json_extract(s.record_json, '$.parentSessionId')) IS NULL
+           AND (COALESCE(s.title, json_extract(s.record_json, '$.title')) IS NOT NULL
                 OR EXISTS (SELECT 1 FROM local_runtime_message_rows m
                            WHERE m.session_id = s.session_id))
          ORDER BY max_child_updated DESC",
@@ -96,28 +100,32 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
         let session_id: String = r.get(0)?;
         let record_json: String = r.get(1)?;
         let self_updated_at_ms: i64 = r.get(2)?;
-        let msg_count: i64 = r.get(3)?;
-        let child_count: i64 = r.get(4)?;
-        let max_child_updated: i64 = r.get(5).unwrap_or(self_updated_at_ms);
+        let title: Option<String> = r.get(3)?;
+        let _parent: Option<String> = r.get(4)?;
+        let workspace_dir: Option<String> = r.get(5)?;
+        let created_col: Option<i64> = r.get(6)?;
+        let msg_count: i64 = r.get(7)?;
+        let child_count: i64 = r.get(8)?;
+        let max_child_updated: i64 = r.get(9).unwrap_or(self_updated_at_ms);
+        // v2 列化元数据优先；旧库列缺失时回退 record_json 字段
         let obj: serde_json::Value = serde_json::from_str(&record_json).unwrap_or_default();
-        let title = obj
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(无标题)")
-            .to_string();
+        let title = title
+            .or_else(|| obj.get("title").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_else(|| "(无标题)".to_string());
         let agent_name = obj
             .get("agentName")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let workspace_dir = obj
-            .get("workspaceDir")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let created_at_ms = obj
-            .get("createdAtMs")
-            .and_then(serde_json::Value::as_i64)
+        let workspace_dir = workspace_dir
+            .or_else(|| {
+                obj.get("workspaceDir")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let created_at_ms = created_col
+            .or_else(|| obj.get("createdAtMs").and_then(serde_json::Value::as_i64))
             .unwrap_or(self_updated_at_ms);
         // 真实更新时间 = max(自身, 所有子任务)
         let updated_at_ms = self_updated_at_ms.max(max_child_updated);
@@ -149,15 +157,18 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
     let conn = open_db(&db_path)?;
     let mut stmt = conn.prepare(
         "SELECT s.session_id, s.record_json, s.updated_at_ms,
+                COALESCE(s.title, json_extract(s.record_json, '$.title')) AS v_title,
+                COALESCE(s.parent_session_id, json_extract(s.record_json, '$.parentSessionId')) AS v_parent,
+                COALESCE(s.workspace_dir, json_extract(s.record_json, '$.workspaceDir')) AS v_ws,
+                COALESCE(s.created_at_ms, json_extract(s.record_json, '$.createdAtMs')) AS v_created,
                 (SELECT count(*) FROM local_runtime_message_rows m WHERE m.session_id = s.session_id) AS msg_count,
                 COALESCE(
                     (SELECT count(*) FROM local_runtime_sessions c
-                     WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id), 0
+                     WHERE COALESCE(c.parent_session_id, json_extract(c.record_json, '$.parentSessionId')) = s.session_id), 0
                 ) AS child_count,
-                s.updated_at_ms AS effective_updated,
-                json_extract(s.record_json, '$.parentSessionId') AS parent
+                s.updated_at_ms AS effective_updated
          FROM local_runtime_sessions s
-         WHERE json_extract(s.record_json, '$.title') IS NOT NULL
+         WHERE COALESCE(s.title, json_extract(s.record_json, '$.title')) IS NOT NULL
             OR EXISTS (SELECT 1 FROM local_runtime_message_rows m
                        WHERE m.session_id = s.session_id)
          ORDER BY effective_updated DESC",
@@ -166,29 +177,32 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
         let session_id: String = r.get(0)?;
         let record_json: String = r.get(1)?;
         let self_updated_at_ms: i64 = r.get(2)?;
-        let msg_count: i64 = r.get(3)?;
-        let child_count: i64 = r.get(4)?;
-        let updated_at_ms: i64 = r.get(5).unwrap_or(self_updated_at_ms);
-        let parent: Option<String> = r.get(6)?;
+        let title: Option<String> = r.get(3)?;
+        let parent: Option<String> = r.get(4)?;
+        let workspace_dir: Option<String> = r.get(5)?;
+        let created_col: Option<i64> = r.get(6)?;
+        let msg_count: i64 = r.get(7)?;
+        let child_count: i64 = r.get(8)?;
+        let updated_at_ms: i64 = self_updated_at_ms;
+        // v2 列化元数据优先；旧库列缺失时回退 record_json 字段
         let obj: serde_json::Value = serde_json::from_str(&record_json).unwrap_or_default();
-        let title = obj
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(无标题)")
-            .to_string();
+        let title = title
+            .or_else(|| obj.get("title").and_then(|v| v.as_str()).map(String::from))
+            .unwrap_or_else(|| "(无标题)".to_string());
         let agent_name = obj
             .get("agentName")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let workspace_dir = obj
-            .get("workspaceDir")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let created_at_ms = obj
-            .get("createdAtMs")
-            .and_then(serde_json::Value::as_i64)
+        let workspace_dir = workspace_dir
+            .or_else(|| {
+                obj.get("workspaceDir")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        let created_at_ms = created_col
+            .or_else(|| obj.get("createdAtMs").and_then(serde_json::Value::as_i64))
             .unwrap_or(self_updated_at_ms);
         Ok(DiscoveredSession {
             session_id,
@@ -209,44 +223,74 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
     Ok(v)
 }
 
+/// 会话元信息（v2 列化字段优先，回退 record_json——旧库无列）。
+struct SessionMeta {
+    record_json: String,
+    title: Option<String>,
+    parent_id: Option<String>,
+    created_at: Option<time::OffsetDateTime>,
+}
+
+/// 读取会话元信息；会话不存在返回 `NotFound`。
+fn session_meta(conn: &Connection, session_id: &str) -> Result<SessionMeta, MinimaxError> {
+    let row = conn
+        .query_row(
+            "SELECT record_json,
+                    COALESCE(title, json_extract(record_json, '$.title')),
+                    COALESCE(parent_session_id, json_extract(record_json, '$.parentSessionId')),
+                    COALESCE(created_at_ms, json_extract(record_json, '$.createdAtMs'))
+             FROM local_runtime_sessions WHERE session_id = ?1",
+            params![session_id],
+            |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<i64>>(3)?,
+                ))
+            },
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => MinimaxError::NotFound(session_id.to_string()),
+            other => other.into(),
+        })?;
+    let (record_json, col_title, col_parent, col_created) = row;
+    let sess: serde_json::Value = serde_json::from_str(&record_json)?;
+    let title = col_title.or_else(|| {
+        sess.get("title")
+            .and_then(|v| v.as_str())
+            .map(std::string::ToString::to_string)
+    });
+    let parent_id = col_parent.or_else(|| {
+        sess.get("parentSessionId")
+            .and_then(|v| v.as_str())
+            .map(std::string::ToString::to_string)
+    });
+    let created_at = col_created
+        .or_else(|| sess.get("createdAtMs").and_then(serde_json::Value::as_i64))
+        .and_then(|ms| {
+            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).ok()
+        });
+    Ok(SessionMeta {
+        record_json,
+        title,
+        parent_id,
+        created_at,
+    })
+}
+
 /// 解析单条 `MiniMax` 会话。
 pub fn parse_session(
     db_path: impl AsRef<Path>,
     session_id: &str,
 ) -> AdapterResult<RawConversation> {
     let conn = open_db(&db_path)?;
-
-    // 1. 会话元信息
-    let (record_json,): (String,) = conn
-        .query_row(
-            "SELECT record_json FROM local_runtime_sessions WHERE session_id = ?1",
-            params![session_id],
-            |r| Ok((r.get(0)?,)),
-        )
-        .map_err(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => MinimaxError::NotFound(session_id.to_string()),
-            other => other.into(),
-        })?;
-    let sess: serde_json::Value = serde_json::from_str(&record_json)?;
-    let title = sess
-        .get("title")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string);
+    let meta = session_meta(&conn, session_id)?;
+    let sess: serde_json::Value = serde_json::from_str(&meta.record_json)?;
     let agent_name = sess
         .get("agentName")
         .and_then(|v| v.as_str())
         .unwrap_or("minimax");
-    let created_at_ms = sess
-        .get("createdAtMs")
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|ms| {
-            time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000).ok()
-        });
-    // 主子任务链路：parentSessionId 为 null 表示顶层主任务
-    let source_parent_id = sess
-        .get("parentSessionId")
-        .and_then(|v| v.as_str())
-        .map(std::string::ToString::to_string);
 
     // 2. 消息行
     let mut stmt = conn.prepare(
@@ -319,17 +363,18 @@ pub fn parse_session(
         return Err(MinimaxError::Empty(session_id.to_string()));
     }
 
-    let title = title.or_else(|| fallback_title(&messages));
+    // v2 列 title 缺失时用首条 user 消息兜底
+    let title = meta.title.or_else(|| fallback_title(&messages));
 
     Ok(RawConversation {
         provider: PROVIDER,
         source_conversation_id: session_id.to_string(),
         title,
         model: Some(agent_name.to_string()),
-        started_at: created_at_ms,
+        started_at: meta.created_at,
         messages,
         events,
-        source_parent_id,
+        source_parent_id: meta.parent_id,
     })
 }
 
@@ -496,10 +541,11 @@ mod tests {
         let db = dir.join("runtime-state.sqlite");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            r"CREATE TABLE local_runtime_sessions (
+            r#"CREATE TABLE local_runtime_sessions (
                 session_id TEXT PRIMARY KEY,
                 record_json TEXT NOT NULL,
-                updated_at_ms INTEGER NOT NULL
+                updated_at_ms INTEGER NOT NULL,
+                "title" TEXT, "parent_session_id" TEXT, "workspace_dir" TEXT, "created_at_ms" INTEGER
             );
             CREATE TABLE local_runtime_message_rows (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -510,7 +556,7 @@ mod tests {
                 created_at_ms INTEGER NOT NULL,
                 data_json TEXT NOT NULL,
                 UNIQUE(session_id, msg_id)
-            );",
+            );"#,
         )
         .expect("unexpected None");
 
@@ -580,13 +626,13 @@ mod tests {
         let db = dir.path().join("h.db");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, \"title\" TEXT, \"parent_session_id\" TEXT, \"workspace_dir\" TEXT, \"created_at_ms\" INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         ).expect("unexpected None");
         // 有标题的隐藏子任务 → 保留
-        conn.execute("INSERT INTO local_runtime_sessions VALUES ('c1', '{\"sessionId\":\"c1\",\"title\":\"真实子任务\",\"parentSessionId\":\"p1\",\"visibility\":\"hidden\"}', 1000)", []).expect("database connection failed");
+        conn.execute("INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('c1', '{\"sessionId\":\"c1\",\"title\":\"真实子任务\",\"parentSessionId\":\"p1\",\"visibility\":\"hidden\"}', 1000)", []).expect("database connection failed");
         // 无标题残根 → 排除
-        conn.execute("INSERT INTO local_runtime_sessions VALUES ('s1', '{\"sessionId\":\"s1\",\"parentSessionId\":null,\"visibility\":\"hidden\",\"archived\":true}', 2000)", []).expect("database connection failed");
+        conn.execute("INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('s1', '{\"sessionId\":\"s1\",\"parentSessionId\":null,\"visibility\":\"hidden\",\"archived\":true}', 2000)", []).expect("database connection failed");
         drop(conn);
 
         let all = discover_all_sessions(&db).expect("unexpected None");
@@ -601,6 +647,72 @@ mod tests {
         assert_eq!(all[0].parent_session_id.as_deref(), Some("p1"));
     }
 
+    /// 回归（2026-08-23 真实库发现）：MiniMax v2 把元数据「列化」——
+    /// title / parent_session_id 等存独立列，record_json 里不再填充。
+    /// 适配器必须列优先（COALESCE），否则「分析前端页面数量」这类会话
+    /// 标题丢失（被首条消息兜底顶替）、父子关系断裂（子任务被当主任务）。
+    #[test]
+    fn columnar_metadata_takes_precedence() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("col.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            r#"CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL,
+                "title" TEXT, "parent_session_id" TEXT, "workspace_dir" TEXT, "created_at_ms" INTEGER);
+             CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);"#,
+        )
+        .expect("unexpected None");
+        // 主任务：title 只在列里（record_json 无 title —— v2 真实形态）
+        conn.execute(
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms, title, workspace_dir, created_at_ms)
+             VALUES ('main', ?1, 3000, '分析前端页面数量', '/tmp/proj', 1000)",
+            params![serde_json::json!({"sessionId": "main"}).to_string()],
+        )
+        .expect("database connection failed");
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('main', 'm1', 'user', 1000, ?1)",
+            params![serde_json::json!({"msg_type": 1, "msg_content": "内容", "timestamp": 1000}).to_string()],
+        )
+        .expect("database connection failed");
+        // 子任务：parent 只在列里
+        conn.execute(
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms, title, parent_session_id)
+             VALUES ('child', ?1, 4000, '子任务', 'main')",
+            params![serde_json::json!({"sessionId": "child"}).to_string()],
+        )
+        .expect("database connection failed");
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('child', 'c1', 'assistant', 4000, ?1)",
+            params![serde_json::json!({"msg_type": 1, "msg_content": "子任务回复", "timestamp": 4000}).to_string()],
+        )
+        .expect("database connection failed");
+        drop(conn);
+
+        // discover_sessions：列 title 命中、子任务折叠（不出现在主任务列表）
+        let mains = discover_sessions(&db).expect("unexpected None");
+        assert_eq!(mains.len(), 1, "parent 在列里的子任务不得混入主任务列表");
+        assert_eq!(mains[0].title, "分析前端页面数量");
+        assert_eq!(mains[0].workspace_dir, "/tmp/proj");
+        assert_eq!(mains[0].created_at_ms, 1000);
+        assert_eq!(mains[0].child_count, 1, "列 parent 关系计入 child_count");
+
+        // discover_all_sessions：parent 关系来自列
+        let all = discover_all_sessions(&db).expect("unexpected None");
+        let child = all
+            .iter()
+            .find(|s| s.session_id == "child")
+            .expect("unexpected None");
+        assert_eq!(child.parent_session_id.as_deref(), Some("main"));
+
+        // parse_session：列 title 优先
+        let raw = parse_session(&db, "main").expect("parse failed");
+        assert_eq!(raw.title.as_deref(), Some("分析前端页面数量"));
+        let child_raw = parse_session(&db, "child").expect("parse failed");
+        assert_eq!(child_raw.source_parent_id.as_deref(), Some("main"));
+    }
+
     /// 回归（2026-08-23 真实库发现）：msg_type=3 的内部事件行
     /// （todo_updated 等，msg_content 是 {"eventType":...} JSON、role 为空）
     /// 不是用户消息，不得进入对话正文。
@@ -610,12 +722,12 @@ mod tests {
         let db = dir.path().join("ev.db");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, \"title\" TEXT, \"parent_session_id\" TEXT, \"workspace_dir\" TEXT, \"created_at_ms\" INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         )
         .expect("unexpected None");
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('e1', ?1, 3000)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('e1', ?1, 3000)",
             params![serde_json::json!({"sessionId":"e1","title":"事件会话"}).to_string()],
         )
         .expect("database connection failed");
@@ -677,12 +789,12 @@ mod tests {
         let db = dir.path().join("v2.db");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, \"title\" TEXT, \"parent_session_id\" TEXT, \"workspace_dir\" TEXT, \"created_at_ms\" INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         ).expect("unexpected None");
         // 真实形态：v2 branch、无 title、hidden、有消息
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('b1', '{\"sessionId\":\"b1\",\"agentName\":\"__local_runtime_v2__\",\"sessionType\":\"branch\",\"visibility\":\"hidden\",\"archived\":true,\"createdAtMs\":1000}', 3000)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('b1', '{\"sessionId\":\"b1\",\"agentName\":\"__local_runtime_v2__\",\"sessionType\":\"branch\",\"visibility\":\"hidden\",\"archived\":true,\"createdAtMs\":1000}', 3000)",
             [],
         ).expect("database connection failed");
         conn.execute(
@@ -826,11 +938,11 @@ mod tests {
         let db = dir.path().join("empty.sqlite");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT, updated_at_ms INTEGER);
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT, updated_at_ms INTEGER, \"title\" TEXT, \"parent_session_id\" TEXT, \"workspace_dir\" TEXT, \"created_at_ms\" INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         ).expect("unexpected None");
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('s', '{\"title\":\"x\"}', 0)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('s', '{\"title\":\"x\"}', 0)",
             [],
         )
         .expect("unexpected None");
@@ -848,23 +960,23 @@ mod tests {
         let db = dir.path().join("hier.sqlite");
         let conn = Connection::open(&db).expect("database connection failed");
         conn.execute_batch(
-            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, \"title\" TEXT, \"parent_session_id\" TEXT, \"workspace_dir\" TEXT, \"created_at_ms\" INTEGER);
              CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
         )
         .expect("unexpected None");
         // 主任务（updated 1000），下面挂 2 个子任务（updated 5000、6000）
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('parent', '{\"sessionId\":\"parent\",\"title\":\"主任务\",\"parentSessionId\":null}', 1000)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('parent', '{\"sessionId\":\"parent\",\"title\":\"主任务\",\"parentSessionId\":null}', 1000)",
             [],
         )
         .expect("unexpected None");
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('child1', '{\"sessionId\":\"child1\",\"title\":\"子任务1\",\"parentSessionId\":\"parent\"}', 5000)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('child1', '{\"sessionId\":\"child1\",\"title\":\"子任务1\",\"parentSessionId\":\"parent\"}', 5000)",
             [],
         )
         .expect("unexpected None");
         conn.execute(
-            "INSERT INTO local_runtime_sessions VALUES ('child2', '{\"sessionId\":\"child2\",\"title\":\"子任务2\",\"parentSessionId\":\"parent\"}', 6000)",
+            "INSERT INTO local_runtime_sessions (session_id, record_json, updated_at_ms) VALUES ('child2', '{\"sessionId\":\"child2\",\"title\":\"子任务2\",\"parentSessionId\":\"parent\"}', 6000)",
             [],
         )
         .expect("unexpected None");

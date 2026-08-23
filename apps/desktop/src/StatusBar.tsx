@@ -1,6 +1,7 @@
 // 底部状态栏：当前页 + 同步状态 + 实时时间 + 快捷键提示。
 // 独立组件：自管 1s 时间刷新，避免整个 App 树每秒重渲染（P1-D3）。
 import { useEffect, useState } from "react";
+import { t } from "./i18n";
 import { Icon } from "./Icon";
 
 export interface StatusBarProps {
@@ -27,11 +28,11 @@ export default function StatusBar({ syncResult, syncing, viewLabel }: StatusBarP
       </span>
       <span className={`status-cell status-sync ${syncing ? "syncing" : syncResult ? "done" : ""}`}>
         {syncing ? (
-          <><Icon name="sync" size={11} /> 同步中…</>
+          <><Icon name="sync" size={11} />{t("同步中…")}</>
         ) : syncResult ? (
           <><Icon name="check" size={11} /> {syncResult.replace(/^✓\s*/, "")}</>
         ) : (
-          <><Icon name="circle-dot" size={11} /> 待同步</>
+          <><Icon name="circle-dot" size={11} />{t("待同步")}</>
         )}
       </span>
       <span className="status-cell status-spacer" />

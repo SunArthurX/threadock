@@ -1,4 +1,5 @@
 // 共享类型定义（与 Rust serde 对应）
+import { t } from "./i18n";
 
 export interface Conversation {
   favorite?: boolean;
@@ -98,20 +99,20 @@ export const COLLAPSE_THRESHOLD = 600;
 export const sourceLabel = (p: string): string => {
   const map: Record<string, string> = {
     "claude-code": "Claude Code", zcode: "ZCode", codex: "Codex",
-    cursor: "Cursor", "minimax-code": "MiniMax", opencode: "OpenCode", generic: "导入",
+    cursor: "Cursor", "minimax-code": "MiniMax", opencode: "OpenCode", generic: t("导入"),
   };
   return map[p] ?? p;
 };
 
-export const eventTypeLabel = (t: string): string => {
+export const eventTypeLabel = (et: string): string => {
   const map: Record<string, string> = {
-    command_started: "命令", command_completed: "命令完成", diff_generated: "变更",
-    tool_call_started: "工具", tool_call_completed: "工具完成",
-    file_read: "读取文件", file_created: "新建文件", file_updated: "修改文件", file_deleted: "删除文件",
-    approval_requested: "请求审批", approval_granted: "批准", approval_denied: "拒绝",
-    error: "错误", artifact_created: "产物",
+    command_started: t("命令"), command_completed: t("命令完成"), diff_generated: t("变更"),
+    tool_call_started: t("工具"), tool_call_completed: t("工具完成"),
+    file_read: t("读取文件"), file_created: t("新建文件"), file_updated: t("修改文件"), file_deleted: t("删除文件"),
+    approval_requested: t("请求审批"), approval_granted: t("批准"), approval_denied: t("拒绝"),
+    error: t("错误"), artifact_created: t("产物"),
   };
-  return map[t] ?? t;
+  return map[et] ?? et;
 };
 
 export const formatTime = (ms: number | null): string => {

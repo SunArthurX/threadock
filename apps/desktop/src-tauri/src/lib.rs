@@ -103,6 +103,33 @@ pub fn run() {
                     }
                 });
             }
+            // MiniMax v2 元数据列化迁移：适配器改列优先后，一次性全量重导修正
+            // 存量标题/父子关系（「分析前端页面数量」等 27 个会话标题被首条
+            // 消息兜底顶替）。app_settings 标记只跑一次。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let done =
+                        state.read_repo.lock().ok().and_then(|repo| {
+                            repo.get_setting("minimax_col_migration").ok().flatten()
+                        });
+                    if done.is_none() {
+                        tracing::info!("MiniMax 元数据列化迁移：全量重导中……");
+                        match minimax_reimport_all(&state) {
+                            Ok(n) => {
+                                tracing::info!("MiniMax 重导完成：{n} 个会话");
+                                if let Ok(repo) = state.repo.lock() {
+                                    let _ = repo.set_setting("minimax_col_migration", "1");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("MiniMax 重导失败（下次启动重试）：{e}")
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

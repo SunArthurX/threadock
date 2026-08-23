@@ -1,5 +1,6 @@
 // 项目中心页（持续优化）：可点击跳转/排序升降序/空状态/卡片 hover/批量导出
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens, formatCost } from "./charts";
 import { formatTime } from "./types";
@@ -25,12 +26,12 @@ export interface ProjectRow {
 type SortKey = "cost" | "tokens" | "active" | "sessions";
 type SortDir = "desc" | "asc";
 
-export const SORT_LABELS: Record<SortKey, string> = {
-  cost: "成本",
+export const SORT_LABELS = (): Record<SortKey, string> => ({
+  cost: t("成本"),
   tokens: "Tokens",
-  active: "最近活跃",
-  sessions: "会话数",
-};
+  active: t("最近活跃"),
+  sessions: t("会话数"),
+});
 
 export function sortProjects(projects: ProjectRow[], key: SortKey, dir: SortDir = "desc"): ProjectRow[] {
   const arr = [...projects];
@@ -49,7 +50,7 @@ export function sortProjects(projects: ProjectRow[], key: SortKey, dir: SortDir 
 
 /** 项目列表导出为 CSV（Excel 友好 UTF-8 BOM）。 */
 export function projectsToCsv(projects: ProjectRow[]): string {
-  const head = "目录,会话数,请求数,Tokens,成本USD,主力Agent,最近活跃(ms)";
+  const head = t("目录,会话数,请求数,Tokens,成本USD,主力Agent,最近活跃(ms)");
   const escape = (v: unknown) => {
     const s = String(v ?? "");
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -126,7 +127,7 @@ export default function ProjectsView({
   const exportCsv = async () => {
     try {
       await navigator.clipboard.writeText(projectsToCsv(processed));
-      showToast(`✓ 已复制 ${processed.length} 个项目 CSV 到剪贴板`, "info");
+      showToast(t("✓ 已复制 {__0__} 个项目 CSV 到剪贴板", { __0__: (processed.length) }), "info");
     } catch {
       showToast("剪贴板不可用", "error");
     }
@@ -141,7 +142,7 @@ export default function ProjectsView({
       const list = await invoke<Conversation[]>("list_conversations_by_dir", { dir });
       setDirConvs(list);
     } catch (e) {
-      showToast(`查询失败：${String(e)}`, "error");
+      showToast(t("查询失败：{__0__}", { __0__: (String(e)) }), "error");
       setDirConvs(null);
     } finally {
       setDirLoading(false);
@@ -151,28 +152,28 @@ export default function ProjectsView({
   return (
     <ScrollArea className="projects-page">
       <div className="ops-card">
-        <CardTitle icon="folder" sub={projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : <LoadingText text="正在加载项目…" />}>项目中心</CardTitle>
+        <CardTitle icon="folder" sub={projects ? t("{__0__} 个项目 · {__1__} 会话 · {__2__} · {__3__}", { __0__: (totals.count), __1__: (totals.sessions), __2__: (formatTokens(totals.tokens)), __3__: (formatCost(totals.cost)) }) : <LoadingText text={t("正在加载项目…")} />}>{t("项目中心")}</CardTitle>
         <ListToolbar
           leading={projects && projects.length > 0 ? (
             <button className="action-btn" onClick={exportCsv}
-              title="把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）">
+              title={t("把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）")}>
               <Icon name="copy" size={12} /> 导出 CSV
             </button>
           ) : null}
-          sortLabel="排序"
+          sortLabel={t("排序")}
           sort={sortKey}
           onSortChange={(v) => {
             if (sortKey === v) setSortDir(sortDir === "desc" ? "asc" : "desc");
             else { setSortKey(v as SortKey); setSortDir("desc"); }
           }}
-          sortOptions={(Object.keys(SORT_LABELS) as SortKey[]).map((k) => ({
-            value: k, label: `${SORT_LABELS[k]}${sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}`
+          sortOptions={(Object.keys(SORT_LABELS()) as SortKey[]).map((k) => ({
+            value: k, label: `${SORT_LABELS()[k]}${sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}`
           }))}
           count={totals.count}
-          countLabel="个项目"
+          countLabel={t("个项目")}
           search={search}
           onSearch={(v) => { setSearch(v); pager.reset(); }}
-          searchPlaceholder="搜索项目 / Agent…"
+          searchPlaceholder={t("搜索项目 / Agent…")}
         />
         {isEmpty && (
           <div className="ops-table-empty">
@@ -180,7 +181,7 @@ export default function ProjectsView({
           </div>
         )}
         {projects && projects.length > 0 && processed.length === 0 && (
-          <div className="ops-table-empty">无匹配项目（试试清空搜索或换个关键词）</div>
+          <div className="ops-table-empty">{t("无匹配项目（试试清空搜索或换个关键词）")}</div>
         )}
       </div>
       <div className="project-grid">
@@ -188,30 +189,30 @@ export default function ProjectsView({
           <div
             key={p.dir}
             className={`project-card ${openDir === p.dir ? "expanded" : ""}`}
-            title={`点击展开/收起会话列表 · ${p.dir}`}
+            title={t("点击展开/收起会话列表 · {__0__}", { __0__: (p.dir) })}
             onClick={() => toggleDir(p.dir)}
           >
             <div className="project-name mono" title={p.dir}>
               {openDir === p.dir ? "▼" : "▶"} {shortDir(p.dir)}
             </div>
-            <div className="cost-ratio" title={`成本占比 ${((p.cost_usd / maxCost) * 100).toFixed(1)}%（相对最大项目）`}>
+            <div className="cost-ratio" title={t("成本占比 {__0__}%（相对最大项目）", { __0__: (((p.cost_usd / maxCost) * 100).toFixed(1)) })}>
               <div className="cost-ratio-fill" style={{ width: `${Math.max(3, (p.cost_usd / maxCost) * 100)}%` }} />
             </div>
             <div className="project-rows">
-              <div className="project-row"><span>会话</span><b>{p.sessions}</b></div>
-              <div className="project-row"><span>请求</span><b>{p.requests.toLocaleString()}</b></div>
+              <div className="project-row"><span>{t("会话")}</span><b>{p.sessions}</b></div>
+              <div className="project-row"><span>{t("请求")}</span><b>{p.requests.toLocaleString()}</b></div>
               <div className="project-row"><span>Tokens</span><b>{formatTokens(p.tokens)}</b></div>
-              <div className="project-row"><span>成本</span><b>{formatCost(p.cost_usd)}</b></div>
-              <div className="project-row"><span>主力 Agent</span><b>{p.main_agent ?? "—"}</b></div>
-              <div className="project-row"><span>最近活跃</span><b>{formatTime(p.last_active_ms) || "—"}</b></div>
+              <div className="project-row"><span>{t("成本")}</span><b>{formatCost(p.cost_usd)}</b></div>
+              <div className="project-row"><span>{t("主力 Agent")}</span><b>{p.main_agent ?? "—"}</b></div>
+              <div className="project-row"><span>{t("最近活跃")}</span><b>{formatTime(p.last_active_ms) || "—"}</b></div>
             </div>
             {openDir === p.dir && (
               <div className="project-conv-list" onClick={(e) => e.stopPropagation()}>
                 <div className="project-conv-title">
-                  {dirLoading ? <LoadingText text="加载中" /> : dirConvs && `${dirConvs.length} 条会话`}
+                  {dirLoading ? <LoadingText text={t("加载中")} /> : dirConvs && t("{__0__} 条会话", { __0__: (dirConvs.length) })}
                 </div>
                 {dirConvs && dirConvs.length === 0 && (
-                  <div className="project-conv-empty">该项目下没有主任务会话</div>
+                  <div className="project-conv-empty">{t("该项目下没有主任务会话")}</div>
                 )}
                 {dirConvs && dirConvs.slice(0, 10).map((c) => (
                   <div
@@ -220,7 +221,7 @@ export default function ProjectsView({
                     onClick={() => onJumpToConversation?.(c.id)}
                   >
                     <span className={`badge source ${c.provider}`}>{c.provider}</span>
-                    <span className="project-conv-name">{c.user_title ?? c.title ?? "(无标题)"}</span>
+                    <span className="project-conv-name">{c.user_title ?? c.title ?? t("(无标题)")}</span>
                     <span className="project-conv-time">{formatTime(c.started_at_ms ?? null)}</span>
                   </div>
                 ))}
@@ -234,7 +235,7 @@ export default function ProjectsView({
                       // P1-A5: 把截断提示变成可点击跳转：调用 onJumpToChat（App.tsx 注入）
                       // 跳到 chat 视图并按 source_dir 过滤；无回调时退化为不可点的提示文本。
                       if (onJumpToChat) onJumpToChat(p.dir);
-                      else showToast(`请在 App.tsx 注入 onJumpToChat 回调以启用「查看全部 ${dirConvs.length} 条」`, "info", 5000);
+                      else showToast(t("请在 App.tsx 注入 onJumpToChat 回调以启用「查看全部 {__0__} 条」", { __0__: (dirConvs.length) }), "info", 5000);
                     }}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
@@ -243,7 +244,7 @@ export default function ProjectsView({
                         if (onJumpToChat) onJumpToChat(p.dir);
                       }
                     }}
-                    title="跳转到 chat 视图并按此项目目录过滤"
+                    title={t("跳转到 chat 视图并按此项目目录过滤")}
                   >
                     在 Chat 中查看全部 {dirConvs.length} 条 →
                   </div>
@@ -255,9 +256,9 @@ export default function ProjectsView({
       </div>
       {pager.needed && (
         <div className="pager" style={{ justifyContent: "center" }}>
-          <button className="pager-btn" onClick={pager.prev} disabled={pager.page === 0}>‹ 上一页</button>
+          <button className="pager-btn" onClick={pager.prev} disabled={pager.page === 0}>{t("‹ 上一页")}</button>
           <span className="pager-info">{pager.page + 1} / {pager.totalPages} 页 · 共 {pager.total} 个项目</span>
-          <button className="pager-btn" onClick={pager.next} disabled={pager.page >= pager.totalPages - 1}>下一页 ›</button>
+          <button className="pager-btn" onClick={pager.next} disabled={pager.page >= pager.totalPages - 1}>{t("下一页 ›")}</button>
         </div>
       )}
     </ScrollArea>

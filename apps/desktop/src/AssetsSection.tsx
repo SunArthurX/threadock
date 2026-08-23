@@ -1,6 +1,7 @@
 // 资产 Section：资产清单（按 agent 分组+类型颜色）+ 自动化任务（完成折叠）
 // 增强：点击资产弹详情（路径/版本/说明）+ 风险资产标红 + 复制资产 ID
 import { useMemo, useState } from "react";
+import { t } from "./i18n";
 import type { AssetRow, AutomationRow } from "./ops-types";
 import { usePager } from "./usePager";
 import { meta } from "./ops-types";
@@ -66,14 +67,14 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
   const pagerBar = (pg: { page: number; totalPages: number; total: number; needed: boolean; prev: () => void; next: () => void }) =>
     pg.needed ? (
       <div className="pager">
-        <button className="pager-btn" onClick={pg.prev} disabled={pg.page === 0}>‹ 上一页</button>
+        <button className="pager-btn" onClick={pg.prev} disabled={pg.page === 0}>{t("‹ 上一页")}</button>
         <span className="pager-info">{pg.page + 1} / {pg.totalPages} 页 · 共 {pg.total} 条</span>
-        <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>下一页 ›</button>
+        <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>{t("下一页 ›")}</button>
       </div>
     ) : null;
 
   const copyAssetField = async (label: string, text: string) => {
-    try { await navigator.clipboard.writeText(text); showToast(`✓ 已复制 ${label}`, "info"); }
+    try { await navigator.clipboard.writeText(text); showToast(t("✓ 已复制 {__0__}", { __0__: (label) }), "info"); }
     catch { showToast("剪贴板不可用", "error"); }
   };
 
@@ -85,7 +86,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
       <div key={i} className={`ops-risky-row ${watched ? "watched" : ""}`}>
         <span
           className={`watch-toggle ${watched ? "on" : ""}`}
-          title={watched ? "取消关注" : "关注此任务（置顶标记；受只读原则限制不修改来源配置）"}
+          title={watched ? t("取消关注") : t("关注此任务（置顶标记；受只读原则限制不修改来源配置）")}
           onClick={() => setWatch(toggleAutomationWatch(wk))}
         >
           {watched ? "★" : "☆"}
@@ -96,7 +97,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
         {a.schedule && <span className="mono" style={{ fontSize: 10.5, color: "var(--text-muted)" }}>{a.schedule}</span>}
         {a.status && (
           <span className={`risk-flag ${bucket === "running" ? "medium" : "low"}`} title={
-            bucket === "running" ? "任务正在执行" : bucket === "configured" ? "已配置/启用（配置存在，非执行态）" : "任务已结束/停用"
+            bucket === "running" ? t("任务正在执行") : bucket === "configured" ? t("已配置/启用（配置存在，非执行态）") : t("任务已结束/停用")
           }>{a.status}</span>
         )}
         <span className="ops-risky-cmd mono">{a.detail ?? ""}</span>
@@ -118,21 +119,21 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
   return (
     <>
       <div className="ops-card">
-        <CardTitle icon="package" sub="skills / plugins / 内置技能" trailing={
+        <CardTitle icon="package" sub={t("skills / plugins / 内置技能")} trailing={
           <ListToolbar
             dense
             search={assetQuery}
             onSearch={setAssetQuery}
-            searchPlaceholder="搜索资产名 / 路径 / 说明…"
+            searchPlaceholder={t("搜索资产名 / 路径 / 说明…")}
             count={filteredAssets.length}
             countTotal={assets.length}
-            countLabel="项"
+            countLabel={t("项")}
           />
-        }>资产清单</CardTitle>
+        }>{t("资产清单")}</CardTitle>
         {filteredAssets.length === 0 ? (
           assets.length === 0
-            ? (loading ? <Skeleton variant="list" count={4} /> : <InlineEmpty message="后台同步中…" hint="首次启动会扫描各 Agent 源" />)
-            : <InlineEmpty message="无匹配资产" hint="试试清空搜索或换关键词" />
+            ? (loading ? <Skeleton variant="list" count={4} /> : <InlineEmpty message={t("后台同步中…")} hint={t("首次启动会扫描各 Agent 源")} />)
+            : <InlineEmpty message={t("无匹配资产")} hint={t("试试清空搜索或换关键词")} />
         ) : (
           Object.entries(
             filteredAssets.reduce<Record<string, AssetRow[]>>((g, a) => {
@@ -151,10 +152,10 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
                     key={i}
                     className={`asset-item kind-${a.kind} ${a.risky_hits > 0 ? "risky" : ""}`}
                     onClick={() => setDetail(a)}
-                    title="点击查看详情"
+                    title={t("点击查看详情")}
                   >
                     <span className={`asset-kind-chip kind-${a.kind}`}>
-                      {a.kind === "builtin_skill" ? "内置" : a.kind === "plugin" ? "插件" : a.kind === "mcp" ? "MCP" : "技能"}
+                      {a.kind === "builtin_skill" ? t("内置") : a.kind === "plugin" ? t("插件") : a.kind === "mcp" ? "MCP" : t("技能")}
                     </span>
                     <span className="asset-name mono" title={a.path ?? ""}>{a.name}</span>
                     {a.version && <span className="asset-ver mono">v{a.version}</span>}
@@ -168,9 +169,9 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
       </div>
 
       <div className="ops-card">
-        <CardTitle icon="stopwatch" sub={`${automations.length} 个 · cron / workflow / 后台任务`}>自动化任务</CardTitle>
+        <CardTitle icon="stopwatch" sub={t("{__0__} 个 · cron / workflow / 后台任务", { __0__: (automations.length) })}>{t("自动化任务")}</CardTitle>
         {automations.length === 0 ? (
-          loading ? <Skeleton variant="list" count={3} /> : <InlineEmpty message="暂无自动化任务" hint="cron / workflow / 后台任务" />
+          loading ? <Skeleton variant="list" count={3} /> : <InlineEmpty message={t("暂无自动化任务")} hint={t("cron / workflow / 后台任务")} />
         ) : (<>
           <div className="ops-risky">
             {running.length > 0 && <div className="automation-sub">运行中（{running.length}）</div>}
@@ -180,7 +181,7 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
             {configuredPager.slice.map(autoRow)}
             {configuredPager.needed && pagerBar(configuredPager)}
             {running.length === 0 && configured.length === 0 && (
-              <div className="ops-table-empty">当前没有运行中或已启用的任务</div>
+              <div className="ops-table-empty">{t("当前没有运行中或已启用的任务")}</div>
             )}
           </div>
           {ended.length > 0 && (
@@ -202,37 +203,37 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
               <h2>
                 <Icon name="package" size={18} /> 资产详情
                 <span className={`asset-kind-chip kind-${detail.kind}`} style={{ marginLeft: 8 }}>
-                  {detail.kind === "builtin_skill" ? "内置" : detail.kind === "plugin" ? "插件" : detail.kind === "mcp" ? "MCP" : "技能"}
+                  {detail.kind === "builtin_skill" ? t("内置") : detail.kind === "plugin" ? t("插件") : detail.kind === "mcp" ? "MCP" : t("技能")}
                 </span>
               </h2>
               <button className="settings-close" onClick={() => setDetail(null)}><Icon name="close" size={14} /></button>
             </div>
             <ScrollArea className="settings-body">
               <div className="asset-detail-row">
-                <span className="asset-detail-label">名称</span>
+                <span className="asset-detail-label">{t("名称")}</span>
                 <span className="mono">{detail.name}</span>
-                <button className="kb-copy" onClick={() => copyAssetField("资产名", detail.name)}>📋</button>
+                <button className="kb-copy" onClick={() => copyAssetField(t("资产名"), detail.name)}>📋</button>
               </div>
               {detail.version && (
                 <div className="asset-detail-row">
-                  <span className="asset-detail-label">版本</span>
+                  <span className="asset-detail-label">{t("版本")}</span>
                   <span className="mono">v{detail.version}</span>
                 </div>
               )}
               {detail.path && (
                 <div className="asset-detail-row">
-                  <span className="asset-detail-label">路径</span>
+                  <span className="asset-detail-label">{t("路径")}</span>
                   <span className="mono" style={{ fontSize: 11, wordBreak: "break-all" }}>{detail.path}</span>
-                  <button className="kb-copy" onClick={() => copyAssetField("路径", detail.path ?? "")}>📋</button>
+                  <button className="kb-copy" onClick={() => copyAssetField(t("路径"), detail.path ?? "")}>📋</button>
                 </div>
               )}
               <div className="asset-detail-row">
-                <span className="asset-detail-label">说明</span>
+                <span className="asset-detail-label">{t("说明")}</span>
                 <span style={{ fontSize: 12, lineHeight: 1.5, color: "var(--text-muted)", whiteSpace: "pre-wrap" }}>
-                  {detail.description ?? "（无）"}
+                  {detail.description ?? t("（无）")}
                 </span>
                 {detail.description && (
-                  <button className="kb-copy" onClick={() => copyAssetField("说明", detail.description ?? "")}>📋</button>
+                  <button className="kb-copy" onClick={() => copyAssetField(t("说明"), detail.description ?? "")}>📋</button>
                 )}
               </div>
               <div className="asset-detail-row">
@@ -241,13 +242,13 @@ export default function AssetsSection({ assets, automations, loading }: Props) {
               </div>
               {detail.risky_hits != null && detail.risky_hits > 0 && (
                 <div className="asset-detail-row">
-                  <span className="asset-detail-label">风险点</span>
+                  <span className="asset-detail-label">{t("风险点")}</span>
                   <span className="risk-flag high">⚠ {detail.risky_hits} 处风险（按审计规则扫描）</span>
                 </div>
               )}
               <div className="asset-detail-row">
-                <span className="asset-detail-label">详情 JSON</span>
-                <button className="kb-copy" onClick={() => copyAssetField("完整 JSON", JSON.stringify(detail, null, 2))}>📋 复制</button>
+                <span className="asset-detail-label">{t("详情 JSON")}</span>
+                <button className="kb-copy" onClick={() => copyAssetField(t("完整 JSON"), JSON.stringify(detail, null, 2))}>{t("📋 复制")}</button>
               </div>
             </ScrollArea>
           </div>

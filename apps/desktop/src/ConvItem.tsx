@@ -1,6 +1,7 @@
 // 单条会话列表项（React.memo：避免未变化的 item 随父级 state 一起重渲）。
 // 父级负责传 per-item props（已经 useMemo 过）；此组件不持有任何 state。
 import { memo } from "react";
+import { t } from "./i18n";
 import type { Conversation } from "./types";
 import { sourceLabel, formatTime } from "./types";
 
@@ -40,8 +41,8 @@ function ConvItemImpl({
           </span>
         )}
         {isChild && <span className="child-arrow">↳</span>}
-        {isPinned && <span className="pin-star" title="已置顶（永远排最前）">📌</span>}
-        {conv.user_title ?? conv.title ?? "(无标题)"}
+        {isPinned && <span className="pin-star" title={t("已置顶（永远排最前）")}>📌</span>}
+        {conv.user_title ?? conv.title ?? t("(无标题)")}
       </div>
       <div className="meta">
         <span className={`badge source ${conv.provider}`}>{sourceLabel(conv.provider)}</span>
@@ -51,9 +52,9 @@ function ConvItemImpl({
         {scope === "deleted" && (
           <span
             className="restore-btn"
-            title="恢复此会话"
+            title={t("恢复此会话")}
             onClick={onRestore}
-          >↩ 恢复</span>
+          >{t("↩ 恢复")}</span>
         )}
       </div>
     </div>

@@ -1,5 +1,6 @@
 // 轻量通知（toast）系统：模块级 store + useSyncExternalStore，免 prop 透传。
 // 支持 undo 按钮：showToast(text, kind, ttlMs, undo?)
+import { t } from "./i18n";
 
 export type ToastKind = "info" | "warn" | "error";
 
@@ -49,7 +50,7 @@ export function showToast(
   kind: ToastKind = "info",
   ttlMs: number = DEFAULT_UNDO_TTL_MS,
   undo?: () => void,
-  undoLabel: string = "撤销",
+  undoLabel: string = t("撤销"),
 ): number {
   const id = nextId++;
   toasts = [

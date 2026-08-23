@@ -1,6 +1,7 @@
 // 报告中心弹窗：应用内渲染周报（当前周期实时生成）+ 历史报告列表
 // 增强：搜索过滤 + 收藏（localStorage 持久化）
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTime } from "./types";
 import ScrollArea from "./ScrollArea";
@@ -82,9 +83,9 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
     <div className="settings-backdrop" onClick={onClose}>
       <div className="settings-modal report-modal" onClick={(e) => e.stopPropagation()}>
         <div className="settings-header">
-          <h2>📊 报告中心</h2>
+          <h2>{t("📊 报告中心")}</h2>
           <div className="knowledge-modal-actions">
-            <button className="action-btn" onClick={renderCurrent} disabled={loading}>↻ 当前周报</button>
+            <button className="action-btn" onClick={renderCurrent} disabled={loading}>{t("↻ 当前周报")}</button>
             <button className="settings-close" onClick={onClose}>✕</button>
           </div>
         </div>
@@ -98,21 +99,21 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
                 <input
                   className="report-search"
                   type="search"
-                  placeholder="🔍 搜索报告名…"
+                  placeholder={t("🔍 搜索报告名…")}
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                 />
                 <button
                   className={`filter-chip ${showFavOnly ? "active" : ""}`}
                   onClick={() => setShowFavOnly((v) => !v)}
-                  title="只看收藏"
+                  title={t("只看收藏")}
                 >
-                  {showFavOnly ? "★ 仅收藏" : "☆ 收藏"}
+                  {showFavOnly ? t("★ 仅收藏") : t("☆ 收藏")}
                 </button>
               </div>
               {filteredHistory.length === 0 ? (
                 <div className="ops-table-empty" style={{ padding: 8 }}>
-                  {keyword ? `没有匹配「${keyword}」的报告` : "暂无收藏"}
+                  {keyword ? t("没有匹配「{__0__}」的报告", { __0__: (keyword) }) : t("暂无收藏")}
                 </div>
               ) : (
                 <ScrollArea className="report-history-list">
@@ -121,7 +122,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
                       <button
                         className="report-fav-btn"
                         onClick={() => toggleFav(h.name)}
-                        title={favs.has(h.name) ? "取消收藏" : "收藏此报告"}
+                        title={favs.has(h.name) ? t("取消收藏") : t("收藏此报告")}
                       >
                         {favs.has(h.name) ? "★" : "☆"}
                       </button>
@@ -140,7 +141,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
           {loading && !html && (
-            <div className="report-skeleton" aria-label="加载报告中…">
+            <div className="report-skeleton" aria-label={t("加载报告中…")}>
               <div className="sk-line sk-lg" />
               <div className="sk-line sk-sm" />
               <div className="sk-line sk-sm" />
@@ -153,7 +154,7 @@ export default function ReportModal({ onClose }: { onClose: () => void }) {
               className="report-frame"
               sandbox="allow-same-origin"
               srcDoc={html}
-              title={current ? `历史报告：${current}` : "实时周报"}
+              title={current ? t("历史报告：{__0__}", { __0__: (current) }) : t("实时周报")}
             />
           )}
       </ScrollArea>

@@ -955,6 +955,30 @@ pub(crate) fn commit_index(
 }
 
 /// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
+/// MiniMax 全量重导（一次性迁移用）：适配器元数据改列优先读取后，
+/// 修正存量会话的标题 / 父子关系（upsert 覆盖 title，user_title 保留）。
+/// 失败逐条继续（warn 留痕），返回成功数。
+pub(crate) fn minimax_reimport_all(state: &DaemonState) -> Result<usize, String> {
+    let db = minimax_db_path()?;
+    let sessions = ch_adapter_minimax::discover_all_sessions(&db)
+        .map_err(|e| format!("discover minimax: {e}"))?;
+    let mut ok = 0usize;
+    for s in &sessions {
+        let raw = match ch_adapter_minimax::parse_session(&db, &s.session_id) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!(session = %s.session_id, error = %e, "minimax 重导跳过");
+                continue;
+            }
+        };
+        match import_raw_to_state(state, raw, Some("MiniMax Code"), Some(s.updated_at_ms)) {
+            Ok(_) => ok += 1,
+            Err(e) => tracing::warn!(session = %s.session_id, error = %e, "minimax 重导失败"),
+        }
+    }
+    Ok(ok)
+}
+
 pub(crate) fn import_raw_to_state(
     state: &DaemonState,
     raw: RawConversation,

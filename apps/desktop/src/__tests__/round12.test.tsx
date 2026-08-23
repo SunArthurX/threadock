@@ -122,9 +122,12 @@ describe("ConversationList Dropdown 带 label", () => {
 describe("App 顶栏：保留 ⌘K / ? / ⚙（⌘K 是命令面板核心入口，保留）", () => {
   it("顶栏保留 命令面板 / 快捷键速查 / 设置 三个按钮（macOS 标准）", async () => {
     const src = readSrc(APP_TSX);
-    expect(/title="命令面板[^"]*"/.test(src)).toBe(true);
-    expect(/title="快捷键速查[^"]*"/.test(src)).toBe(true);
-    expect(/title="设置"/.test(src)).toBe(true);
+    // i18n 改造后 title 为 {t("...")} 形态；两种形态都认
+    const titleAttr = (label: string) =>
+      new RegExp(`title=(?:\\{t\\("|")${label}`).test(src);
+    expect(titleAttr("命令面板")).toBe(true);
+    expect(titleAttr("快捷键速查")).toBe(true);
+    expect(titleAttr("设置")).toBe(true);
   });
 });
 

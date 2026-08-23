@@ -1,6 +1,7 @@
 // 知识库页（第 6-10 轮优化）：单条复制/完成进度/空状态/快捷键/提取引导
 // 第 11+ 轮：message_id 跳转（精确到消息）/ 全 6 类（加摘要、错误）/ Top 20 可点击 / 版本管理
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTime } from "./types";
 import { usePager } from "./usePager";
@@ -138,9 +139,9 @@ export function knowledgeBaseToMarkdown(kb: {
   top_commands?: { cmd: string; count: number }[];
   top_files?: { path: string; count: number }[];
 }): string {
-  const lines: string[] = ["# 知识库纪要", ""];
+  const lines: string[] = [t("# 知识库纪要"), ""];
   if ((kb.decisions ?? []).length > 0) {
-    lines.push("## 决策", ...(kb.decisions ?? []).map((d) => `- ${d.text ?? ""}（${d.title}）`), "");
+    lines.push(t("## 决策"), ...(kb.decisions ?? []).map((d) => `- ${d.text ?? ""}（${d.title}）`), "");
   }
   if ((kb.todos ?? []).length > 0) {
     lines.push(
@@ -152,22 +153,22 @@ export function knowledgeBaseToMarkdown(kb: {
     );
   }
   if ((kb.top_commands ?? []).length > 0) {
-    lines.push("## 常用命令", ...(kb.top_commands ?? []).map((c) => `- \`${c.cmd}\` ×${c.count}`), "");
+    lines.push(t("## 常用命令"), ...(kb.top_commands ?? []).map((c) => `- \`${c.cmd}\` ×${c.count}`), "");
   }
   if ((kb.top_files ?? []).length > 0) {
-    lines.push("## 高频文件", ...(kb.top_files ?? []).map((f) => `- ${f.path} ×${f.count}`), "");
+    lines.push(t("## 高频文件"), ...(kb.top_files ?? []).map((f) => `- ${f.path} ×${f.count}`), "");
   }
   return lines.join("\n");
 }
 
 /** 相对时间（"3 天前"）。 */
 export function relativeTime(ms: number): string {
-  if (!ms) return "从未";
+  if (!ms) return t("从未");
   const diff = Date.now() - ms;
   const day = 86400000;
-  if (diff < 3600000) return "刚刚";
-  if (diff < day) return `${Math.floor(diff / 3600000)} 小时前`;
-  if (diff < 30 * day) return `${Math.floor(diff / day)} 天前`;
+  if (diff < 3600000) return t("刚刚");
+  if (diff < day) return t("{__0__} 小时前", { __0__: (Math.floor(diff / 3600000)) });
+  if (diff < 30 * day) return t("{__0__} 天前", { __0__: (Math.floor(diff / day)) });
   return formatTime(ms);
 }
 
@@ -204,7 +205,7 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      showToast(`✓ 已复制 ${label}`, "info");
+      showToast(t("✓ 已复制 {__0__}", { __0__: (label) }), "info");
     } catch {
       showToast("剪贴板不可用", "error");
     }
@@ -299,9 +300,9 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
   const pagerBar = (pg: { page: number; totalPages: number; total: number; needed: boolean; prev: () => void; next: () => void }) =>
     pg.needed ? (
       <div className="pager">
-        <button className="pager-btn" onClick={pg.prev} disabled={pg.page === 0}>‹ 上一页</button>
+        <button className="pager-btn" onClick={pg.prev} disabled={pg.page === 0}>{t("‹ 上一页")}</button>
         <span className="pager-info">{pg.page + 1} / {pg.totalPages} 页 · 共 {pg.total} 条</span>
-        <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>下一页 ›</button>
+        <button className="pager-btn" onClick={pg.next} disabled={pg.page >= pg.totalPages - 1}>{t("下一页 ›")}</button>
       </div>
     ) : null;
 
@@ -342,7 +343,7 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
     return (
       <div key={i} className={`kb-item ${done?.is ? "done" : ""}`}>
         {done ? (
-          <span className="todo-check" title={done.is ? "标记未完成" : "标记已完成"} onClick={done.toggle}>
+          <span className="todo-check" title={done.is ? t("标记未完成") : t("标记已完成")} onClick={done.toggle}>
             {done.is ? "☑" : "☐"}
           </span>
         ) : (
@@ -354,11 +355,11 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
         <button
           className="kb-src"
           onClick={() => onJump(item.conversation_id, item.message_id)}
-          title={item.message_id ? "跳转到对应消息" : "跳转到会话"}
+          title={item.message_id ? t("跳转到对应消息") : t("跳转到会话")}
         >
-          {item.title || "(无标题)"}
+          {item.title || t("(无标题)")}
         </button>
-        <button className="kb-copy" title={`复制${copyLabel}文本`} onClick={() => copyText(bodyText, copyLabel)}>📋</button>
+        <button className="kb-copy" title={t("复制{__0__}文本", { __0__: (copyLabel) })} onClick={() => copyText(bodyText, copyLabel)}>📋</button>
       </div>
     );
   };
@@ -372,27 +373,27 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               className="link-like"
               style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
               onClick={() => setModalKind("versions")}
-              title="查看已提取会话的版本历史"
+              title={t("查看已提取会话的版本历史")}
             >已提取 {kb.extracted}</button>
             {" / "}
             <span>{kb.total_conversations} 会话</span>
-            {" · 未提取 "}
+            {t(" · 未提取 ")}
             <button
               className="link-like"
               style={{ background: "none", border: "none", padding: 0, color: "inherit", cursor: "pointer", textDecoration: "underline" }}
               onClick={() => setModalKind("pending")}
-              title="查看尚未提取的会话清单"
+              title={t("查看尚未提取的会话清单")}
             >{(kb.pending ?? []).length}</button>
-            {" · 上次 "}{relativeTime(kb.last_extract_ms)}
+            {t(" · 上次 ")}{relativeTime(kb.last_extract_ms)}
           </>
-        ) : <LoadingText text="正在加载知识库…" />} trailing={<>
+        ) : <LoadingText text={t("正在加载知识库…")} />} trailing={<>
           <button className="action-btn" disabled={extracting}
             onClick={() => runExtract(false)}>
-            {extracting ? "提取中…" : kb && kb.extracted > 0 ? "↻ 提取新会话" : "▶ 首次提取全部"}
+            {extracting ? t("提取中…") : kb && kb.extracted > 0 ? t("↻ 提取新会话") : t("▶ 首次提取全部")}
           </button>
           {kb && kb.extracted > 0 && kb.extracted < kb.total_conversations && (
             <button className="action-btn" disabled={extracting}
-              onClick={() => runExtract(true)} title="重新提取全部（含已提取）">重提全部</button>
+              onClick={() => runExtract(true)} title={t("重新提取全部（含已提取）")}>{t("重提全部")}</button>
           )}
           {kb && kb.extracted > 0 && (
             <button className="action-btn"
@@ -401,10 +402,10 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                   await navigator.clipboard.writeText(knowledgeBaseToMarkdown(kb));
                   showToast("✓ 知识库纪要已复制到剪贴板", "info");
                 } catch { showToast("剪贴板不可用", "error"); }
-              }} title="全部知识导出为 Markdown 纪要（含 TODO 完成状态）">导出纪要</button>
+              }} title={t("全部知识导出为 Markdown 纪要（含 TODO 完成状态）")}>{t("导出纪要")}</button>
           )}
-        </>}>知识库</CardTitle>
-        <MiniProgressShim show={extracting} label="知识提取" />
+        </>}>{t("知识库")}</CardTitle>
+        <MiniProgressShim show={extracting} label={t("知识提取")} />
         {empty && (
           <div className="ops-table-empty">
             还没有积累任何知识——点击「首次提取全部」，把所有会话中的决策 / TODO / 命令 / 文件沉淀为可检索的知识库。
@@ -413,15 +414,15 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
         {kb && kb.extracted > 0 && (
           <>
             <div className="kb-grid">
-              <div className="kb-stat"><b>{openTodos}</b><span>未完成 TODO</span></div>
-              <div className="kb-stat"><b>{kb.decisions.length}</b><span>决策</span></div>
-              <div className="kb-stat"><b>{(kb.summaries ?? []).length}</b><span>摘要</span></div>
-              <div className="kb-stat"><b>{(kb.errors ?? []).length}</b><span>错误</span></div>
-              <div className="kb-stat"><b>{kb.top_commands.length}</b><span>常用命令</span></div>
-              <div className="kb-stat"><b>{kb.top_files.length}</b><span>高频文件</span></div>
+              <div className="kb-stat"><b>{openTodos}</b><span>{t("未完成 TODO")}</span></div>
+              <div className="kb-stat"><b>{kb.decisions.length}</b><span>{t("决策")}</span></div>
+              <div className="kb-stat"><b>{(kb.summaries ?? []).length}</b><span>{t("摘要")}</span></div>
+              <div className="kb-stat"><b>{(kb.errors ?? []).length}</b><span>{t("错误")}</span></div>
+              <div className="kb-stat"><b>{kb.top_commands.length}</b><span>{t("常用命令")}</span></div>
+              <div className="kb-stat"><b>{kb.top_files.length}</b><span>{t("高频文件")}</span></div>
             </div>
             {kb.todos.length > 0 && (
-              <div className="kb-progress" title={`已了结 ${doneCount} / 共 ${kb.todos.length} 条 TODO（完成或过期）`}>
+              <div className="kb-progress" title={t("已了结 {__0__} / 共 {__1__} 条 TODO（完成或过期）", { __0__: (doneCount), __1__: (kb.todos.length) })}>
                 <div className="kb-progress-bar"><div className="kb-progress-fill" style={{ width: `${doneRatio}%` }} /></div>
                 <span className="kb-progress-label">✅ {doneCount} / {kb.todos.length} TODO 已了结（完成或过期）· {doneRatio.toFixed(0)}%</span>
               </div>
@@ -436,17 +437,17 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             <div className="scope-bar" style={{ alignItems: "center" }}>
               {([
                 ["todos", `TODO（${filtered.todos.length}）`],
-                ["decisions", `决策（${filtered.decisions.length}）`],
-                ["summaries", `摘要（${filtered.summaries.length}）`],
-                ["errors", `错误（${filtered.errors.length}）`],
-                ["prompts", `我的提问（收藏 ${favPrompts.length}）`],
+                ["decisions", t("决策（{__0__}）", { __0__: (filtered.decisions.length) })],
+                ["summaries", t("摘要（{__0__}）", { __0__: (filtered.summaries.length) })],
+                ["errors", t("错误（{__0__}）", { __0__: (filtered.errors.length) })],
+                ["prompts", t("我的提问（收藏 {__0__}）", { __0__: (favPrompts.length) })],
               ] as const).map(([k, label]) => (
                 <button key={k} className={`scope-chip ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{label}</button>
               ))}
               <label
                 className="scope-chip"
                 style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, userSelect: "none" }}
-                title="提取器判定「已完成 / 过期」的条目默认隐藏——点勾选框可复活单条"
+                title={t("提取器判定「已完成 / 过期」的条目默认隐藏——点勾选框可复活单条")}
               >
                 <input
                   type="checkbox"
@@ -456,13 +457,13 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                     localStorage.setItem("ch-todo-hide-done", e.target.checked ? "1" : "0");
                   }}
                 />
-                隐藏已完成
+                {t("隐藏已完成")}
               </label>
               <input
                 ref={searchRef}
                 className="settings-confirm-input"
                 style={{ marginLeft: "auto", width: 180, fontSize: 12 }}
-                placeholder="🔍 搜索知识条目…（⌘F）"
+                placeholder={t("🔍 搜索知识条目…（⌘F）")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -472,12 +473,12 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                 {todoPager.slice.length === 0 && (
                   <div className="ops-table-empty">
                     {search
-                      ? "🔍 无匹配条目"
+                      ? t("🔍 无匹配条目")
                       : kb?.todos.length === 0
-                        ? "🎯 当前没有提取到 TODO —— 多用 Agent 处理任务后再提取"
+                        ? t("🎯 当前没有提取到 TODO —— 多用 Agent 处理任务后再提取")
                         : hideDone
-                          ? "✅ 没有未完成的 TODO —— 关闭「隐藏已完成」可查看全部历史条目"
-                          : "✅ 所有 TODO 都已勾选完成"}
+                          ? t("✅ 没有未完成的 TODO —— 关闭「隐藏已完成」可查看全部历史条目")
+                          : t("✅ 所有 TODO 都已勾选完成")}
                   </div>
                 )}
                 {todoPager.slice.map((t, i) => {
@@ -495,10 +496,10 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               <div className="kb-list">
                 {decisionPager.slice.length === 0 && (
                   <div className="ops-table-empty">
-                    {search ? "🔍 无匹配条目" : "🎯 还没有决策记录 —— 让 Agent 多做方案对比、选型讨论"}
+                    {search ? t("🔍 无匹配条目") : t("🎯 还没有决策记录 —— 让 Agent 多做方案对比、选型讨论")}
                   </div>
                 )}
-                {decisionPager.slice.map((d, i) => kbItemRow(d, i, "🎯", "决策", d.text ?? ""))}
+                {decisionPager.slice.map((d, i) => kbItemRow(d, i, "🎯", t("决策"), d.text ?? ""))}
                 {pagerBar(decisionPager)}
               </div>
             )}
@@ -506,10 +507,10 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               <div className="kb-list">
                 {summaryPager.slice.length === 0 && (
                   <div className="ops-table-empty">
-                    {search ? "🔍 无匹配条目" : "📖 还没有摘要 —— 多数会话都已自动生成主题/问题/要点摘要"}
+                    {search ? t("🔍 无匹配条目") : t("📖 还没有摘要 —— 多数会话都已自动生成主题/问题/要点摘要")}
                   </div>
                 )}
-                {summaryPager.slice.map((s, i) => kbItemRow(s, i, "📖", "摘要", s.summary ?? s.text ?? ""))}
+                {summaryPager.slice.map((s, i) => kbItemRow(s, i, "📖", t("摘要"), s.summary ?? s.text ?? ""))}
                 {pagerBar(summaryPager)}
               </div>
             )}
@@ -517,17 +518,17 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
               <div className="kb-list">
                 {errorPager.slice.length === 0 && (
                   <div className="ops-table-empty">
-                    {search ? "🔍 无匹配条目" : "❌ 还没有错误记录 —— 多数正常会话不会触发"}
+                    {search ? t("🔍 无匹配条目") : t("❌ 还没有错误记录 —— 多数正常会话不会触发")}
                   </div>
                 )}
-                {errorPager.slice.map((e, i) => kbItemRow(e, i, "❌", "错误", e.error ?? e.text ?? ""))}
+                {errorPager.slice.map((e, i) => kbItemRow(e, i, "❌", t("错误"), e.error ?? e.text ?? ""))}
                 {pagerBar(errorPager)}
               </div>
             )}
             {tab === "prompts" && (
               <div className="kb-list">
                 {favPrompts.length === 0 && (
-                  <div className="ops-table-empty">还没有收藏的提问 —— 在下方点 ☆ 把好用的 prompt 沉淀下来</div>
+                  <div className="ops-table-empty">{t("还没有收藏的提问 —— 在下方点 ☆ 把好用的 prompt 沉淀下来")}</div>
                 )}
                 {favPrompts.map((p) => (
                   <div key={`fav-${p.message_id}`} className="kb-item">
@@ -536,14 +537,14 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                     <button
                       className="kb-src"
                       onClick={() => onJump(p.conversation_id, p.message_id)}
-                      title="跳转到该提问"
+                      title={t("跳转到该提问")}
                     >
                       {p.title}
                     </button>
-                    <button className="kb-copy" title="复制 prompt" onClick={() => copyText(p.text, "prompt")}>📋</button>
+                    <button className="kb-copy" title={t("复制 prompt")} onClick={() => copyText(p.text, "prompt")}>📋</button>
                   </div>
                 ))}
-                {promptPager.slice.length > 0 && <div className="automation-sub">最近提问（点 ☆ 收藏）</div>}
+                {promptPager.slice.length > 0 && <div className="automation-sub">{t("最近提问（点 ☆ 收藏）")}</div>}
                 {promptPager.slice.map((p) => (
                   <div key={p.message_id} className="kb-item">
                     <span className={`fav-toggle ${favs.includes(p.message_id) ? "on" : ""}`}
@@ -552,11 +553,11 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                     <button
                       className="kb-src"
                       onClick={() => onJump(p.conversation_id, p.message_id)}
-                      title="跳转到该提问"
+                      title={t("跳转到该提问")}
                     >
                       {p.title}
                     </button>
-                    <button className="kb-copy" title="复制 prompt" onClick={() => copyText(p.text, "prompt")}>📋</button>
+                    <button className="kb-copy" title={t("复制 prompt")} onClick={() => copyText(p.text, "prompt")}>📋</button>
                   </div>
                 ))}
                 {pagerBar(promptPager)}
@@ -565,8 +566,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           </div>
 
           <div className="ops-card">
-            <CardTitle icon="terminal">常用命令 Top 20</CardTitle>
-            {filtered.topCommands.length === 0 ? <div className="ops-table-empty">{search ? "无匹配" : "无数据"}</div> : (
+            <CardTitle icon="terminal">{t("常用命令 Top 20")}</CardTitle>
+            {filtered.topCommands.length === 0 ? <div className="ops-table-empty">{search ? t("无匹配") : t("无数据")}</div> : (
               <div className="kb-list">
                 {filtered.topCommands.map((c, i) => (
                   <div key={i} className="kb-item">
@@ -576,9 +577,9 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                       <button
                         className="kb-src"
                         onClick={() => onJump(c.last_conversation_id!)}
-                        title="跳转到最近一次使用此命令的会话"
+                        title={t("跳转到最近一次使用此命令的会话")}
                       >
-                        跳到会话 ↗
+                        {t("跳到会话 ↗")}
                       </button>
                     )}
                   </div>
@@ -588,8 +589,8 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           </div>
 
           <div className="ops-card">
-            <CardTitle icon="file">高频文件 Top 20</CardTitle>
-            {filtered.topFiles.length === 0 ? <div className="ops-table-empty">{search ? "无匹配" : "无数据"}</div> : (
+            <CardTitle icon="file">{t("高频文件 Top 20")}</CardTitle>
+            {filtered.topFiles.length === 0 ? <div className="ops-table-empty">{search ? t("无匹配") : t("无数据")}</div> : (
               <div className="kb-list">
                 {filtered.topFiles.map((f, i) => (
                   <div key={i} className="kb-item">
@@ -599,9 +600,9 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
                       <button
                         className="kb-src"
                         onClick={() => onJump(f.last_conversation_id!)}
-                        title="跳转到最近一次涉及此文件的会话"
+                        title={t("跳转到最近一次涉及此文件的会话")}
                       >
-                        跳到会话 ↗
+                        {t("跳到会话 ↗")}
                       </button>
                     )}
                   </div>
@@ -618,11 +619,11 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
           <div className="settings-modal" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
             <div className="settings-header">
               <h2>
-                {modalKind === "pending" ? "⏳ 未提取的会话" : "🗂 提取版本历史"}
+                {modalKind === "pending" ? t("⏳ 未提取的会话") : t("🗂 提取版本历史")}
                 <span className="ops-card-sub" style={{ marginLeft: 8 }}>
                   {modalKind === "pending"
-                    ? `共 ${(kb.pending ?? []).length} 条`
-                    : `共 ${(kb.versions ?? []).length} 条`}
+                    ? t("共 {__0__} 条", { __0__: ((kb.pending ?? []).length) })
+                    : t("共 {__0__} 条", { __0__: ((kb.versions ?? []).length) })}
                 </span>
               </h2>
               <button className="settings-close" onClick={() => setModalKind(null)}>✕</button>
@@ -630,25 +631,25 @@ export default function KnowledgeView({ onJump }: { onJump: (conversationId: str
             <div className="settings-body" style={{ padding: 12 }}>
               {modalKind === "pending" && (
                 (kb.pending ?? []).length === 0
-                  ? <div className="ops-table-empty">所有会话都已提取</div>
+                  ? <div className="ops-table-empty">{t("所有会话都已提取")}</div>
                   : (kb.pending ?? []).map((p) => (
                       <div key={p.id} className="kb-item">
                         <span className="badge source">{p.provider}</span>
                         <span className="kb-text" title={p.title}>{p.title}</span>
                         <span className="kb-src" style={{ color: "var(--text-muted)" }}>{relativeTime(p.updated_at_ms)}</span>
-                        <button className="kb-src" onClick={() => onJump(p.id)} title="跳转到该会话">跳到会话 ↗</button>
+                        <button className="kb-src" onClick={() => onJump(p.id)} title={t("跳转到该会话")}>{t("跳到会话 ↗")}</button>
                       </div>
                     ))
               )}
               {modalKind === "versions" && (
                 (kb.versions ?? []).length === 0
-                  ? <div className="ops-table-empty">暂无提取记录</div>
+                  ? <div className="ops-table-empty">{t("暂无提取记录")}</div>
                   : (kb.versions ?? []).map((v) => (
                       <div key={v.conversation_id} className="kb-item">
                         <span className="badge source">v{v.version}</span>
                         <span className="kb-text" title={v.title}>{v.title}</span>
                         <span className="kb-src" style={{ color: "var(--text-muted)" }}>{v.extractor} · {relativeTime(v.extracted_at)}</span>
-                        <button className="kb-src" onClick={() => onJump(v.conversation_id)} title="跳转到该会话">跳到会话 ↗</button>
+                        <button className="kb-src" onClick={() => onJump(v.conversation_id)} title={t("跳转到该会话")}>{t("跳到会话 ↗")}</button>
                       </div>
                     ))
               )}

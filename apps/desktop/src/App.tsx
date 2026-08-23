@@ -1,9 +1,11 @@
 // App 主组件：布局 + 状态管理 + 导航（组件已拆分到独立文件）
 import { useEffect, useRef, useState, useCallback } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { copyToClipboard } from "./clipboard";
+import { useLang } from "./i18n";
 import OpsView from "./OpsView";
 import ConversationList from "./ConversationList";
 import ConversationDetail from "./ConversationDetail";
@@ -38,26 +40,28 @@ type View = Page;
 
 // 侧栏分组：对话 / 治理 / 资料 — 每项带 SVG 图标名 + ⌘1..N 快捷键
 type NavItem = { view: View; icon: IconName; label: string; section: "primary" | "ops" | "library"; shortcut: string };
-const NAV_ITEMS: readonly NavItem[] = [
-  { view: "chat",      icon: "chat",      label: "对话",   section: "primary", shortcut: "⌘1" },
-  { view: "overview",  icon: "overview",  label: "概览",   section: "ops",     shortcut: "⌘2" },
-  { view: "cost",      icon: "cost",      label: "成本",   section: "ops",     shortcut: "⌘3" },
-  { view: "security",  icon: "shield",    label: "安全",   section: "ops",     shortcut: "⌘4" },
-  { view: "activity",  icon: "calendar",  label: "活动",   section: "ops",     shortcut: "⌘5" },
-  { view: "knowledge", icon: "library",   label: "知识库", section: "library", shortcut: "⌘6" },
-  { view: "assets",    icon: "package",   label: "资产",   section: "library", shortcut: "⌘7" },
-  { view: "projects",  icon: "folder",    label: "项目",   section: "library", shortcut: "⌘8" },
+const NAV_ITEMS = (): readonly NavItem[] => [
+  { view: "chat",      icon: "chat",      label: t("对话"),   section: "primary", shortcut: "⌘1" },
+  { view: "overview",  icon: "overview",  label: t("概览"),   section: "ops",     shortcut: "⌘2" },
+  { view: "cost",      icon: "cost",      label: t("成本"),   section: "ops",     shortcut: "⌘3" },
+  { view: "security",  icon: "shield",    label: t("安全"),   section: "ops",     shortcut: "⌘4" },
+  { view: "activity",  icon: "calendar",  label: t("活动"),   section: "ops",     shortcut: "⌘5" },
+  { view: "knowledge", icon: "library",   label: t("知识库"), section: "library", shortcut: "⌘6" },
+  { view: "assets",    icon: "package",   label: t("资产"),   section: "library", shortcut: "⌘7" },
+  { view: "projects",  icon: "folder",    label: t("项目"),   section: "library", shortcut: "⌘8" },
 ] as const;
 
 /** 视图标签（用于 window.title 反映当前页）。 */
-const VIEW_LABEL: Record<View, string> = {
-  chat: "对话", overview: "概览", cost: "成本", security: "安全", assets: "资产",
-  knowledge: "知识库", activity: "活动", projects: "项目",
-};
+const VIEW_LABEL = (): Record<View, string> => ({
+  chat: t("对话"), overview: t("概览"), cost: t("成本"), security: t("安全"), assets: t("资产"),
+  knowledge: t("知识库"), activity: t("活动"), projects: t("项目"),
+});
 
 /** 底部状态栏已拆为独立组件 ./StatusBar.tsx（自管 1s 刷新，避免整树重渲染）。 */
 
 export default function App() {
+  // 语言：根组件订阅变化，key={lang} 整树重挂载使所有 t() 即时切换
+  const { lang, setLang } = useLang();
   // 默认始终进入「对话」tab（chat 是主操作页；其他页通过 ⌘1..8 / 侧栏 / ⌘K 跳转）
   // 之前从 ch-view 持久化恢复，但用户重启 app 时通常想从主操作开始
   const [view, setView] = useState<View>("chat");
@@ -202,19 +206,19 @@ export default function App() {
   function friendlyError(raw: string): string {
     const lower = raw.toLowerCase();
     if (lower.includes("reading 'invoke'") || lower.includes("reading \"invoke\"")) {
-      return "桌面运行时未就绪（请在 Tauri 桌面里打开 Webview，或检查应用启动是否完成）";
+      return t("桌面运行时未就绪（请在 Tauri 桌面里打开 Webview，或检查应用启动是否完成）");
     }
     if (lower.includes("network") || lower.includes("fetch")) {
-      return "网络异常，请检查连接后重试";
+      return t("网络异常，请检查连接后重试");
     }
     if (lower.includes("permission") || lower.includes("denied")) {
-      return "权限不足，请检查文件 / 系统权限";
+      return t("权限不足，请检查文件 / 系统权限");
     }
-    if (lower.includes("not found") || lower.includes("未找到")) {
-      return "未找到资源（可能已被删除）";
+    if (lower.includes("not found") || lower.includes(t("未找到"))) {
+      return t("未找到资源（可能已被删除）");
     }
-    if (lower.includes("数据库") || lower.includes("database") || lower.includes("sql")) {
-      return "数据库异常，建议重试或重启应用";
+    if (lower.includes(t("数据库")) || lower.includes("database") || lower.includes("sql")) {
+      return t("数据库异常，建议重试或重启应用");
     }
     // 其它错误：截断到 120 字符，避免超长堆栈
     return raw.length > 120 ? raw.slice(0, 117) + "…" : raw;
@@ -253,14 +257,14 @@ export default function App() {
       const parts: string[] = [];
       for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"]] as [string,string][]) {
         const ok = result[`${key}_imported`] ?? 0;
-        if (ok > 0) parts.push(`${label}: ${ok} 新`);
+        if (ok > 0) parts.push(t("{__0__}: {__1__} 新", { __0__: (label), __1__: (ok) }));
       }
       // 完成态统一为「已同步」：本次有导入则附明细，没有则「全部最新」
-      setSyncResult(parts.length > 0 ? `✓ 已同步 · ${parts.join(" | ")}` : "✓ 已同步 · 全部最新");
+      setSyncResult(parts.length > 0 ? t("✓ 已同步 · {__0__}", { __0__: parts.join(" | ") }) : t("✓ 已同步 · 全部最新"));
       await loadConversations();
     } catch (e) {
       const msg = typeof e === "string" ? e : String(e);
-      if (msg.includes("同步中") || msg.includes("重置中")) {
+      if (msg.includes(t("同步中")) || msg.includes(t("重置中"))) {
         // 已有同步在进行（多为启动自动同步与手点并发）：明确告知而非静默无反应
         if (!silent) showToast("⟳ 已有同步正在进行，完成后将自动刷新", "info");
       } else {
@@ -383,8 +387,8 @@ export default function App() {
     html.dataset.theme = theme;
     html.dataset.themeFading = "1";
     localStorage.setItem("ch-theme", theme);
-    const t = window.setTimeout(() => { delete html.dataset.themeFading; }, 240);
-    return () => window.clearTimeout(t);
+    const tmr = window.setTimeout(() => { delete html.dataset.themeFading; }, 240);
+    return () => window.clearTimeout(tmr);
   }, [theme]);
 
   useEffect(() => {
@@ -392,15 +396,15 @@ export default function App() {
     html.dataset.textSize = textSize;
     html.dataset.textSizeFading = "1";
     localStorage.setItem("ch-text-size", textSize);
-    const t = window.setTimeout(() => { delete html.dataset.textSizeFading; }, 240);
-    return () => window.clearTimeout(t);
+    const tmr = window.setTimeout(() => { delete html.dataset.textSizeFading; }, 240);
+    return () => window.clearTimeout(tmr);
   }, [textSize]);
   useEffect(() => { localStorage.setItem("ch-view", view); }, [view]);
   useEffect(() => { localStorage.setItem("ch-sidebar", sidebarCollapsed ? "1" : "0"); }, [sidebarCollapsed]);
   // Window title 反映当前页（OS 任务栏/活动指示友好）
   useEffect(() => {
-    const sub = selectedConv ? ` · ${selectedConv.user_title ?? selectedConv.title ?? "未命名"}` : "";
-    document.title = `Threadock · ${VIEW_LABEL[view]}${sub}`;
+    const sub = selectedConv ? ` · ${selectedConv.user_title ?? selectedConv.title ?? t("未命名")}` : "";
+    document.title = `Threadock · ${VIEW_LABEL()[view]}${sub}`;
   }, [view, selectedConv]);
 
   // 预算看门狗：预算/月用量/预测 → 全局预算条；超限且开启通知时弹一次（按月去重）
@@ -422,7 +426,7 @@ export default function App() {
         const key = `ch-budget-warned-${new Date().getFullYear()}-${new Date().getMonth()}`;
         if (!localStorage.getItem(key)) {
           localStorage.setItem(key, "1");
-          showToast(`⚠ 预算已超限：当月 $${info.costSoFar.toFixed(2)} / 预算 $${info.costLimit}`, "error", 10000);
+          showToast(t("⚠ 预算已超限：当月 ${__0__} / 预算 ${__1__}", { __0__: (info.costSoFar.toFixed(2)), __1__: (info.costLimit ?? 0) }), "error", 10000);
         }
       }
     } catch { /* 预算看门狗失败静默（空库等） */ }
@@ -432,7 +436,7 @@ export default function App() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loadConversations 内部同步 setConvsLoading(true)
     loadConversations();
-    const t = setTimeout(() => autoSync(), 600);
+    const tmr = setTimeout(() => autoSync(), 600);
     // 周报自动生成（>7 天落盘一份）+ 保留策略自动执行 + 预算刷新
     const t2 = setTimeout(async () => {
       refreshBudget();
@@ -440,17 +444,17 @@ export default function App() {
       refreshProviders();
       try {
         const r = await invoke<{ generated: boolean; path: string | null }>("weekly_report_auto", {});
-        if (r.generated && r.path) showToast(`📄 周报已自动生成：${r.path}`, "info", 8000);
+        if (r.generated && r.path) showToast(t("📄 周报已自动生成：{__0__}", { __0__: (r.path) }), "info", 8000);
       } catch { /* 失败静默：后台/可选操作 */ }
       try {
         const days = Number(localStorage.getItem("ch-retention-days") ?? "0");
         if (days > 0) {
           const r = await invoke<{ archived: number }>("retention_apply", { days });
-          if (r.archived > 0) showToast(`🗄 保留策略：自动归档 ${r.archived} 条 ${days} 天前的会话`, "info");
+          if (r.archived > 0) showToast(t("🗄 保留策略：自动归档 {__0__} 条 {__1__} 天前的会话", { __0__: (r.archived), __1__: (days) }), "info");
         }
       } catch { /* 失败静默：后台/可选操作 */ }
     }, 3000);
-    return () => { clearTimeout(t); clearTimeout(t2); };
+    return () => { clearTimeout(tmr); clearTimeout(t2); };
     // 仅挂载时执行一次（初始加载 + 延迟自动同步/周报/保留策略）；
     // 引用的函数每次渲染重建，加入依赖会导致重复触发，有意省略。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -494,8 +498,8 @@ export default function App() {
           e.preventDefault();
           const id = selectedConv.source_conversation_id || selectedConv.id;
           void copyToClipboard(id).then((r) => {
-            if (r.ok) showToast(`✓ 已复制会话 ID：${id}`, "info", 1800);
-            else showToast(`✗ 复制失败：${r.error ?? "未知错误"}`, "error", 2500);
+            if (r.ok) showToast(t("✓ 已复制会话 ID：{__0__}", { __0__: (id) }), "info", 1800);
+            else showToast(`✗ 复制失败：${r.error ?? t("未知错误")}`, "error", 2500);
           });
           return;
         }
@@ -792,7 +796,7 @@ export default function App() {
     }
     if (engine === "llm") {
       setExtractLog([
-        `[${stamp()}] 开始 AI 提取：${selectedConv.user_title ?? selectedConv.title ?? ""}`,
+        t("[{__0__}] 开始 AI 提取：{__1__}", { __0__: stamp(), __1__: selectedConv.user_title ?? selectedConv.title ?? "" }),
       ]);
     } else if (engineArg !== "llm" && engineArg !== "rule") {
       setExtractLog([]);
@@ -810,11 +814,11 @@ export default function App() {
     } catch (e) {
       const reason = typeof e === "string" ? e : (e as { message?: string }).message ?? String(e);
       if (engine === "llm") {
-        setExtractLog((log) => [...log, `[${stamp()}] ✗ 提取失败：${reason}`]);
+        setExtractLog((log) => [...log, t("[{__0__}] ✗ 提取失败：{__1__}", { __0__: (stamp()), __1__: (reason) })]);
         await refreshRuns();
       }
       // 提取失败不打断浏览：toast 呈现原因（此前弹 error-banner 会被误认为页面异常）
-      showToast(`知识提取失败：${reason}`, "error");
+      showToast(t("知识提取失败：{__0__}", { __0__: (reason) }), "error");
     }
   };
 
@@ -825,7 +829,7 @@ export default function App() {
       const result = await invoke<ImportResultDto>("import_file", { path: selected, workspaceName: null });
       await loadConversations();
       refreshNewCount();
-      alert(`✓ 导入成功\n消息 ${result.messages} 条 · 完整度 ${result.completeness}`);
+      alert(t("✓ 导入成功\n消息 {__0__} 条 · 完整度 {__1__}", { __0__: (result.messages), __1__: (result.completeness) }));
     } catch (e) { showError(e); }
   };
   // ↑ 单 IDE 导入（按 ZCode/Claude/Cursor/MiniMax/Codex 单独 list + 选择性 import）已下线。
@@ -877,7 +881,7 @@ export default function App() {
       await invoke("set_archived", { id: c.id, archived: !c.archived });
       await loadConversations();
       if (selectedConv?.id === c.id) setSelectedConv({ ...selectedConv, archived: !c.archived });
-      showToast(!c.archived ? "🗄 已归档" : "📤 已取消归档");
+      showToast(!c.archived ? t("🗄 已归档") : t("📤 已取消归档"));
     } catch (e) { showError(e); }
   };
   // 共享软删 + 撤销 toast 助手（单条 / 批量共用，避免「两个命令 + source_conversation_id」错位）
@@ -890,8 +894,8 @@ export default function App() {
     await loadConversations();
     if (selectedConv && snapshot.some((c) => c.id === selectedConv.id)) setSelectedConv(null);
     const label = snapshot.length === 1
-      ? `🗑 已移入回收站（${snapshot[0].user_title ?? snapshot[0].title ?? "未命名"}）`
-      : `🗑 已删除 ${snapshot.length} 条会话`;
+      ? t("🗑 已移入回收站（{__0__}）", { __0__: snapshot[0].user_title ?? snapshot[0].title ?? t("未命名") })
+      : t("🗑 已删除 {__0__} 条会话", { __0__: (snapshot.length) });
     showToast(
       label,
       "info",
@@ -902,9 +906,9 @@ export default function App() {
           catch { /* 单条失败不影响整体 */ }
         }
         await loadConversations();
-        showToast(`↩ 已恢复 ${snapshot.length} 条会话`, "info");
+        showToast(t("↩ 已恢复 {__0__} 条会话", { __0__: (snapshot.length) }), "info");
       },
-      "撤销删除",
+      t("撤销删除"),
     );
   };
   // 单条删除（带 undo）：薄壳转共享助手
@@ -933,8 +937,8 @@ export default function App() {
     try {
       const findings = await invoke<unknown[]>("audit_scan_conversation", { conversationId: selectedConv.id });
       showToast(findings.length > 0
-        ? `🔍 重扫完成：${findings.length} 条发现（详见安全页）`
-        : "🔍 重扫完成：本会话无发现", findings.length > 0 ? "warn" : "info");
+        ? t("🔍 重扫完成：{__0__} 条发现（详见安全页）", { __0__: (findings.length) })
+        : t("🔍 重扫完成：本会话无发现"), findings.length > 0 ? "warn" : "info");
     } catch (e) { showError(e); }
   };
 
@@ -968,28 +972,28 @@ export default function App() {
       const conv = await invoke<Conversation | null>("get_conversation_by_source", { provider, sourceConversationId: sourceConvId });
       if (loadSeqRef.current !== seq) return;
       if (conv) await selectConversation(conv, messageId ?? undefined);
-      else setError("未找到对应会话");
+      else setError(t("未找到对应会话"));
     } catch (e) { showError(e); }
   };
 
   // ── render ──
   return (
-    <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div key={lang} className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       {/* 无障碍：跳到主内容（Tab 1 可见，其它隐藏） */}
-      <a href="#main-content" className="skip-to-content">跳到主内容</a>
+      <a href="#main-content" className="skip-to-content">{t("跳到主内容")}</a>
       <nav className="sidebar" style={{ width: sidebarCollapsed ? 56 : sidebarWidth }}>
-        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? "展开侧栏" : "收起侧栏"}>
+        <button className="sidebar-toggle" onClick={() => setSidebarCollapsed(!sidebarCollapsed)} title={sidebarCollapsed ? t("展开侧栏") : t("收起侧栏")}>
           <Icon name={sidebarCollapsed ? "chevron-right" : "chevron-left"} size={12} />
         </button>
         {(["primary", "ops", "library"] as const).map((section, i) => (
           <div key={section} className="sidebar-section">
             {!sidebarCollapsed && (
               <div className="sidebar-section-label">
-                {section === "primary" ? "对话" : section === "ops" ? "治理" : "资料"}
+                {section === "primary" ? t("对话") : section === "ops" ? t("治理") : t("资料")}
               </div>
             )}
             {i > 0 && <div className="sidebar-divider" />}
-            {NAV_ITEMS.filter((it) => it.section === section).map((it) => (
+            {NAV_ITEMS().filter((it) => it.section === section).map((it) => (
               <button
                 key={it.view}
                 className={`nav-item ${view === it.view ? "active" : ""}`}
@@ -1010,7 +1014,7 @@ export default function App() {
         <Resizer
           className="sidebar-resizer"
           onDrag={(dx) => setSidebarWidth((w) => { const n = Math.round(w + dx); const c = Math.max(120, Math.min(320, n)); saveNumber("ch-sidebar-width", c); return c; })}
-          title="拖拽调整侧边栏宽度"
+          title={t("拖拽调整侧边栏宽度")}
         />
       )}
 
@@ -1028,15 +1032,15 @@ export default function App() {
                 void loadConversations();
                 refreshNewCount();
               }}
-              title="重新尝试当前操作"
+              title={t("重新尝试当前操作")}
             >
               <Icon name="sync" size={11} /> 重试
             </button>
             <button
               className="error-banner-close"
               onClick={(e) => { e.stopPropagation(); setError(null); }}
-              title="关闭（点击 banner 任意处也可关闭）"
-              aria-label="关闭错误提示"
+              title={t("关闭（点击 banner 任意处也可关闭）")}
+              aria-label={t("关闭错误提示")}
             >
               <Icon name="close" size={12} />
             </button>
@@ -1047,7 +1051,7 @@ export default function App() {
         <div className="app-body-main">
 
         <div className="topbar">
-          <button className="brand" onClick={() => setView("overview")} title="Threadock · 回到概览">
+          <button className="brand" onClick={() => setView("overview")} title={t("Threadock · 回到概览")}>
             <span className="brand-mark"><Icon name="logo" size={14} /></span>
             <span className="brand-name">Threadock</span>
           </button>
@@ -1056,15 +1060,15 @@ export default function App() {
               <span className="sync-status syncing-chip">
                 <span className="dot" />
                 {syncProgress && syncProgress.total > 0
-                  ? `导入中 ${syncProgress.current}/${syncProgress.total}${syncProgress.detail && syncProgress.detail !== "done" ? ` · ${syncProgress.detail}` : ""}`
-                  : "数据更新中…"}
-                <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>取消</button>
+                  ? t("导入中 {__0__}/{__1__}", { __0__: syncProgress.current, __1__: syncProgress.total }) + (syncProgress.detail && syncProgress.detail !== "done" ? ` · ${syncProgress.detail}` : "")
+                  : t("数据更新中…")}
+                <button className="sync-cancel" onClick={() => invoke("cancel_sync").catch(() => { /* 后台任务失败不打断 UI */ })}>{t("取消")}</button>
               </span>
             ) : syncResult && <span className="sync-status done"><span className="dot" />{syncResult}</span>}
 
             <div className="search-box">
               <div className="search-input-wrap">
-                <input ref={searchInputRef} type="text" placeholder="搜索全部会话 · 支持 provider:/workspace:/type: 前缀"
+                <input ref={searchInputRef} type="text" placeholder={t("搜索全部会话 · 支持 provider:/workspace:/type: 前缀")}
                   value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyDown={(e) => {
                     // Esc：先清空搜索内容（含搜索模式），停止传播避免触发全局 Esc
@@ -1078,39 +1082,39 @@ export default function App() {
                   onFocus={() => setHistoryOpen(true)}
                   onBlur={() => window.setTimeout(() => setHistoryOpen(false), 180)} />
                 {searchQuery && (
-                  <button className="search-box-clear" title="清空搜索（Esc）"
+                  <button className="search-box-clear" title={t("清空搜索（Esc）")}
                     onClick={() => { clearSearchMode(); searchInputRef.current?.focus(); }}>✕</button>
                 )}
               </div>
               <Icon name="search" size={14} className="search-icon" />
               <div className="search-actions">
-                <button onClick={() => doSearch()}>搜索</button>
+                <button onClick={() => doSearch()}>{t("搜索")}</button>
               </div>
               {historyOpen && (searchHistory.length > 0 || savedSearches.length > 0) && !searchGroups && (
                 <div className="search-history-dropdown" onMouseDown={(e) => e.preventDefault()}>
                   {savedSearches.length > 0 && (
                     <div className="search-history-head">
-                      <span>保存的搜索</span>
+                      <span>{t("保存的搜索")}</span>
                     </div>
                   )}
                   {savedSearches.map((s) => (
                     <button key={s.id} className="search-history-item" onClick={() => { setSearchQuery(s.query_text); setHistoryOpen(false); doSearch(s.query_text); }}>
                       <span className="search-history-q">⭐ {s.name}</span>
-                      <span className="search-history-del" title="删除这条保存的搜索"
+                      <span className="search-history-del" title={t("删除这条保存的搜索")}
                         onClick={(e) => { e.stopPropagation(); deleteSavedSearch(s.id); }}>×</span>
                     </button>
                   ))}
                   {searchHistory.length > 0 && (
                     <div className="search-history-head">
-                      <span>最近搜索</span>
-                      <button className="kb-copy" onClick={clearSearchHistory} title="清空全部历史">清空</button>
+                      <span>{t("最近搜索")}</span>
+                      <button className="kb-copy" onClick={clearSearchHistory} title={t("清空全部历史")}>{t("清空")}</button>
                     </div>
                   )}
                   {searchHistory.map((q) => (
                     <button key={q} className="search-history-item" onClick={() => { setSearchQuery(q); setHistoryOpen(false); doSearch(q); }}>
                       <span className="search-history-q">{q}</span>
                       <span className="search-history-hint">↵</span>
-                      <span className="search-history-del" title="删除这条历史"
+                      <span className="search-history-del" title={t("删除这条历史")}
                         onClick={(e) => { e.stopPropagation(); removeSearchHistory(q); }}>×</span>
                     </button>
                   ))}
@@ -1124,7 +1128,7 @@ export default function App() {
           <button
             className={`topbar-terminal-toggle ${bottomOpen ? "active" : ""} ${view !== "chat" ? "solo" : ""}`}
             onClick={toggleBottom}
-            title="底部终端面板（⌘J）"
+            title={t("底部终端面板（⌘J）")}
             data-testid="bottom-terminal-toggle"
           >
             <Icon name="terminal" size={14} />
@@ -1148,17 +1152,17 @@ export default function App() {
           <div className="topbar-actions">
             <button
               className="icon-btn"
-              title="命令面板 (⌘K)"
+              title={t("命令面板 (⌘K)")}
               onClick={() => setCmdOpen(true)}
-              aria-label="命令面板"
+              aria-label={t("命令面板")}
             ><Icon name="command" size={15} /></button>
             <button
               className="icon-btn"
-              title="快捷键速查 (⌘?)"
+              title={t("快捷键速查 (⌘?)")}
               onClick={() => setHelpOpen(true)}
-              aria-label="快捷键速查"
+              aria-label={t("快捷键速查")}
             ><Icon name="help" size={15} /></button>
-            <button className="icon-btn" title="设置" onClick={() => setSettingsOpen(true)} aria-label="设置">
+            <button className="icon-btn" title={t("设置")} onClick={() => setSettingsOpen(true)} aria-label={t("设置")}>
               <Icon name="settings" size={15} />
             </button>
           </div>
@@ -1175,14 +1179,14 @@ export default function App() {
             // 复用 selectConversation 走序号守卫路径（P0-3 + P1-A3 契约）
             const conv = conversations.find((c) => c.id === cid);
             if (conv) await selectConversation(conv, mid);
-            else showError(`未找到会话：${cid}`);
+            else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
           }}
           onAction={(action: CommandActionId) => {
             // P1-E3：⌘K 动作分发。映射到 App 已有 setState / 同步函数。
             switch (action) {
               case "open_settings": setSettingsOpen(true); break;
               case "trigger_sync": runManualSync(); showToast("⟳ 已触发同步", "info", 2000); break;
-              case "toggle_theme": changeTheme(theme === "dark" ? "light" : "dark"); showToast(`✓ 主题已切换：${theme === "dark" ? "浅色" : "深色"}`, "info", 1500); break;
+              case "toggle_theme": changeTheme(theme === "dark" ? "light" : "dark"); showToast(`✓ 主题已切换：${theme === "dark" ? t("浅色") : t("深色")}`, "info", 1500); break;
               case "show_shortcuts": setHelpOpen(true); break;
               case "open_reports": setReportsOpen(true); break;
               case "show_changelog": setChangelogOpen(true); break;
@@ -1207,7 +1211,7 @@ export default function App() {
               // 复用 selectConversation 走序号守卫（P0-3）
               const conv = conversations.find((c) => c.id === cid);
               if (conv) { setKnowledge(null); await selectConversation(conv); }
-              else showError(`未找到会话：${cid}`);
+              else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
             }}
           />
         )}
@@ -1228,6 +1232,7 @@ export default function App() {
 
         {settingsOpen && (
           <SettingsView theme={theme} onThemeChange={changeTheme}
+            lang={lang} onLangChange={setLang}
             textSize={textSize} onTextSizeChange={setTextSize}
             syncIntervalMin={syncIntervalMin} onSyncIntervalChange={changeSyncInterval}
             retentionDays={retentionDays} onRetentionDaysChange={changeRetentionDays}
@@ -1259,7 +1264,7 @@ export default function App() {
             // 复用 selectConversation 走序号守卫 + 滚动到 mid（P1-A3 契约：可选 message id）
             const conv = conversations.find((c) => c.id === cid);
             if (conv) await selectConversation(conv, mid);
-            else showError(`未找到会话：${cid}`);
+            else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
           }} />
         ) : view === "activity" ? (
           <ActivityView
@@ -1267,7 +1272,7 @@ export default function App() {
               setView("chat");
               const conv = conversations.find((c) => c.id === cid);
               if (conv) await selectConversation(conv);
-              else showError(`未找到会话：${cid}`);
+              else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
             }}
           />
         ) : view === "projects" ? (
@@ -1276,7 +1281,7 @@ export default function App() {
               setView("chat");
               const conv = conversations.find((c) => c.id === cid);
               if (conv) await selectConversation(conv);
-              else showError(`未找到会话：${cid}`);
+              else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
             }}
           />
         ) : view !== "chat" ? (
@@ -1322,7 +1327,7 @@ export default function App() {
                       for (const id of ids) {
                         try { await invoke("add_tag", { id, tag }); } catch { /* 单条失败不影响整体 */ }
                       }
-                      showToast(`✓ 已为 ${ids.length} 条会话加标签 #${tag}`, "info");
+                      showToast(t("✓ 已为 {__0__} 条会话加标签 #{__1__}", { __0__: (ids.length), __1__: (tag) }), "info");
                     }}
                     onBulkDelete={async (ids) => {
                       // 复用单条同款助手：避免「用 source_conversation_id 撤销导致恢复失败」
@@ -1332,7 +1337,7 @@ export default function App() {
                     onBulkSplit={async (ids, name) => {
                       try {
                         await invoke("workspace_split", { conversationIds: ids, newName: name });
-                        showToast(`✓ 已把 ${ids.length} 条会话拆分到「${name}」`, "info");
+                        showToast(t("✓ 已把 {__0__} 条会话拆分到「{__1__}」", { __0__: (ids.length), __1__: (name) }), "info");
                         loadConversations();
                       } catch (e) { showError(e); }
                     }}
@@ -1340,21 +1345,21 @@ export default function App() {
             </ScrollArea>
             <Resizer
               onDrag={(dx) => setListWidth((w) => { const n = Math.round(w + dx); const c = Math.max(240, Math.min(540, n)); saveNumber("ch-list-width", c); return c; })}
-              title="拖拽调整会话列表宽度"
+              title={t("拖拽调整会话列表宽度")}
             />
             {/* 右栏：命中步进条钉在滚动区域外（始终可见，不随内容滚走）+ 详情滚动区 */}
             <div className="detail-col" onWheel={paneSwipe}>
               {/* 命中步进条：当前会话树（主对话+子对话）内的全部命中，↑/↓ 跨会话跳转 */}
               {hitNav && (
                 <div className="hit-nav-bar">
-                  <span className="hit-nav-query" title="当前搜索关键词">🎯 {hitNav.query}</span>
+                  <span className="hit-nav-query" title={t("当前搜索关键词")}>🎯 {hitNav.query}</span>
                   <span className="hit-nav-count">
-                    {hitNav.hits.length === 0 ? "无命中" : `${hitNav.idx + 1} / ${hitNav.hits.length}`}
+                    {hitNav.hits.length === 0 ? t("无命中") : `${hitNav.idx + 1} / ${hitNav.hits.length}`}
                   </span>
-                  <button className="msg-search-btn" onClick={() => stepHits(-1)} disabled={hitNav.hits.length < 2} title="上一处命中（↑）">↑</button>
-                  <button className="msg-search-btn" onClick={() => stepHits(1)} disabled={hitNav.hits.length < 2} title="下一处命中（↓）">↓</button>
+                  <button className="msg-search-btn" onClick={() => stepHits(-1)} disabled={hitNav.hits.length < 2} title={t("上一处命中（↑）")}>↑</button>
+                  <button className="msg-search-btn" onClick={() => stepHits(1)} disabled={hitNav.hits.length < 2} title={t("下一处命中（↓）")}>↓</button>
                   <span className="hit-nav-hint">↑/↓ 在主对话与子对话的命中间跳转</span>
-                  <button className="msg-search-btn" onClick={clearSearchMode} title="退出搜索模式（Esc）">✕</button>
+                  <button className="msg-search-btn" onClick={clearSearchMode} title={t("退出搜索模式（Esc）")}>✕</button>
                 </div>
               )}
               <ScrollArea ref={detailPanelRef} style={{ flex: 1 }}>
@@ -1374,7 +1379,7 @@ export default function App() {
                         await invoke("set_conversation_note", { id: selectedConv.id, note: text });
                         setNoteText(text);
                       } catch (e) {
-                        showToast(`保存笔记失败：${String(e)}`, "error");
+                        showToast(t("保存笔记失败：{__0__}", { __0__: (String(e)) }), "error");
                       }
                     }}
                     allTags={allTags}
@@ -1385,9 +1390,9 @@ export default function App() {
                         const next = { ...selectedConv!, user_title: title };
                         setSelectedConv(next);
                         setConversations((p) => p.map((c) => c.id === next.id ? next : c));
-                        showToast(title ? "✓ 标题已更新" : "✓ 已恢复原始标题", "info", 2000);
+                        showToast(title ? t("✓ 标题已更新") : t("✓ 已恢复原始标题"), "info", 2000);
                       } catch (e) {
-                        showToast(`改标题失败：${String(e)}`, "error");
+                        showToast(t("改标题失败：{__0__}", { __0__: (String(e)) }), "error");
                       }
                     }}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
@@ -1397,14 +1402,14 @@ export default function App() {
                   <EmptyState
                     icon="mailbox"
                     size="lg"
-                    title="还没有任何会话"
+                    title={t("还没有任何会话")}
                     desc={<>把 Cursor / Claude Code / ZCode / Codex 里的历史对话同步进来，统一管理。</>}
                     action={
                       <>
                         <button className="action-btn primary" onClick={() => setImportMenu(true)}>
                           <Icon name="sync" size={12} /> 立即同步
                         </button>
-                        <span className="empty-hint-muted">或按 <kbd>⌘K</kbd> 唤起命令面板</span>
+                        <span className="empty-hint-muted">{t("或按")} <kbd>⌘K</kbd>{t("唤起命令面板")}</span>
                       </>
                     }
                   />
@@ -1413,8 +1418,8 @@ export default function App() {
                     icon="chat"
                     size="lg"
                     state={convsLoading ? "loading" : "default"}
-                    title={convsLoading ? "正在拉取会话列表" : "选择一条会话查看详情"}
-                    desc={convsLoading ? undefined : <>试试按 <kbd>⌘K</kbd> 搜索会话，或 <kbd>⌘1</kbd> 跳到本视图</>}
+                    title={convsLoading ? t("正在拉取会话列表") : t("选择一条会话查看详情")}
+                    desc={convsLoading ? undefined : <>试试按 <kbd>⌘K</kbd> 搜索会话，或 <kbd>⌘1</kbd>{t("跳到本视图")}</>}
                   />
                 )}
               </ScrollArea>
@@ -1430,7 +1435,7 @@ export default function App() {
           onClose={toggleBottom}
           onHeightChange={resizeBottom}
         />
-        <StatusBar syncResult={syncResult} syncing={syncing} viewLabel={VIEW_LABEL[view]} />
+        <StatusBar syncResult={syncResult} syncing={syncing} viewLabel={VIEW_LABEL()[view]} />
       </div>
     </div>
   );

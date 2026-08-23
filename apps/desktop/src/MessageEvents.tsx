@@ -2,6 +2,7 @@
 //（完整摘要 / 状态 / 起止时间与耗时 / payload JSON）。超过 4 条折叠，
 // 「还有 N 条」展开——避免长工程会话一条消息挂几十个工具调用撑爆 DOM。
 import { useState } from "react";
+import { t } from "./i18n";
 import { eventTypeLabel, formatTime } from "./types";
 import type { EventDto } from "./types";
 import { EVENT_ROWS_COLLAPSED } from "./eventGrouping";
@@ -63,7 +64,7 @@ function EventRow({ e }: { e: EventDto }) {
       <button
         className={`msg-event-row ${e.event_type === "error" ? "is-error" : ""}`}
         onClick={() => setOpen((o) => !o)}
-        title={open ? "收起详情" : "展开详情"}
+        title={open ? t("收起详情") : t("展开详情")}
       >
         <span className="msg-event-icon">{EVENT_ICONS[e.event_type] ?? "⚙"}</span>
         <span className="msg-event-type">{eventTypeLabel(e.event_type)}</span>
@@ -97,7 +98,7 @@ export default function MessageEvents({ events, label }: { events: EventDto[]; l
         </button>
       )}
       {expanded && events.length > EVENT_ROWS_COLLAPSED && (
-        <button className="msg-event-more" onClick={() => setExpanded(false)}>收起 ▴</button>
+        <button className="msg-event-more" onClick={() => setExpanded(false)}>{t("收起 ▴")}</button>
       )}
     </div>
   );
