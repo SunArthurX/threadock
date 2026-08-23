@@ -87,7 +87,9 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
                  WHERE json_extract(c.record_json, '$.parentSessionId') = s.session_id) AS max_child_updated
          FROM local_runtime_sessions s
          WHERE json_extract(s.record_json, '$.parentSessionId') IS NULL
-           AND json_extract(s.record_json, '$.title') IS NOT NULL
+           AND (json_extract(s.record_json, '$.title') IS NOT NULL
+                OR EXISTS (SELECT 1 FROM local_runtime_message_rows m
+                           WHERE m.session_id = s.session_id))
          ORDER BY max_child_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -141,7 +143,8 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
 /// 列出 `MiniMax` **所有**会话（主任务 + 子任务），按更新时间降序。
 /// 用于 `auto_sync：主任务先导入（source_parent_id=null），子任务后导入（source_parent_id=父ID`）。
 /// 过滤 runtime 内部残留：MiniMax 的子任务 visibility=hidden 是正常形态（保留），
-/// 仅排除 `record_json` 无 title 字段的空残根（__`local_runtime_v2`__ 生成）。
+/// 仅排除无 title **且**无消息的空残根（__`local_runtime_v2`__ 生成）——
+/// v2 branch 会话无标题但有真实消息，必须保留（否则最新数据不同步）。
 pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
     let mut stmt = conn.prepare(
@@ -155,6 +158,8 @@ pub fn discover_all_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Dis
                 json_extract(s.record_json, '$.parentSessionId') AS parent
          FROM local_runtime_sessions s
          WHERE json_extract(s.record_json, '$.title') IS NOT NULL
+            OR EXISTS (SELECT 1 FROM local_runtime_message_rows m
+                       WHERE m.session_id = s.session_id)
          ORDER BY effective_updated DESC",
     )?;
     let rows = stmt.query_map([], |r| {
@@ -304,6 +309,8 @@ pub fn parse_session(
         return Err(MinimaxError::Empty(session_id.to_string()));
     }
 
+    let title = title.or_else(|| fallback_title(&messages));
+
     Ok(RawConversation {
         provider: PROVIDER,
         source_conversation_id: session_id.to_string(),
@@ -314,6 +321,24 @@ pub fn parse_session(
         events,
         source_parent_id,
     })
+}
+
+/// v2 branch 会话常无 title：用首条 user 消息生成标题，避免入库后
+/// 一排「(untitled)」无法区分（截 50 字符，超出加省略号）。
+fn fallback_title(messages: &[RawMessage]) -> Option<String> {
+    messages
+        .iter()
+        .find(|m| m.role == Role::User)
+        .and_then(|m| m.text.as_deref())
+        .map(|t| {
+            let mut chars = t.chars();
+            let head: String = chars.by_ref().take(50).collect();
+            if chars.next().is_some() {
+                format!("{head}…")
+            } else {
+                head
+            }
+        })
 }
 
 /// tool_calls[] → 事件（真实形态实测：{tool_name, tool_call_id,
@@ -555,6 +580,52 @@ mod tests {
             "无标题残根应排除"
         );
         assert_eq!(all[0].parent_session_id.as_deref(), Some("p1"));
+    }
+
+    /// 回归（2026-08-23 真实库发现）：MiniMax v2 运行时会生成
+    /// `sessionType=branch`、`visibility=hidden`、**无 title 但有大量真实消息**
+    /// 的主任务会话（实测最新一条 1389 条消息被挡在同步外）。
+    /// 残根判定必须收紧为「无 title **且** 无消息」。
+    #[test]
+    fn discover_keeps_untitled_sessions_with_messages() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("v2.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE local_runtime_sessions (session_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL);
+             CREATE TABLE local_runtime_message_rows (id INTEGER PRIMARY KEY, session_id TEXT, msg_id TEXT, role TEXT, turn_id TEXT, created_at_ms INTEGER, data_json TEXT);",
+        ).expect("unexpected None");
+        // 真实形态：v2 branch、无 title、hidden、有消息
+        conn.execute(
+            "INSERT INTO local_runtime_sessions VALUES ('b1', '{\"sessionId\":\"b1\",\"agentName\":\"__local_runtime_v2__\",\"sessionType\":\"branch\",\"visibility\":\"hidden\",\"archived\":true,\"createdAtMs\":1000}', 3000)",
+            [],
+        ).expect("database connection failed");
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('b1', 'm1', 'user', 1000, '{\"msg_content\":\"真实工作消息\"}')",
+            [],
+        ).expect("database connection failed");
+
+        let all = discover_all_sessions(&db).expect("unexpected None");
+        assert!(
+            all.iter().any(|s| s.session_id == "b1"),
+            "无标题但有真实消息的 v2 branch 会话必须被发现（否则最新数据不同步）"
+        );
+        let main = discover_sessions(&db).expect("unexpected None");
+        assert!(
+            main.iter().any(|s| s.session_id == "b1"),
+            "主任务列表同样必须包含（parentSessionId 为空即主任务）"
+        );
+        let hit = all
+            .iter()
+            .find(|s| s.session_id == "b1")
+            .expect("unexpected None");
+        assert_eq!(hit.message_count, 1);
+        assert_eq!(hit.title, "(无标题)");
+
+        // parse：无标题会话用首条 user 消息生成标题（GUI 不显示 (untitled)）
+        let raw = parse_session(&db, "b1").expect("parse failed");
+        assert_eq!(raw.title.as_deref(), Some("真实工作消息"));
     }
 
     #[test]
