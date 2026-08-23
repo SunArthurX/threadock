@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **MiniMax v2 无标题会话不同步**：v2 运行时生成的 `sessionType=branch`、
+  无 `title` 但有大量真实消息的会话（最新一条 1389 行消息，另有一批
+  08-16~08-19 同类）被「title IS NOT NULL」残根过滤整体挡在同步外。
+  残根判定收紧为「无标题且无消息」；无标题会话入库时用首条 user 消息
+  生成标题（截 50 字符），避免列表一排「(untitled)」
+- **MiniMax 内部事件 JSON 污染对话**：`msg_type=3` 的事件行
+  （`{"eventType":"todo_updated",...}`，role 为空被兜底成 user）曾被当
+  用户消息入库（真实库 462 条 / 35 会话）。适配器双判据过滤
+  （msg_type=3 或载荷含 eventType）；schema V16 迁移清洗存量
+  （FTS 触发器联动；tantivy 索引随重建排除）。附带修正
+  `migrate_to(target)` 循环缺上限、会越界应用更高版本的框架缺陷
+
 ## [1.3.0] - 2026-08-23（重设）
 
 知识提取 rule-v2（TODO 完成态）+ AI 提取全链路重构（经验导向 prompt-v3 / 落库 / 实时日志）+ GLM/MiniMax 兼容修复 + 规则引擎 27 倍提速 + 自动化任务三档分组。

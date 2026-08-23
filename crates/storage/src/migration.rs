@@ -11,7 +11,7 @@ use ch_domain::now_utc;
 use rusqlite::Connection;
 
 /// 当前 schema 目标版本。
-pub const LATEST_VERSION: u32 = 15;
+pub const LATEST_VERSION: u32 = 16;
 
 /// 一个迁移步骤：版本号 + 描述 + SQL。
 struct Migration {
@@ -98,6 +98,11 @@ fn migrations() -> Vec<Migration> {
             description: "llm extract run log (success & failure)",
             sql: crate::schema::SCHEMA_V15,
         },
+        Migration {
+            version: 16,
+            description: "purge MiniMax internal event messages (todo_updated etc.)",
+            sql: crate::schema::SCHEMA_V16,
+        },
     ]
 }
 
@@ -143,6 +148,9 @@ pub fn migrate_to(conn: &mut Connection, target: u32) -> StorageResult<()> {
     for m in migrations() {
         if m.version <= current {
             continue;
+        }
+        if m.version > target {
+            break;
         }
         apply_migration(conn, &m)?;
         current = m.version;
@@ -391,6 +399,61 @@ mod tests {
         migrate_to_latest(&mut conn).expect("database connection failed");
         let err = migrate_to(&mut conn, 0).expect_err("version 0 must fail");
         assert!(matches!(err, StorageError::Migration { .. }));
+    }
+
+    /// V16：MiniMax 内部事件消息清洗——只删事件 JSON 存量，正常消息与 FTS 联动正确。
+    #[test]
+    fn v16_purges_event_messages_only() {
+        let mut conn = fresh_conn();
+        migrate_to(&mut conn, 15).expect("database connection failed");
+        assert_eq!(
+            current_version(&conn).expect("database connection failed"),
+            15,
+            "migrate_to(15) 不得越界应用更高版本（此前循环缺 target 上限）"
+        );
+
+        // 造数据：provider / conversation / 两条消息（一条事件 JSON、一条正常）
+        conn.execute(
+            "INSERT INTO providers (id, name, adapter_id, adapter_version, created_at, updated_at)
+             VALUES ('p', 'p', 'a', 'v', 0, 0)",
+            [],
+        )
+        .expect("database connection failed");
+        conn.execute(
+            "INSERT INTO conversations (id, provider_id, source_conversation_id, updated_at)
+             VALUES ('c1', 'p', 's1', 0)",
+            [],
+        )
+        .expect("database connection failed");
+        for (mid, body) in [
+            ("m_event", r#"{"eventType":"todo_updated","todos":[]}"#),
+            ("m_normal", "正常的用户提问"),
+        ] {
+            conn.execute(
+                "INSERT INTO messages (id, conversation_id, role, content_text, sequence_number, content_hash, created_at)
+                 VALUES (?1, 'c1', 'user', ?2, 1, ?3, 0)",
+                rusqlite::params![mid, body, format!("h-{mid}")],
+            )
+            .expect("database connection failed");
+        }
+        let fts_before: i64 = conn
+            .query_row("SELECT count(*) FROM messages_fts", [], |r| r.get(0))
+            .expect("unexpected None");
+        assert_eq!(fts_before, 2, "两条都进 FTS");
+
+        migrate_to_latest(&mut conn).expect("database connection failed");
+        let left: i64 = conn
+            .query_row("SELECT count(*) FROM messages", [], |r| r.get(0))
+            .expect("unexpected None");
+        assert_eq!(left, 1, "只删事件消息");
+        let fts_after: i64 = conn
+            .query_row("SELECT count(*) FROM messages_fts", [], |r| r.get(0))
+            .expect("unexpected None");
+        assert_eq!(fts_after, 1, "FTS 触发器联动清理");
+        let body: String = conn
+            .query_row("SELECT content_text FROM messages", [], |r| r.get(0))
+            .expect("unexpected None");
+        assert_eq!(body, "正常的用户提问");
     }
 
     #[test]
