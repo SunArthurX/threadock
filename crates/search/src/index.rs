@@ -1,16 +1,18 @@
 //! Tantivy 索引实现：schema、分词、增删查、重建。
 
 use crate::error::{SearchError, SearchResult as LibResult};
-use ch_domain::{Provider, Role};
-use std::path::Path;
+use ch_domain::{Provider, Role, Timestamp};
+use std::path::PathBuf;
 // Provider::from_str 需要trait 在作用域内（语法 provider: 前缀解析）
 use std::str::FromStr as _;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::query::{BooleanQuery, Occur, TermQuery};
-use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value};
+use tantivy::schema::{
+    Field, IndexRecordOption, NumericOptions, Schema, TextFieldIndexing, TextOptions, Value,
+};
 use tantivy::tokenizer::{LowerCaser, NgramTokenizer, RawTokenizer, TextAnalyzer};
-use tantivy::{doc, Index as TantivyIndex, IndexReader, IndexWriter, ReloadPolicy};
+use tantivy::{doc, Index as TantivyIndex, IndexReader, IndexWriter, Order, ReloadPolicy};
 
 /// IndexWriter 默认堆大小（15 MiB）：单 writer 场景的内存/性能平衡点。
 pub const DEFAULT_WRITER_HEAP: usize = 15_000_000;
@@ -26,7 +28,11 @@ pub struct SearchHit {
     pub title: Option<String>,
     /// 命中片段（已高亮）。
     pub snippet: String,
+    /// 相关性得分（时间序模式下为 0，排序依据见 `created_at_ms`）。
     pub score: f32,
+    /// 消息时间（unix 毫秒）。时间序模式下的排序键；旧索引（schema 无此
+    /// 字段）或未写入时间的消息为 None。
+    pub created_at_ms: Option<i64>,
 }
 
 /// 查询条件（与 `storage::search::SearchQuery` 对齐）。
@@ -87,6 +93,9 @@ impl SearchQuery {
 }
 
 /// 字段元信息（避免到处传 Field）。
+///
+/// `created_at_ms` 为时间序排序键（fast 字段）：既有索引 schema 里没有时
+/// 为 None——此时搜索退回相关性排序，直到调用方 `recreate` 后重建。
 struct SchemaFields {
     message_id: Field,
     conversation_id: Field,
@@ -95,6 +104,30 @@ struct SchemaFields {
     role: Field,
     title: Field,
     body: Field,
+    created_at_ms: Option<Field>,
+}
+
+/// 按名字从「索引实际 schema」解析字段。
+///
+/// 打开既有索引时 schema 来自 meta.json（代码 schema 仅在建索引时生效），
+/// 必须按名解析而非复用代码 Field id——否则 schema 演进（如追加
+/// created_at_ms）后 id 与旧索引错位。`created_at_ms` 允许缺席（旧 schema）。
+fn resolve_fields(schema: &Schema) -> LibResult<SchemaFields> {
+    let need = |name: &str| {
+        schema
+            .get_field(name)
+            .map_err(|_| SearchError::Tantivy(format!("index schema lacks field {name:?}")))
+    };
+    Ok(SchemaFields {
+        message_id: need("message_id")?,
+        conversation_id: need("conversation_id")?,
+        provider: need("provider")?,
+        workspace_id: need("workspace_id")?,
+        role: need("role")?,
+        title: need("title")?,
+        body: need("body")?,
+        created_at_ms: schema.get_field("created_at_ms").ok(),
+    })
 }
 
 /// 中文分词器选择（plan §13.1「分词器可插拔 + N-gram 兜底」）。
@@ -143,16 +176,21 @@ fn build_schema(tokenizer: ChineseTokenizer) -> (Schema, SchemaFields) {
         )
         .set_stored();
 
-    let fields = SchemaFields {
-        message_id: schema_builder.add_text_field("message_id", id_opts.clone()),
-        conversation_id: schema_builder.add_text_field("conversation_id", id_opts.clone()),
-        provider: schema_builder.add_text_field("provider", id_opts.clone()),
-        workspace_id: schema_builder.add_text_field("workspace_id", id_opts.clone()),
-        role: schema_builder.add_text_field("role", id_opts),
-        title: schema_builder.add_text_field("title", text_opts.clone()),
-        body: schema_builder.add_text_field("body", text_opts),
-    };
-    (schema_builder.build(), fields)
+    // 消息时间（unix 毫秒）：fast 字段，时间倒序排序键。字段句柄一律按名
+    // 从索引实际 schema 解析（见 resolve_fields），旧 schema 缺此字段时为
+    // None：写入跳过、排序回退相关性，直到 recreate + 重建
+    schema_builder.add_i64_field("created_at_ms", NumericOptions::default().set_fast());
+
+    schema_builder.add_text_field("message_id", id_opts.clone());
+    schema_builder.add_text_field("conversation_id", id_opts.clone());
+    schema_builder.add_text_field("provider", id_opts.clone());
+    schema_builder.add_text_field("workspace_id", id_opts.clone());
+    schema_builder.add_text_field("role", id_opts);
+    schema_builder.add_text_field("title", text_opts.clone());
+    schema_builder.add_text_field("body", text_opts);
+    let schema = schema_builder.build();
+    let fields = resolve_fields(&schema).expect("freshly built schema resolves");
+    (schema, fields)
 }
 
 /// 注册分词器：ngram（默认）+ raw（ID 精确匹配）+ jieba（可选 feature）。
@@ -257,6 +295,10 @@ pub struct SearchIndex {
     index: TantivyIndex,
     reader: IndexReader,
     fields: SchemaFields,
+    /// 索引目录（`recreate` 时原地重建用）。
+    path: Option<PathBuf>,
+    /// 创建索引时用的分词器（`recreate` 保持一致）。
+    tokenizer: ChineseTokenizer,
 }
 
 /// 待索引的一条消息（由调用方从主数据组装）。
@@ -269,11 +311,19 @@ pub struct IndexableMessage {
     pub role: Role,
     pub title: Option<String>,
     pub body: Option<String>,
+    /// 消息时间：写入 `created_at_ms` fast 字段，时间倒序排序键。
+    /// None（未知/旧索引无此字段）排序时视为最旧。
+    pub created_at: Option<Timestamp>,
+}
+
+/// `OffsetDateTime` → unix 毫秒（fast 字段精度，足够排序区分消息）。
+fn ts_unix_ms(ts: &Timestamp) -> i64 {
+    ts.unix_timestamp() * 1000 + i64::from(ts.millisecond())
 }
 
 impl SearchIndex {
     /// 打开（或创建）位于 `path` 的持久化索引（默认 N-gram 分词）。
-    pub fn open(path: impl AsRef<Path>) -> LibResult<Self> {
+    pub fn open(path: impl AsRef<std::path::Path>) -> LibResult<Self> {
         Self::open_with_tokenizer(path, ChineseTokenizer::NGram)
     }
 
@@ -282,23 +332,25 @@ impl SearchIndex {
     /// 注意：既有索引的 schema 固定了创建时的分词器；切换分词器后必须
     /// 重建索引（delete_all + 重灌），否则新旧文档分词不一致导致漏召回。
     pub fn open_with_tokenizer(
-        path: impl AsRef<Path>,
+        path: impl AsRef<std::path::Path>,
         tokenizer: ChineseTokenizer,
     ) -> LibResult<Self> {
-        let (schema, fields) = build_schema(tokenizer);
-        let path_ref = path.as_ref();
-        std::fs::create_dir_all(path_ref)?;
+        let (schema, _) = build_schema(tokenizer);
+        let path_buf = path.as_ref().to_path_buf();
+        std::fs::create_dir_all(&path_buf)?;
         // 判断目录是否已有索引（含 meta.json）
-        let meta_exists = path_ref.join("meta.json").exists();
+        let meta_exists = path_buf.join("meta.json").exists();
         let index = if meta_exists {
-            TantivyIndex::open_in_dir(path_ref).map_err(|e| SearchError::Tantivy(e.to_string()))?
+            TantivyIndex::open_in_dir(&path_buf).map_err(|e| SearchError::Tantivy(e.to_string()))?
         } else {
             TantivyIndex::builder()
                 .schema(schema)
-                .create_in_dir(path_ref)
+                .create_in_dir(&path_buf)
                 .map_err(|e| SearchError::Tantivy(e.to_string()))?
         };
         register_tokenizers(&index);
+        // 字段按名解析自索引实际 schema（旧 schema 缺 created_at_ms → None）
+        let fields = resolve_fields(&index.schema())?;
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
@@ -308,6 +360,8 @@ impl SearchIndex {
             index,
             reader,
             fields,
+            path: Some(path_buf),
+            tokenizer,
         })
     }
 
@@ -318,9 +372,10 @@ impl SearchIndex {
 
     /// 创建指定分词器的内存索引（测试 / jieba 验证用）。
     pub fn open_in_memory_with(tokenizer: ChineseTokenizer) -> LibResult<Self> {
-        let (schema, fields) = build_schema(tokenizer);
+        let (schema, _) = build_schema(tokenizer);
         let index = TantivyIndex::create_in_ram(schema);
         register_tokenizers(&index);
+        let fields = resolve_fields(&index.schema())?;
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
@@ -330,7 +385,57 @@ impl SearchIndex {
             index,
             reader,
             fields,
+            path: None,
+            tokenizer,
         })
+    }
+
+    /// 索引 schema 是否含 `created_at_ms`（时间倒序排序就绪）。
+    ///
+    /// false = 旧 schema 索引：搜索回退相关性排序；调用方应 `recreate`
+    /// 后从主数据全量重灌以启用时间序（GUI 启动时自动做）。
+    #[must_use]
+    pub fn has_time_field(&self) -> bool {
+        self.fields.created_at_ms.is_some()
+    }
+
+    /// 原地重建索引目录：删除后按当前代码 schema 新建（空索引）。
+    ///
+    /// schema 演进（如新增 created_at_ms）后由调用方触发，随后从主数据
+    /// 全量重灌。仅支持持久化索引（内存索引没有目录）。unix 语义下删除
+    /// 仍被旧 reader 映射的文件是安全的；此方法后旧 writer/reader 全部失效，
+    /// 调用方不得再持有。
+    pub fn recreate(&mut self) -> LibResult<()> {
+        let path = self
+            .path
+            .clone()
+            .ok_or_else(|| SearchError::Tantivy("in-memory index cannot recreate".into()))?;
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+        let (schema, _) = build_schema(self.tokenizer);
+        std::fs::create_dir_all(&path)?;
+        let index = TantivyIndex::builder()
+            .schema(schema)
+            .create_in_dir(&path)
+            .map_err(|e| SearchError::Tantivy(e.to_string()))?;
+        register_tokenizers(&index);
+        let fields = resolve_fields(&index.schema())?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .map_err(|e| SearchError::Tantivy(e.to_string()))?;
+        *self = Self {
+            index,
+            reader,
+            fields,
+            path: Some(path),
+            tokenizer: self.tokenizer,
+        };
+        Ok(())
     }
 
     /// 创建一个 writer（调用方负责 commit）。
@@ -362,6 +467,9 @@ impl SearchIndex {
         }
         if let Some(b) = &m.body {
             doc.add_text(f.body, b);
+        }
+        if let (Some(ts_field), Some(ts)) = (f.created_at_ms, m.created_at.as_ref()) {
+            doc.add_i64(ts_field, ts_unix_ms(ts));
         }
         writer
             .add_document(doc)
@@ -463,38 +571,35 @@ impl SearchIndex {
         }
 
         let bool_query = BooleanQuery::new(clauses);
-        // tantivy 0.26: TopDocs 现在是 builder，with_limit 返 TopDocs（不 impl Collector），
-        // 必须链 .order_by_score() 才能拿到 impl Collector<Fruit = Vec<(Score, DocAddress)>>
-        let top = TopDocs::with_limit(q.limit).order_by_score();
-        let hits = searcher
-            .search(&bool_query, &top)
-            .map_err(|e| SearchError::Tantivy(e.to_string()))?;
+        // 收集器：schema 含 created_at_ms 时按消息时间倒序（全局取 top-N，
+        // 不受相关性截断）；旧索引无此字段时回退 BM25 相关性
+        //（tantivy 0.26: TopDocs 是 builder，with_limit 返 TopDocs 不 impl
+        //  Collector，必须链 order_by_* 才拿到 Collector）
+        let hits: Vec<(Option<i64>, tantivy::DocAddress)> = if f.created_at_ms.is_some() {
+            let top = TopDocs::with_limit(q.limit)
+                .order_by_fast_field::<i64>("created_at_ms", Order::Desc);
+            searcher
+                .search(&bool_query, &top)
+                .map_err(|e| SearchError::Tantivy(e.to_string()))?
+        } else {
+            let top = TopDocs::with_limit(q.limit).order_by_score();
+            searcher
+                .search(&bool_query, &top)
+                .map_err(|e| SearchError::Tantivy(e.to_string()))?
+                .into_iter()
+                .map(|(_score, addr)| (None, addr))
+                .collect()
+        };
 
         let mut results = Vec::with_capacity(hits.len());
-        for (score, doc_addr) in hits {
-            let doc: tantivy::TantivyDocument = searcher
-                .doc(doc_addr)
-                .map_err(|e| SearchError::Tantivy(e.to_string()))?;
-            let get = |field: Field| -> Option<String> {
-                doc.get_first(field)
-                    .and_then(|v| v.as_str().map(std::string::ToString::to_string))
-            };
-            let provider_str = get(f.provider).unwrap_or_default();
-            let role_str = get(f.role).unwrap_or_default();
-            // 高亮命中片段：取 body 的前若干字符，标记查询词（仅自由文本部分）
-            let body = get(f.body).unwrap_or_default();
-            let snippet = make_snippet(&body, &parsed.text);
-
-            results.push(SearchHit {
-                message_id: get(f.message_id).unwrap_or_default(),
-                conversation_id: get(f.conversation_id).unwrap_or_default(),
-                provider: provider_str.parse().unwrap_or(Provider::Unknown),
-                workspace_id: get(f.workspace_id),
-                role: parse_role(&role_str),
-                title: get(f.title),
-                snippet,
-                score,
-            });
+        for (created_at_ms, doc_addr) in hits {
+            results.push(hit_from_doc(
+                &searcher,
+                doc_addr,
+                f,
+                &parsed.text,
+                created_at_ms,
+            )?);
         }
         Ok(results)
     }
@@ -530,6 +635,39 @@ impl SearchIndex {
             .map_err(|e| SearchError::Tantivy(e.to_string()))?;
         Ok(())
     }
+}
+
+/// 取回命中文档并组装 SearchHit（时间序模式下无相关性得分，score 恒 0）。
+fn hit_from_doc(
+    searcher: &tantivy::Searcher,
+    doc_addr: tantivy::DocAddress,
+    f: &SchemaFields,
+    query_text: &str,
+    created_at_ms: Option<i64>,
+) -> LibResult<SearchHit> {
+    let doc: tantivy::TantivyDocument = searcher
+        .doc(doc_addr)
+        .map_err(|e| SearchError::Tantivy(e.to_string()))?;
+    let get = |field: Field| -> Option<String> {
+        doc.get_first(field)
+            .and_then(|v| v.as_str().map(std::string::ToString::to_string))
+    };
+    let provider_str = get(f.provider).unwrap_or_default();
+    let role_str = get(f.role).unwrap_or_default();
+    // 高亮命中片段：取 body 的前若干字符，标记查询词（仅自由文本部分）
+    let body = get(f.body).unwrap_or_default();
+    let snippet = make_snippet(&body, query_text);
+    Ok(SearchHit {
+        message_id: get(f.message_id).unwrap_or_default(),
+        conversation_id: get(f.conversation_id).unwrap_or_default(),
+        provider: provider_str.parse().unwrap_or(Provider::Unknown),
+        workspace_id: get(f.workspace_id),
+        role: parse_role(&role_str),
+        title: get(f.title),
+        snippet,
+        score: 0.0,
+        created_at_ms,
+    })
 }
 
 fn parse_role(s: &str) -> Role {
@@ -614,6 +752,7 @@ mod tests {
             role: Role::User,
             title: Some(title.into()),
             body: Some(body.into()),
+            created_at: None,
         }
     }
 
@@ -706,6 +845,7 @@ mod tests {
                 role: Role::User,
                 title: Some("t".into()),
                 body: Some("search keyword here".into()),
+                created_at: None,
             },
         )
         .expect("unexpected None");
@@ -719,6 +859,7 @@ mod tests {
                 role: Role::User,
                 title: Some("t".into()),
                 body: Some("search keyword here".into()),
+                created_at: None,
             },
         )
         .expect("unexpected None");
@@ -937,6 +1078,7 @@ mod tests {
                     role: Role::Assistant,
                     title: Some("t".into()),
                     body: Some("assistant answers feature".into()),
+                    created_at: None,
                 },
             ],
         );
@@ -985,6 +1127,7 @@ mod tests {
                     role: Role::Assistant,
                     title: Some("t".into()),
                     body: Some("assistant answers feature".into()),
+                    created_at: None,
                 },
             ],
         );
@@ -1038,5 +1181,147 @@ mod tests {
             )
             .expect("unexpected None");
         assert_eq!(hits.len(), 2);
+    }
+
+    // ── 时间倒序排序（created_at_ms fast 字段）────────────────────────
+
+    fn ts(secs: i64) -> Timestamp {
+        Timestamp::from_unix_timestamp(secs).expect("timestamp out of range")
+    }
+
+    #[test]
+    fn search_orders_by_time_desc() {
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        // 故意让最旧的消息词频最高（相关性最强）：时间序必须压过相关性
+        let old = IndexableMessage {
+            created_at: Some(ts(1_700_000_000)),
+            ..msg("m_old", "c_old", "旧", "配置 配置 配置 配置 最早的消息")
+        };
+        let mid = IndexableMessage {
+            created_at: Some(ts(1_750_000_000)),
+            ..msg("m_mid", "c_mid", "中", "配置 中间的消息")
+        };
+        let new = IndexableMessage {
+            created_at: Some(ts(1_800_000_000)),
+            ..msg("m_new", "c_new", "新", "配置 最新的消息")
+        };
+        for m in [&old, &mid, &new] {
+            idx.index_message(&mut writer, m).expect("file I/O failed");
+        }
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(&SearchQuery::new("配置"))
+            .expect("SQL execution failed");
+        assert_eq!(hits.len(), 3, "三条都应命中");
+        let ids: Vec<&str> = hits.iter().map(|h| h.message_id.as_str()).collect();
+        assert_eq!(ids, vec!["m_new", "m_mid", "m_old"], "按消息时间倒序");
+        assert!(hits[0].created_at_ms > hits[1].created_at_ms);
+    }
+
+    #[test]
+    fn time_order_not_truncated_by_relevance() {
+        // 时间序是「全局 top-N by 时间」：低相关但最新的消息必须排第一，
+        // 而不是先被相关性截断再排序
+        let idx = SearchIndex::open_in_memory().expect("unexpected None");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        for i in 0..30 {
+            let m = IndexableMessage {
+                created_at: Some(ts(1_700_000_000 + i)),
+                ..msg(&format!("m{i}"), "c1", "噪音", "配置 配置 配置 配置")
+            };
+            idx.index_message(&mut writer, &m).expect("file I/O failed");
+        }
+        let target = IndexableMessage {
+            created_at: Some(ts(1_900_000_000)),
+            ..msg("newest", "c2", "目标", "正文很长只出现一次配置")
+        };
+        idx.index_message(&mut writer, &target)
+            .expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
+
+        let hits = idx
+            .search(&SearchQuery::new("配置").with_limit(5))
+            .expect("SQL execution failed");
+        assert_eq!(hits.len(), 5);
+        assert_eq!(hits[0].message_id, "newest", "最新消息必须在时间序首位");
+    }
+
+    /// 旧 schema（无 created_at_ms）索引：打开不炸、搜索走相关性回退；
+    /// `recreate` 后 schema 更新、可重灌启用时间序——GUI 启动迁移依赖此链路。
+    #[test]
+    fn legacy_index_falls_back_then_recreate_upgrades() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let path = dir.path().join("idx");
+
+        // 1. 用「旧 schema」（7 字段，无 created_at_ms）手工建索引并灌一条
+        {
+            let mut b = Schema::builder();
+            let text_opts = TextOptions::default()
+                .set_indexing_options(
+                    TextFieldIndexing::default()
+                        .set_tokenizer("ngram")
+                        .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+                )
+                .set_stored();
+            let id_opts = TextOptions::default()
+                .set_indexing_options(
+                    TextFieldIndexing::default()
+                        .set_tokenizer("raw")
+                        .set_index_option(IndexRecordOption::Basic),
+                )
+                .set_stored();
+            let message_id = b.add_text_field("message_id", id_opts.clone());
+            b.add_text_field("conversation_id", id_opts.clone());
+            b.add_text_field("provider", id_opts.clone());
+            b.add_text_field("workspace_id", id_opts.clone());
+            b.add_text_field("role", id_opts);
+            b.add_text_field("title", text_opts.clone());
+            let body = b.add_text_field("body", text_opts);
+            std::fs::create_dir_all(&path).expect("mkdir");
+            let index = TantivyIndex::builder()
+                .schema(b.build())
+                .create_in_dir(&path)
+                .expect("create");
+            register_tokenizers(&index);
+            let mut w = index.writer(15_000_000).expect("writer");
+            w.add_document(doc!(message_id => "legacy1", body => "历史遗留消息"))
+                .expect("add doc");
+            w.commit().expect("commit");
+        }
+
+        // 2. 打开：无时间字段 → 搜索仍工作（相关性回退），命中无时间
+        let mut idx = SearchIndex::open(&path).expect("unexpected None");
+        assert!(!idx.has_time_field(), "旧 schema 不含时间字段");
+        let hits = idx
+            .search(&SearchQuery::new("遗留"))
+            .expect("SQL execution failed");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].created_at_ms, None, "回退模式命中无时间");
+
+        // 3. recreate：schema 升级、文档清空 → 重灌后时间序生效
+        idx.recreate().expect("recreate");
+        assert!(idx.has_time_field());
+        let empty = idx
+            .search(&SearchQuery::new("遗留"))
+            .expect("SQL execution failed");
+        assert!(empty.is_empty(), "recreate 后索引为空");
+        let mut writer = idx.writer(15_000_000).expect("file I/O failed");
+        idx.index_message(
+            &mut writer,
+            &IndexableMessage {
+                created_at: Some(ts(1_800_000_000)),
+                ..msg("fresh1", "c1", "新", "重灌后的遗留消息")
+            },
+        )
+        .expect("file I/O failed");
+        idx.commit(writer).expect("file I/O failed");
+        let hits = idx
+            .search(&SearchQuery::new("遗留"))
+            .expect("SQL execution failed");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].message_id, "fresh1");
+        assert!(hits[0].created_at_ms.is_some(), "时间随文档写入");
     }
 }

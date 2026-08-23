@@ -39,7 +39,7 @@ impl EngineHit {
 /// `base_limit` 为无 DB 后过滤时的条数上限；有过滤时超量拉取（≥200）避免
 /// 过滤后不足一页。空关键词 + 无过滤 + 无 workspace 前缀时走 FTS5 全量。
 fn engine_search(
-    state: &tauri::State<'_, DaemonState>,
+    state: &DaemonState,
     query: &str,
     role: Option<&str>,
     base_limit: usize,
@@ -76,13 +76,19 @@ fn engine_search(
     }
     // 优先走 Tantivy，降级 FTS5
     let idx = state.search_index.lock().map_err(|e| search_err(e))?;
-    let mut q = ch_search::SearchQuery::new(query).with_workspace_ids(ws_ids);
+    // 有 DB 后过滤时超量拉取，避免过滤后不足一页；limit 必须透传，
+    // 否则回落到 SearchQuery::new 默认 50——常见词命中上千条时低分
+    // 会话被整体截掉（「追问」实测 1609 命中 / 目标排名 179 搜不到）
+    let limit = if db_filter.is_some() {
+        base_limit.max(200)
+    } else {
+        base_limit
+    };
+    let mut q = ch_search::SearchQuery::new(query)
+        .with_workspace_ids(ws_ids)
+        .with_limit(limit);
     if let Some(r) = role {
         q = q.with_role(r.to_string());
-    }
-    // 有 DB 后过滤时超量拉取，避免过滤后不足一页
-    if db_filter.is_some() {
-        q = q.with_limit(base_limit.max(200));
     }
     let tantivy_hits = idx.search(&q).ok().map(|hits| {
         hits.into_iter()
@@ -115,7 +121,7 @@ fn engine_search(
 
 /// FTS5 降级路径（与原 `search` 命令的降级行为一致）。
 fn fts_search(
-    state: &tauri::State<'_, DaemonState>,
+    state: &DaemonState,
     query: &str,
     role: Option<&str>,
     limit: usize,
@@ -372,4 +378,113 @@ pub(crate) async fn prompt_reuse_search(
     let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
     repo.prompt_reuse_search(q, limit.unwrap_or(5))
         .map_err(|e| storage_err(e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ch_domain::{Provider, Role, Timestamp};
+    use ch_search::index::{IndexableMessage, DEFAULT_WRITER_HEAP};
+
+    fn ts(secs: i64) -> Timestamp {
+        Timestamp::from_unix_timestamp(secs).expect("timestamp out of range")
+    }
+
+    /// 回归：常见二元词（如「追问」）命中大量消息时，目标会话的低分命中
+    /// （长正文、词频 1）在时间序/相关性序下都可能落在 50 名之外。
+    /// `base_limit` 必须透传给 tantivy 查询，否则 `SearchQuery::new` 默认
+    /// limit=50 把它截掉，表现为「搜『追问』找不到，搜『追问详细答案』
+    /// 才找到」（2026-08-23 实测：真实索引「追问」命中 1609 条消息 /
+    /// 266 会话，目标消息排名 179）。
+    ///
+    /// 时间序下目标消息设为最旧（确定性）：噪音按时间倒序占满前 60 位，
+    /// 目标排 61 —— 任何 limit < 61 都会截掉它。
+    #[test]
+    fn engine_search_passes_base_limit_to_tantivy() {
+        let state = DaemonState::open_in_memory().expect("state open");
+        {
+            let idx = state.search_index.lock().expect("mutex poisoned");
+            let mut writer = idx.writer(DEFAULT_WRITER_HEAP).expect("writer");
+            // 60 条高词频噪音：越新排越前，目标（最旧）落在第 61 位
+            for i in 0..60 {
+                idx.index_message(
+                    &mut writer,
+                    &IndexableMessage {
+                        message_id: format!("noise_{i}"),
+                        conversation_id: format!("noise_conv_{i}"),
+                        provider: Provider::Generic,
+                        workspace_id: None,
+                        role: Role::User,
+                        title: Some(format!("噪音会话 {i}")),
+                        body: Some("追问 追问 追问 追问 追问".into()),
+                        created_at: Some(ts(1_700_000_000 + i)),
+                    },
+                )
+                .expect("index noise");
+            }
+            // 目标：长正文里「追问」只出现一次（作为「追问详细答案」的子串）
+            idx.index_message(
+                &mut writer,
+                &IndexableMessage {
+                    message_id: "target_1".into(),
+                    conversation_id: "target_conv".into(),
+                    provider: Provider::Generic,
+                    workspace_id: None,
+                    role: Role::User,
+                    title: Some("Java 高并发高可用架构师面试题生成".into()),
+                    body: Some(
+                        "生成 Java 架构师面试题库，每道题都要有追问详细答案，\
+                         覆盖高并发、数据库与高可用，输出为 Markdown 表格"
+                            .into(),
+                    ),
+                    created_at: Some(ts(1_600_000_000)),
+                },
+            )
+            .expect("index target");
+            idx.commit(writer).expect("commit");
+        }
+
+        let hits = engine_search(&state, "追问", None, 500).expect("engine_search");
+        assert!(
+            hits.iter().any(|h| h.conversation_id == "target_conv"),
+            "base_limit=500 时目标会话必须在结果内（实际返回 {} 条命中）",
+            hits.len()
+        );
+    }
+
+    /// 搜索结果按消息时间倒序（用户预期：最近的会话/消息排最前），
+    /// 且与相关性无关（词频最低的最新消息也排第一）。
+    #[test]
+    fn engine_search_orders_hits_by_time_desc() {
+        let state = DaemonState::open_in_memory().expect("state open");
+        {
+            let idx = state.search_index.lock().expect("mutex poisoned");
+            let mut writer = idx.writer(DEFAULT_WRITER_HEAP).expect("writer");
+            for (id, body, t) in [
+                ("old", "配置 配置 配置 配置 最早且词频最高", 1_700_000_000),
+                ("mid", "配置 中间的消息", 1_750_000_000),
+                ("new", "最新的消息提到配置", 1_800_000_000),
+            ] {
+                idx.index_message(
+                    &mut writer,
+                    &IndexableMessage {
+                        message_id: id.into(),
+                        conversation_id: format!("conv_{id}"),
+                        provider: Provider::Generic,
+                        workspace_id: None,
+                        role: Role::User,
+                        title: Some(id.into()),
+                        body: Some(body.into()),
+                        created_at: Some(ts(t)),
+                    },
+                )
+                .expect("index");
+            }
+            idx.commit(writer).expect("commit");
+        }
+
+        let hits = engine_search(&state, "配置", None, 50).expect("engine_search");
+        let ids: Vec<&str> = hits.iter().map(|h| h.message_id.as_str()).collect();
+        assert_eq!(ids, vec!["new", "mid", "old"], "命中按消息时间倒序");
+    }
 }

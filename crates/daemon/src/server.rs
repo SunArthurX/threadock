@@ -570,6 +570,7 @@ fn handle_sync(
             role: m.role,
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
+            created_at: m.created_at,
         };
         idx.index_message(&mut writer, &im)
             .map_err(|e| e.to_string())?;
@@ -694,6 +695,7 @@ mod tests {
                 role: Role::User,
                 title: Some("Daemon 测试".into()),
                 body: Some("搜索关键词 tauri".into()),
+                created_at: m.created_at,
             },
         )
         .expect("unexpected None");
