@@ -124,7 +124,7 @@ jobs:
           Compress-Archive -Path target/${{ matrix.target }}/release/ch.exe, target/${{ matrix.target }}/release/ch-daemon.exe, target/${{ matrix.target }}/release/ch-adapter-markdown.exe -DestinationPath ${{ matrix.archive }}
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.archive }}
 
