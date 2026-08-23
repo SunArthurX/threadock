@@ -2,6 +2,7 @@
 // 全部带入场动画：数值从 0 → 目标（0 到有值再到最大）。
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { t } from "./i18n";
 
 /** mount 后一帧置 true，触发 CSS transition 从 0 → 目标 */
 function useMounted(): boolean {
@@ -46,7 +47,7 @@ export function DonutChart({ slices, size = 160 }: { slices: DonutSlice[]; size?
   const [hover, setHover] = useState<{ i: number; x: number; y: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const total = slices.reduce((s, x) => s + x.value, 0);
-  if (total <= 0) return <div className="chart-empty">无数据</div>;
+  if (total <= 0) return <div className="chart-empty">{t("无数据")}</div>;
   const r = size / 2 - 14;
   const c = 2 * Math.PI * r;
   // 预计算每个扇区的 dashoffset（前序扇区累计占比 × 周长）；
@@ -165,7 +166,7 @@ export function BarChart({
   const [hover, setHover] = useState<{ i: number; x: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const items = data.slice(-30);
-  if (items.length === 0) return <div className="chart-empty">无数据</div>;
+  if (items.length === 0) return <div className="chart-empty">{t("无数据")}</div>;
   const max = Math.max(...items.map((d) => d.value), 1);
 
   const onMouseMove = (e: React.MouseEvent<HTMLDivElement>, i: number) => {

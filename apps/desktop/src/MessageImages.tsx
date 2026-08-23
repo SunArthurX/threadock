@@ -2,6 +2,7 @@
 // 已移动/删除显示灰色占位（告知用户为什么没图），加载错误显示原因。
 // 带模块级缓存：同一路径只读一次（切换会话/滚动不重复 IO 与 base64）。
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { extractLocalImagePaths } from "./localImages";
 
@@ -44,7 +45,7 @@ function InlineImage({ path }: { path: string }) {
 
   const short = path.length > 56 ? `…${path.slice(-54)}` : path;
   if (state === undefined) {
-    return <div className="msg-image msg-image-loading" title={path} aria-label="图片加载中" />;
+    return <div className="msg-image msg-image-loading" title={path} aria-label={t("图片加载中")} />;
   }
   if (state === null) {
     return (

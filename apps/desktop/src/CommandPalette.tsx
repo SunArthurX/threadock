@@ -1,6 +1,7 @@
 // 全站 Command Palette：⌘K / Ctrl+K 唤起
 // 支持：页面跳转、跳到指定会话、跳到知识条目、跳到活动页指定日期、内置动作
 import { useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
 import { formatTime } from "./types";
@@ -10,14 +11,14 @@ import { Icon, type IconName } from "./Icon";
 export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
 
 const PAGES: { key: Page; icon: IconName; label: string; hint: string }[] = [
-  { key: "chat", icon: "chat", label: "对话", hint: "会话列表 / 搜索" },
-  { key: "overview", icon: "overview", label: "概览", hint: "治理总览" },
-  { key: "cost", icon: "cost", label: "成本", hint: "成本 / 预算" },
-  { key: "security", icon: "shield", label: "安全", hint: "审计 / 风险" },
-  { key: "assets", icon: "package", label: "资产", hint: "技能 / 插件 / MCP" },
-  { key: "knowledge", icon: "library", label: "知识库", hint: "决策 / TODO / 提示词" },
-  { key: "activity", icon: "calendar", label: "活动", hint: "热力图 / 时段 / 工具" },
-  { key: "projects", icon: "folder", label: "项目", hint: "按 source_dir 归并" },
+  { key: "chat", icon: "chat", label: t("对话"), hint: "会话列表 / 搜索" },
+  { key: "overview", icon: "overview", label: t("概览"), hint: t("治理总览") },
+  { key: "cost", icon: "cost", label: t("成本"), hint: "成本 / 预算" },
+  { key: "security", icon: "shield", label: t("安全"), hint: "审计 / 风险" },
+  { key: "assets", icon: "package", label: t("资产"), hint: "技能 / 插件 / MCP" },
+  { key: "knowledge", icon: "library", label: t("知识库"), hint: "决策 / TODO / 提示词" },
+  { key: "activity", icon: "calendar", label: t("活动"), hint: "热力图 / 时段 / 工具" },
+  { key: "projects", icon: "folder", label: t("项目"), hint: t("按 source_dir 归并") },
 ];
 
 // 内置动作：触发外部副作用（开关弹窗 / 跑同步 / 切主题等），由 App 层通过 onAction 实际处理。
@@ -31,12 +32,12 @@ export type CommandActionId =
   | "show_changelog";
 
 const ACTIONS: { id: CommandActionId; icon: IconName; label: string; hint: string }[] = [
-  { id: "open_settings", icon: "settings", label: "打开设置", hint: "主题 / 同步 / 预算 / 重置" },
-  { id: "trigger_sync", icon: "sync", label: "触发同步", hint: "立即从来源拉取最新会话" },
-  { id: "toggle_theme", icon: "moon", label: "切换主题 深/浅", hint: "深色 ⇄ 浅色" },
-  { id: "show_shortcuts", icon: "keyboard", label: "显示快捷键", hint: "列出所有全局快捷键" },
-  { id: "open_reports", icon: "file", label: "打开周报中心", hint: "历史周报列表" },
-  { id: "show_changelog", icon: "sparkle", label: "查看更新日志", hint: "本版本的变更说明" },
+  { id: "open_settings", icon: "settings", label: t("打开设置"), hint: "主题 / 同步 / 预算 / 重置" },
+  { id: "trigger_sync", icon: "sync", label: t("触发同步"), hint: t("立即从来源拉取最新会话") },
+  { id: "toggle_theme", icon: "moon", label: "切换主题 深/浅", hint: t("深色 ⇄ 浅色") },
+  { id: "show_shortcuts", icon: "keyboard", label: t("显示快捷键"), hint: t("列出所有全局快捷键") },
+  { id: "open_reports", icon: "file", label: t("打开周报中心"), hint: t("历史周报列表") },
+  { id: "show_changelog", icon: "sparkle", label: t("查看更新日志"), hint: t("本版本的变更说明") },
 ];
 
 // 列表项的判别联合（P1-E3）
@@ -248,14 +249,14 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
             className="cmd-input"
             value={q}
             onChange={(e) => { setQ(e.target.value); setActive(0); }}
-            placeholder="跳到页面 / 搜会话标题 / 找历史相似 prompt…  (↑↓ 选择 · Enter 跳转 · Esc 关闭)"
+            placeholder={t("跳到页面 / 搜会话标题 / 找历史相似 prompt…  (↑↓ 选择 · Enter 跳转 · Esc 关闭)")}
           />
         </div>
         <ScrollArea className="cmd-list">
           {/* 页面组 */}
           {items.some((i) => i.kind === "page") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">页面</div>
+              <div className="cmd-group-title">{t("页面")}</div>
               {items.map((it, i) => it.kind === "page" ? (
                 <div
                   key={`p-${it.page.key}`}
@@ -273,7 +274,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
           {/* 动作组（P1-E3） */}
           {items.some((i) => i.kind === "action") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">动作</div>
+              <div className="cmd-group-title">{t("动作")}</div>
               {items.map((it, i) => it.kind === "action" ? (
                 <div
                   key={`a-${it.action.id}`}
@@ -322,7 +323,7 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
           {/* Prompt 复用组 */}
           {items.some((i) => i.kind === "reuse") && (
             <div className="cmd-group">
-              <div className="cmd-group-title">你之前问过类似问题（Prompt 复用）</div>
+              <div className="cmd-group-title">{t("你之前问过类似问题（Prompt 复用）")}</div>
               {items.map((it, i) => it.kind === "reuse" ? (
                 <div
                   key={`r-${it.hit.message_id}`}
@@ -346,13 +347,13 @@ export function CommandPalette({ open, onClose, onJumpPage, onJumpConversation, 
             </div>
           )}
           {items.length === 0 && (
-            <div className="cmd-empty">没有匹配项（试试「活动」「成本」或会话标题关键词）</div>
+            <div className="cmd-empty">{t("没有匹配项（试试「活动」「成本」或会话标题关键词）")}</div>
           )}
         </ScrollArea>
         <div className="cmd-footer">
-          <span>↑↓ 移动</span>
-          <span>⏎ 跳转</span>
-          <span>esc 关闭</span>
+          <span>{t("↑↓ 移动")}</span>
+          <span>{t("⏎ 跳转")}</span>
+          <span>{t("esc 关闭")}</span>
           <span style={{ marginLeft: "auto", opacity: 0.55 }}>Threadock · Command Palette</span>
         </div>
       </div>

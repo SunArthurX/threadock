@@ -4,6 +4,7 @@
 // 回滚缓冲保留），「重启」kill 重开。组件常驻挂载，holder 元素稳定存在，
 // 画布不因开关重建。
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Terminal } from "@xterm/xterm";
@@ -132,19 +133,19 @@ export default function BottomTerminal({
         <Resizer
           axis="y"
           className="bottom-dock-resizer"
-          title="拖拽调整终端高度"
+          title={t("拖拽调整终端高度")}
           onDrag={(dy) => onHeightChange(Math.max(160, Math.min(720, height - dy)))}
         />
       )}
       {open && (
         <div className="bottom-dock-header">
           <Icon name="terminal" size={12} />
-          <span>终端</span>
-          {exited && <span className="bottom-dock-exited">已退出</span>}
+          <span>{t("终端")}</span>
+          {exited && <span className="bottom-dock-exited">{t("已退出")}</span>}
           <span style={{ flex: 1 }} />
-          <button className="action-btn" onClick={() => termRef.current?.clear()} title="清屏">清屏</button>
-          <button className="action-btn" onClick={() => void restart()} title="kill 当前 shell 并重新启动">↻ 重启</button>
-          <button className="action-btn" onClick={onClose} title="收起面板（⌘J）">✕ 收起</button>
+          <button className="action-btn" onClick={() => termRef.current?.clear()} title={t("清屏")}>{t("清屏")}</button>
+          <button className="action-btn" onClick={() => void restart()} title={t("kill 当前 shell 并重新启动")}>{t("↻ 重启")}</button>
+          <button className="action-btn" onClick={onClose} title={t("收起面板（⌘J）")}>{t("✕ 收起")}</button>
         </div>
       )}
       <div className="bottom-xterm" ref={holderRef} />

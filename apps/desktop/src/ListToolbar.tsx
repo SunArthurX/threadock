@@ -8,6 +8,7 @@
 //     trailing={<button>重算</button>}
 //   />
 import type { ReactNode } from "react";
+import { t } from "./i18n";
 import { Icon, type IconName } from "./Icon";
 
 export interface ListToolbarSortOption<T extends string = string> {
@@ -47,18 +48,18 @@ export interface ListToolbarProps {
 export function ListToolbar({
   search,
   onSearch,
-  searchPlaceholder = "搜索…",
+  searchPlaceholder = t("搜索…"),
   filterValue,
   onFilterChange,
   filterOptions,
-  filterLabel = "筛选",
+  filterLabel = t("筛选"),
   sort,
   onSortChange,
   sortOptions,
-  sortLabel = "排序",
+  sortLabel = t("排序"),
   count,
   countTotal,
-  countLabel = "项",
+  countLabel = t("项"),
   trailing,
   leading,
   dense = false,

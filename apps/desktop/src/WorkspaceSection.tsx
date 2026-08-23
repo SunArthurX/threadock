@@ -1,5 +1,6 @@
 // Workspace 管理分区（v1.0.0，plan §4.3）：列表 + 匹配置信度 + 重命名 + 手动合并
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { showToast } from "./toast";
 import ScrollArea from "./ScrollArea";
@@ -89,8 +90,8 @@ export default function WorkspaceSection() {
   if (workspaces.length === 0) {
     return (
       <section className="settings-section">
-        <h3>🗂 Workspace 管理</h3>
-        <div className="settings-hint">暂无 Workspace（导入会话后自动生成）</div>
+        <h3>{t("🗂 Workspace 管理")}</h3>
+        <div className="settings-hint">{t("暂无 Workspace（导入会话后自动生成）")}</div>
       </section>
     );
   }
@@ -116,14 +117,14 @@ export default function WorkspaceSection() {
               {conf != null && (
                 <span
                   className={`ws-conf-badge ${conf < LOW_CONFIDENCE ? "low" : "ok"}`}
-                  title={`该 Workspace 来源映射的最低匹配置信度 ${conf.toFixed(2)}（${conf < LOW_CONFIDENCE ? "建议人工确认" : "可信"}）`}
+                  title={`该 Workspace 来源映射的最低匹配置信度 ${conf.toFixed(2)}（${conf < LOW_CONFIDENCE ? t("建议人工确认") : t("可信")}）`}
                 >
                   {conf < LOW_CONFIDENCE ? `⚠ ${conf.toFixed(2)}` : `✓ ${conf.toFixed(2)}`}
                 </span>
               )}
-              <button className="bulk-btn" disabled={busy} onClick={() => rename(ws)}>✏️ 重命名</button>
+              <button className="bulk-btn" disabled={busy} onClick={() => rename(ws)}>{t("✏️ 重命名")}</button>
               <button className="bulk-btn" disabled={busy || workspaces.length < 2} onClick={() => merge(ws)}
-                title={workspaces.length < 2 ? "至少需要两个 Workspace 才能合并" : "把这个 Workspace 并入另一个"}>
+                title={workspaces.length < 2 ? t("至少需要两个 Workspace 才能合并") : t("把这个 Workspace 并入另一个")}>
                 ⇄ 合并到…
               </button>
             </div>

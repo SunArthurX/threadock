@@ -3,6 +3,7 @@
 // `.heat-cell` 相关的历史冲突（round 9/10/13/14/15 多次迭代导致 CSS 重复定义）。
 // 第 17 轮：加 hover 自定义 tooltip（绕开 macOS 原生 title 1.5s 延迟）
 import { memo, useState } from "react";
+import { t } from "./i18n";
 
 export interface HeatCell {
   day: string;
@@ -61,7 +62,7 @@ function weekdayCN(day: string): string {
     const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
     return era * 146097 + doe - 719468;
   })();
-  const dow = ["日", "一", "二", "三", "四", "五", "六"][(seq + 4) % 7];
+  const dow = [t("日"), t("一"), t("二"), t("三"), t("四"), t("五"), t("六")][(seq + 4) % 7];
   return `周${dow}`;
 }
 
@@ -292,7 +293,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
                       fontSize: 10,
                       fontWeight: 500,
                     }}
-                  >今天</span>
+                  >{t("今天")}</span>
                 )}
               </div>
               <div style={{ color: "var(--text-secondary, #9aa3bd)", fontSize: 11 }}>
@@ -306,7 +307,7 @@ function HeatmapGitHub({ cols, max, monthLabels, selectedDay, todayKey, year: _y
             </>
           ) : (
             <div style={{ color: "var(--text-muted, #5d6880)", fontSize: 11 }}>
-              无数据
+              {t("无数据")}
               <span style={{ marginLeft: 6, opacity: 0.7 }}>(空格 / 未来日期)</span>
             </div>
           )}

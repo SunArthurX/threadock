@@ -1,5 +1,6 @@
 // CodeAgentOps 治理视图容器：状态管理 + 分区加载 + 委托渲染
 import { useEffect, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import OverviewSection from "./OverviewSection";
@@ -172,7 +173,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
     const cost = budgetInput.cost.trim() ? parseFloat(budgetInput.cost) : null;
     await invoke("budget_set", { settings: { monthly_token_limit: tokens, monthly_cost_limit: cost, notify_on_exceed: budget.notify_on_exceed } });
     await loadBudget();
-    setRecalcMsg("预算已保存"); setTimeout(() => setRecalcMsg(null), 2000);
+    setRecalcMsg(t("预算已保存")); setTimeout(() => setRecalcMsg(null), 2000);
   };
   const recalcCost = async () => {
     try {
@@ -195,7 +196,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
       <div className="ops-toolbar">
         {section !== "assets" && (
           <div className="ops-range">
-            {[[7,"7天"],[30,"30天"],[90,"90天"],[null,"全部"]].map(([v, label]) => (
+            {[[7,t("7天")],[30,t("30天")],[90,t("90天")],[null,t("全部")]].map(([v, label]) => (
               <button key={String(v)} className={`filter-chip ${range === v ? "active" : ""}`}
                 onClick={() => setRange(v as number | null)}>{label as string}</button>
             ))}
@@ -208,7 +209,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
           const ageMs = Date.now() - lastSyncedAt;
           const stale = ageMs > 60 * 60_000;
           const min = Math.floor(ageMs / 60_000);
-          const label = min < 1 ? "刚刚" : min < 60 ? `${min} 分钟前` : min < 1440 ? `${Math.floor(min / 60)} 小时前` : `${Math.floor(min / 1440)} 天前`;
+          const label = min < 1 ? t("刚刚") : min < 60 ? `${min} 分钟前` : min < 1440 ? `${Math.floor(min / 60)} 小时前` : `${Math.floor(min / 1440)} 天前`;
           return (
             <span className={`ops-freshness ${stale ? "stale" : "fresh"}`} title={`上次同步：${new Date(lastSyncedAt).toLocaleString("zh-CN")}`}>
               <Icon name={stale ? "warning" : "check"} size={11} />
@@ -222,7 +223,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
           disabled={syncing}
         >
           {syncing
-            ? <><Icon name="sync" size={12} className="icon-spin" /> 同步中…</>
+            ? <><Icon name="sync" size={12} className="icon-spin" />{t("同步中…")}</>
             : <><Icon name="sync" size={12} /> 同步{section === "assets" ? "资产" : "指标"}</>}
         </button>
       </div>
@@ -277,7 +278,7 @@ export default function OpsView({ section, onJumpToConversation, onOpenReports, 
           onImportPolicies={async (json) => {
             try {
               const arr = JSON.parse(json);
-              if (!Array.isArray(arr)) throw new Error("JSON 不是数组");
+              if (!Array.isArray(arr)) throw new Error(t("JSON 不是数组"));
               let n = 0;
               for (const r of arr) {
                 try { await invoke("policy_upsert", { rule: r }); n++; } catch { /* 单条失败 */ }

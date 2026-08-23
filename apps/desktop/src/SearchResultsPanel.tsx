@@ -2,6 +2,7 @@
 // 命中聚合到「主对话」层级，子对话命中折叠在所属主对话之下（缩进行），
 // 保持与普通会话列表一致的父子树心智模型；点击任一行进入右栏命中步进。
 import { useMemo } from "react";
+import { t } from "./i18n";
 import { SearchHitGroup, sourceLabel } from "./types";
 
 interface Props {
@@ -66,28 +67,28 @@ export default function SearchResultsPanel({
               className="search-panel-select"
               value={role}
               onChange={(e) => onRoleChange(e.target.value)}
-              title="按角色筛选（重新查询）"
+              title={t("按角色筛选（重新查询）")}
             >
-              <option value="">全部角色</option>
-              <option value="user">仅用户</option>
-              <option value="assistant">仅助手</option>
+              <option value="">{t("全部角色")}</option>
+              <option value="user">{t("仅用户")}</option>
+              <option value="assistant">{t("仅助手")}</option>
             </select>
           </div>
         </div>
       </div>
-      {sections.length === 0 && <div className="empty">无匹配</div>}
+      {sections.length === 0 && <div className="empty">{t("无匹配")}</div>}
       {sections.map((sec) => (
         <div key={sec.rootId} className="search-group">
           <div
             className="search-group-root"
             onClick={() => onOpen(sec.rows[0])}
-            title="打开该主对话（含子对话命中步进）"
+            title={t("打开该主对话（含子对话命中步进）")}
           >
             <span className="search-group-caret">▾</span>
             <div className="title">
               {sec.rootTitle}
               <span className={`badge source ${sec.provider}`}>{sourceLabel(sec.provider)}</span>
-              <span className="search-hit-total" title="该主对话（含子对话）总命中数">
+              <span className="search-hit-total" title={t("该主对话（含子对话）总命中数")}>
                 🎯 {sec.totalHits} 处
               </span>
             </div>
@@ -97,11 +98,11 @@ export default function SearchResultsPanel({
               key={r.conversation_id}
               className={`search-result search-group-row ${activeConversationId === r.conversation_id ? "active" : ""}`}
               onClick={() => onOpen(r)}
-              title="打开此会话并跳到命中"
+              title={t("打开此会话并跳到命中")}
             >
               <div className="title">
                 <span className={`search-row-kind ${r.is_child ? "child" : "parent"}`}>
-                  {r.is_child ? "子对话" : "主对话"}
+                  {r.is_child ? t("子对话") : t("主对话")}
                 </span>
                 {r.title ?? sec.rootTitle}
                 <span className="search-role">{r.best_role}</span>

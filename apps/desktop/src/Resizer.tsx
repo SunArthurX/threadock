@@ -4,10 +4,11 @@
 //      <Resizer axis="y" onDrag={(dy) => setHeight(h => clamp(h - dy, 160, 640))} />
 // 默认 6px 宽，hover 时变蓝色，拖拽时 body 加 select-none 避免选中文本。
 import { useEffect, useRef, useState } from "react";
+import { t } from "./i18n";
 
 export default function Resizer({
   onDrag,
-  title = "拖拽调整宽度",
+  title = t("拖拽调整宽度"),
   className = "",
   axis = "x",
 }: {

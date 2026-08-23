@@ -2,6 +2,7 @@
 // 第 11 轮大改版：4 行 filter-bar 合并成 1 行 toolbar（3 个 dropdown + 搜索 + 数量）；
 // 列表项去掉复选框 / hover-pin-toggle / hover-fav-toggle —— 全部走右键菜单（⌘点击多选 + ⌘A 全选 + ⋯ / 右键触发）。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t } from "./i18n";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Conversation, sourceLabel } from "./types";
 import { showToast } from "./toast";
@@ -20,23 +21,23 @@ export type DateFilter = "all" | "today" | "week" | "month";
 export type SortBy = "updated" | "created" | "title";
 
 const DATE_FILTERS: { key: DateFilter; label: string; days: number | null }[] = [
-  { key: "all", label: "全部时间", days: null },
-  { key: "today", label: "今日", days: 1 },
-  { key: "week", label: "近 7 天", days: 7 },
-  { key: "month", label: "近 30 天", days: 30 },
+  { key: "all", label: t("全部时间"), days: null },
+  { key: "today", label: t("今日"), days: 1 },
+  { key: "week", label: t("近 7 天"), days: 7 },
+  { key: "month", label: t("近 30 天"), days: 30 },
 ];
 
 const SORT_OPTIONS: { key: SortBy; label: string; icon: string }[] = [
-  { key: "updated", label: "最新活动", icon: "🕐" },
-  { key: "created", label: "创建时间", icon: "📅" },
-  { key: "title", label: "标题字母序", icon: "🔤" },
+  { key: "updated", label: t("最新活动"), icon: "🕐" },
+  { key: "created", label: t("创建时间"), icon: "📅" },
+  { key: "title", label: t("标题字母序"), icon: "🔤" },
 ];
 
 const SCOPE_OPTIONS: { key: ListScope; label: string; icon: string }[] = [
-  { key: "all", label: "全部会话", icon: "💬" },
-  { key: "favorite", label: "收藏", icon: "★" },
-  { key: "archived", label: "已归档", icon: "🗄" },
-  { key: "deleted", label: "回收站", icon: "🗑" },
+  { key: "all", label: t("全部会话"), icon: "💬" },
+  { key: "favorite", label: t("收藏"), icon: "★" },
+  { key: "archived", label: t("已归档"), icon: "🗄" },
+  { key: "deleted", label: t("回收站"), icon: "🗑" },
 ];
 
 const PIN_KEY = "ch-conv-pins";
@@ -278,28 +279,28 @@ export default function ConversationList({
     if (scope !== "deleted") {
       items.push({
         icon: c.favorite ? "☆" : "★",
-        label: isMulti ? `${c.favorite ? "取消收藏" : "收藏"} ${targetCount} 条` : (c.favorite ? "取消收藏" : "收藏"),
+        label: isMulti ? `${c.favorite ? t("取消收藏") : t("收藏")} ${targetCount} 条` : (c.favorite ? t("取消收藏") : t("收藏")),
         onClick: async () => {
           const fn = onBulkFavorite ? (ids: string[]) => onBulkFavorite(ids, !c.favorite) : undefined;
-          if (fn) { await fn(targetIds); showToast(`✓ ${!c.favorite ? "已收藏" : "已取消收藏"} ${targetCount} 条`, "info"); }
+          if (fn) { await fn(targetIds); showToast(`✓ ${!c.favorite ? t("已收藏") : t("已取消收藏")} ${targetCount} 条`, "info"); }
           else onToggleFavorite?.(c);
         },
         group: 1,
       });
       items.push({
         icon: c.archived ? "📤" : "🗄",
-        label: isMulti ? `${c.archived ? "取消归档" : "归档"} ${targetCount} 条` : (c.archived ? "取消归档" : "归档"),
+        label: isMulti ? `${c.archived ? t("取消归档") : t("归档")} ${targetCount} 条` : (c.archived ? t("取消归档") : t("归档")),
         onClick: async () => {
           if (isMulti) {
             const fn = onBulkArchive ? (ids: string[]) => onBulkArchive(ids, !c.archived) : undefined;
-            if (fn) { await fn(targetIds); showToast(`✓ ${!c.archived ? "已归档" : "已取消归档"} ${targetCount} 条`, "info"); }
+            if (fn) { await fn(targetIds); showToast(`✓ ${!c.archived ? t("已归档") : t("已取消归档")} ${targetCount} 条`, "info"); }
           } else if (onArchiveOne) onArchiveOne(c);
         },
         group: 1,
       });
       items.push({
         icon: pinned.has(c.id) ? "📍" : "📌",
-        label: pinned.has(c.id) ? "取消置顶" : "置顶（排在最前）",
+        label: pinned.has(c.id) ? t("取消置顶") : t("置顶（排在最前）"),
         onClick: () => togglePin(c.id),
         group: 1,
       });
@@ -328,13 +329,13 @@ export default function ConversationList({
       });
       items.push({
         icon: "📋",
-        label: "复制标题",
+        label: t("复制标题"),
         onClick: () => { if (onCopyTitle) onCopyTitle(c); else { navigator.clipboard?.writeText(c.user_title ?? c.title ?? "").then(() => showToast("✓ 标题已复制", "info", 1500)).catch(() => showToast("剪贴板不可用", "error")); } },
         group: 2,
       });
       items.push({
         icon: "🗑",
-        label: isMulti ? `删除 ${targetCount} 条（带撤销）` : "删除（带撤销）",
+        label: isMulti ? `删除 ${targetCount} 条（带撤销）` : t("删除（带撤销）"),
         danger: true,
         onClick: () => {
           const fn = onBulkDelete ? (ids: string[]) => onBulkDelete(ids) : undefined;
@@ -402,7 +403,7 @@ export default function ConversationList({
   return (
     <>
       <div className="panel-header">
-        会话
+        {t("会话")}
         <span className="panel-header-count">
           {listSearch
             ? `${searchFiltered.length} / ${dateFiltered.length}`
@@ -418,28 +419,28 @@ export default function ConversationList({
         <input
           className="list-search-input"
           type="search"
-          placeholder="搜索标题…"
+          placeholder={t("搜索标题…")}
           value={listSearch}
           onChange={(e) => setListSearch(e.target.value)}
         />
         {listSearch && (
-          <button className="list-search-clear" onClick={() => setListSearch("")} title="清空搜索">✕</button>
+          <button className="list-search-clear" onClick={() => setListSearch("")} title={t("清空搜索")}>✕</button>
         )}
         <div className="list-toolbar-row">
           <Dropdown
-            label="视图"
+            label={t("视图")}
             value={scope}
             options={SCOPE_OPTIONS}
             onChange={onScopeChange}
           />
           <Dropdown
-            label="日期"
+            label={t("日期")}
             value={dateFilter}
             options={DATE_FILTERS}
             onChange={setDateFilter}
           />
           <Dropdown
-            label="排序"
+            label={t("排序")}
             value={sortBy}
             options={SORT_OPTIONS}
             onChange={setSortBy}
@@ -451,8 +452,8 @@ export default function ConversationList({
             <button
               className={`provider-chip ${providerFilter === null ? "active" : ""}`}
               onClick={() => onFilter(null)}
-              title="显示全部来源"
-            >全部</button>
+              title={t("显示全部来源")}
+            >{t("全部")}</button>
             {providerChips.map((p) => (
               <button
                 key={p}
@@ -468,24 +469,24 @@ export default function ConversationList({
       {/* 多选操作栏：仅在 selectedIds > 0 时显示 */}
       {selectedIds.size > 0 && (
         <div className="bulk-bar">
-          <span>已选 <b>{selectedIds.size}</b> 条</span>
-          <button className="bulk-btn" onClick={() => setSelectedIds(new Set(sorted.map((c) => c.id)))} title="全选当前可见（⌘A）">全选</button>
-          <button className="bulk-btn" onClick={() => setSelectedIds(new Set())} title="清空选择（Esc）">清空</button>
+          <span>已选 <b>{selectedIds.size}</b>{t("条")}</span>
+          <button className="bulk-btn" onClick={() => setSelectedIds(new Set(sorted.map((c) => c.id)))} title={t("全选当前可见（⌘A）")}>{t("全选")}</button>
+          <button className="bulk-btn" onClick={() => setSelectedIds(new Set())} title={t("清空选择（Esc）")}>{t("清空")}</button>
           <button className="bulk-btn" onClick={() => {
             const ids = [...selectedIds];
             const fav = !conversations.find((c) => c.id === ids[0])?.favorite;
             onBulkFavorite?.(ids, fav);
-            showToast(`✓ ${fav ? "已收藏" : "已取消收藏"} ${ids.length} 条`, "info");
-          }}>★ 收藏</button>
+            showToast(`✓ ${fav ? t("已收藏") : t("已取消收藏")} ${ids.length} 条`, "info");
+          }}>{t("★ 收藏")}</button>
           <button className="bulk-btn" onClick={() => {
             const ids = [...selectedIds];
             const arch = !conversations.find((c) => c.id === ids[0])?.archived;
             onBulkArchive?.(ids, arch);
-            showToast(`✓ ${arch ? "已归档" : "已取消归档"} ${ids.length} 条`, "info");
-          }}>🗄 归档</button>
+            showToast(`✓ ${arch ? t("已归档") : t("已取消归档")} ${ids.length} 条`, "info");
+          }}>{t("🗄 归档")}</button>
           <input
             className="bulk-tag-input"
-            placeholder="# 批量加标签…"
+            placeholder={t("# 批量加标签…")}
             value={bulkTagInput}
             onChange={(e) => setBulkTagInput(e.target.value)}
             onKeyDown={(e) => {
@@ -498,22 +499,22 @@ export default function ConversationList({
                 setBulkTagInput("");
               }
             }}
-            title="输入标签名后按 Enter（自动去 # 前缀）"
+            title={t("输入标签名后按 Enter（自动去 # 前缀）")}
           />
-          <button className="bulk-btn" title="把这批会话拆分到一个新 Workspace（plan §4.3 手动拆分）" onClick={() => {
+          <button className="bulk-btn" title={t("把这批会话拆分到一个新 Workspace（plan §4.3 手动拆分）")} onClick={() => {
             const name = window.prompt(`把选中的 ${selectedIds.size} 条会话移到新 Workspace，输入名称：`);
             if (!name?.trim()) return;
             onBulkSplit?.([...selectedIds], name.trim());
-          }}>📂 拆分到新 Workspace</button>
+          }}>{t("📂 拆分到新 Workspace")}</button>
           <button className="bulk-btn danger" onClick={() => {
             onBulkDelete?.([...selectedIds]);
             setSelectedIds(new Set());
-          }}>🗑 删除</button>
+          }}>{t("🗑 删除")}</button>
         </div>
       )}
 
       {loading && (
-        <div className="panel-loading"><div className="spinner spinner-sm" /><span>加载会话…</span></div>
+        <div className="panel-loading"><div className="spinner spinner-sm" /><span>{t("加载会话…")}</span></div>
       )}
       {!loading && sorted.length > 0 && (
         <div
@@ -559,7 +560,7 @@ export default function ConversationList({
                 />
                 {isExpanded && (
                   <div className="child-list">
-                    {children.length === 0 && <div className="child-empty">无子任务</div>}
+                    {children.length === 0 && <div className="child-empty">{t("无子任务")}</div>}
                     {children.map((ch) => (
                       <ConvItem
                         key={ch.id}
@@ -588,12 +589,12 @@ export default function ConversationList({
         <EmptyState
           icon="mailbox"
           size="md"
-          title="还没有任何会话"
-          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} /> 同步</span> 按钮把 Cursor / Claude Code / ZCode / Codex 里的历史对话拉进来</>}
+          title={t("还没有任何会话")}
+          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} />{t("同步")}</span> 按钮把 Cursor / Claude Code / ZCode / Codex 里的历史对话拉进来</>}
         />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length === 0 && (
-        <EmptyState icon="calendar" size="sm" title="当前日期范围无会话" desc="试试「全部时间」" />
+        <EmptyState icon="calendar" size="sm" title={t("当前日期范围无会话")} desc={t("试试「全部时间」")} />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length > 0 && searchFiltered.length === 0 && (
         <EmptyState icon="search" size="sm" title={`无匹配「${listSearch}」的会话`} desc="清空搜索试试" />
@@ -620,14 +621,14 @@ export default function ConversationList({
             <input
               className="bulk-tag-input"
               autoFocus
-              placeholder="# 标签名（自动去 # 前缀）"
+              placeholder={t("# 标签名（自动去 # 前缀）")}
               value={tagInput.value}
               onChange={(e) => setTagInput({ ...tagInput, value: e.target.value })}
               onKeyDown={(e) => {
                 if (e.key === "Enter") { e.preventDefault(); void submitTagInput(); }
                 else if (e.key === "Escape") { e.preventDefault(); setTagInput(null); setCtxMenu(null); }
               }}
-              title="Enter 提交 · Esc 取消"
+              title={t("Enter 提交 · Esc 取消")}
             />
           </div>
         </>

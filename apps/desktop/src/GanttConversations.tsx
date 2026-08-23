@@ -3,6 +3,7 @@
 // 悬停浮动详情（fixed 定位，沿 HeatmapGitHub 模式，不被滚动容器裁剪），
 // 点击条跳转会话详情；跨范围边界的会话裁剪到窗口内显示。
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import type { Conversation } from "./types";
 import { meta } from "./ops-types";
@@ -61,7 +62,7 @@ export function buildGanttRows(
 
 /** 跨度人话：「45 秒」「3 小时 12 分」「2 天 4 小时」。 */
 export function ganttSpanText(ms: number): string {
-  if (ms < 1000) return "≤1 秒";
+  if (ms < 1000) return t("≤1 秒");
   const s = Math.floor(ms / 1000);
   if (s < 60) return `${s} 秒`;
   const m = Math.floor(s / 60);
@@ -160,7 +161,7 @@ export default function GanttConversations({
           ) : null
         }
       >
-        会话甘特图
+        {t("会话甘特图")}
       </CardTitle>
       <div className="ops-range-wrap">
         <div className="ops-range">
@@ -180,7 +181,7 @@ export default function GanttConversations({
       {showSkeleton ? (
         <Skeleton variant="list" count={6} />
       ) : rows.length === 0 ? (
-        <InlineEmpty message={`近 ${daysLabel}没有会话`} hint="切换更大的时间范围，或同步 Agent 数据后查看" />
+        <InlineEmpty message={`近 ${daysLabel}没有会话`} hint={t("切换更大的时间范围，或同步 Agent 数据后查看")} />
       ) : (
         <div className="gantt-wrap">
           <div className="gantt-axis">

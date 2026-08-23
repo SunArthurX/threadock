@@ -6,6 +6,7 @@
 //   - 搜索：搜索历史
 //   - 上次：changelog 上次看到版本
 // 不覆盖：会话内容、消息、标签、审计发现状态（属于数据库；用备份/恢复走）
+import { t } from "./i18n";
 
 const EXPORT_VERSION = 1;
 const ALL_KEYS = [
@@ -41,7 +42,7 @@ export function exportAllSettings(): string {
  *  - 失败抛 Error（含原因） */
 export function importAllSettings(json: string, mode: "merge" | "replace" = "merge"): { applied: number; skipped: number } {
   let parsed: unknown;
-  try { parsed = JSON.parse(json); } catch { throw new Error("JSON 解析失败"); }
+  try { parsed = JSON.parse(json); } catch { throw new Error(t("JSON 解析失败")); }
   if (!parsed || typeof parsed !== "object") throw new Error("JSON 根节点不是对象");
   const obj = parsed as { version?: number; prefs?: Record<string, unknown> };
   if (typeof obj.version !== "number") throw new Error("缺少 version 字段");

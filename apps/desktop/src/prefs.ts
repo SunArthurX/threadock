@@ -1,5 +1,7 @@
 // 用户偏好：数字格式 + 货币 + 日期格式（localStorage 持久化）。
 // 这些偏好只影响展示，不影响后端存储。
+import { t } from "./i18n";
+
 export type NumberFormat = "raw" | "k" | "wan" | "yi";
 export type Currency = "USD" | "CNY";
 export type DateFormat = "relative" | "absolute" | "iso";
@@ -59,13 +61,13 @@ export function formatTokensPref(n: number, fmt: NumberFormat = loadNumberFormat
     return n.toString();
   }
   if (fmt === "wan") {
-    if (Math.abs(n) >= 100_000_000) return (n / 100_000_000).toFixed(2) + "亿";
-    if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + "万";
+    if (Math.abs(n) >= 100_000_000) return (n / 100_000_000).toFixed(2) + t("亿");
+    if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + t("万");
     return n.toLocaleString();
   }
   // yi
   if (Math.abs(n) >= 1_000_000_000) return (n / 1_000_000_000).toFixed(2) + "B";
-  if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + "万";
+  if (Math.abs(n) >= 10_000) return (n / 10_000).toFixed(1) + t("万");
   return n.toLocaleString();
 }
 
@@ -82,7 +84,7 @@ export function formatTimePref(ms: number | null | undefined, fmt: DateFormat = 
   }
   // relative
   const diff = Date.now() - ms;
-  if (diff < 0) return "刚刚";
+  if (diff < 0) return t("刚刚");
   const s = Math.floor(diff / 1000);
   if (s < 60) return `${s} 秒前`;
   const m = Math.floor(s / 60);

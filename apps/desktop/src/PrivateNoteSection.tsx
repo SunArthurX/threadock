@@ -2,6 +2,7 @@
 // 父级应给此组件传 `key={conv.id}`：切换会话时 React 会卸载旧实例并重建，
 // 避免 useEffect [note] 覆盖用户当前正在编辑的本地 text。
 import { useEffect, useState } from "react";
+import { t } from "./i18n";
 
 export interface PrivateNoteSectionProps {
   note: string;
@@ -50,8 +51,8 @@ export default function PrivateNoteSection({ note, onChange }: PrivateNoteSectio
   return (
     <details className="private-note" open={!!note}>
       <summary>
-        📝 私人笔记 {saved === "saving" && <span className="private-note-status">保存中…</span>}
-        {saved === "saved" && <span className="private-note-status saved">✓ 已保存</span>}
+        📝 私人笔记 {saved === "saving" && <span className="private-note-status">{t("保存中…")}</span>}
+        {saved === "saved" && <span className="private-note-status saved">{t("✓ 已保存")}</span>}
       </summary>
       <textarea
         className="private-note-text"

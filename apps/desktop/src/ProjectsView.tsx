@@ -1,5 +1,6 @@
 // 项目中心页（持续优化）：可点击跳转/排序升降序/空状态/卡片 hover/批量导出
 import { useEffect, useMemo, useState } from "react";
+import { t } from "./i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { formatTokens, formatCost } from "./charts";
 import { formatTime } from "./types";
@@ -26,10 +27,10 @@ type SortKey = "cost" | "tokens" | "active" | "sessions";
 type SortDir = "desc" | "asc";
 
 export const SORT_LABELS: Record<SortKey, string> = {
-  cost: "成本",
+  cost: t("成本"),
   tokens: "Tokens",
-  active: "最近活跃",
-  sessions: "会话数",
+  active: t("最近活跃"),
+  sessions: t("会话数"),
 };
 
 export function sortProjects(projects: ProjectRow[], key: SortKey, dir: SortDir = "desc"): ProjectRow[] {
@@ -151,15 +152,15 @@ export default function ProjectsView({
   return (
     <ScrollArea className="projects-page">
       <div className="ops-card">
-        <CardTitle icon="folder" sub={projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : <LoadingText text="正在加载项目…" />}>项目中心</CardTitle>
+        <CardTitle icon="folder" sub={projects ? `${totals.count} 个项目 · ${totals.sessions} 会话 · ${formatTokens(totals.tokens)} · ${formatCost(totals.cost)}` : <LoadingText text="正在加载项目…" />}>{t("项目中心")}</CardTitle>
         <ListToolbar
           leading={projects && projects.length > 0 ? (
             <button className="action-btn" onClick={exportCsv}
-              title="把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）">
+              title={t("把当前过滤+排序后的项目列表复制为 CSV（Excel 友好 UTF-8 BOM）")}>
               <Icon name="copy" size={12} /> 导出 CSV
             </button>
           ) : null}
-          sortLabel="排序"
+          sortLabel={t("排序")}
           sort={sortKey}
           onSortChange={(v) => {
             if (sortKey === v) setSortDir(sortDir === "desc" ? "asc" : "desc");
@@ -169,7 +170,7 @@ export default function ProjectsView({
             value: k, label: `${SORT_LABELS[k]}${sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}`
           }))}
           count={totals.count}
-          countLabel="个项目"
+          countLabel={t("个项目")}
           search={search}
           onSearch={(v) => { setSearch(v); pager.reset(); }}
           searchPlaceholder="搜索项目 / Agent…"
@@ -180,7 +181,7 @@ export default function ProjectsView({
           </div>
         )}
         {projects && projects.length > 0 && processed.length === 0 && (
-          <div className="ops-table-empty">无匹配项目（试试清空搜索或换个关键词）</div>
+          <div className="ops-table-empty">{t("无匹配项目（试试清空搜索或换个关键词）")}</div>
         )}
       </div>
       <div className="project-grid">
@@ -198,20 +199,20 @@ export default function ProjectsView({
               <div className="cost-ratio-fill" style={{ width: `${Math.max(3, (p.cost_usd / maxCost) * 100)}%` }} />
             </div>
             <div className="project-rows">
-              <div className="project-row"><span>会话</span><b>{p.sessions}</b></div>
-              <div className="project-row"><span>请求</span><b>{p.requests.toLocaleString()}</b></div>
+              <div className="project-row"><span>{t("会话")}</span><b>{p.sessions}</b></div>
+              <div className="project-row"><span>{t("请求")}</span><b>{p.requests.toLocaleString()}</b></div>
               <div className="project-row"><span>Tokens</span><b>{formatTokens(p.tokens)}</b></div>
-              <div className="project-row"><span>成本</span><b>{formatCost(p.cost_usd)}</b></div>
-              <div className="project-row"><span>主力 Agent</span><b>{p.main_agent ?? "—"}</b></div>
-              <div className="project-row"><span>最近活跃</span><b>{formatTime(p.last_active_ms) || "—"}</b></div>
+              <div className="project-row"><span>{t("成本")}</span><b>{formatCost(p.cost_usd)}</b></div>
+              <div className="project-row"><span>{t("主力 Agent")}</span><b>{p.main_agent ?? "—"}</b></div>
+              <div className="project-row"><span>{t("最近活跃")}</span><b>{formatTime(p.last_active_ms) || "—"}</b></div>
             </div>
             {openDir === p.dir && (
               <div className="project-conv-list" onClick={(e) => e.stopPropagation()}>
                 <div className="project-conv-title">
-                  {dirLoading ? <LoadingText text="加载中" /> : dirConvs && `${dirConvs.length} 条会话`}
+                  {dirLoading ? <LoadingText text={t("加载中")} /> : dirConvs && `${dirConvs.length} 条会话`}
                 </div>
                 {dirConvs && dirConvs.length === 0 && (
-                  <div className="project-conv-empty">该项目下没有主任务会话</div>
+                  <div className="project-conv-empty">{t("该项目下没有主任务会话")}</div>
                 )}
                 {dirConvs && dirConvs.slice(0, 10).map((c) => (
                   <div
@@ -243,7 +244,7 @@ export default function ProjectsView({
                         if (onJumpToChat) onJumpToChat(p.dir);
                       }
                     }}
-                    title="跳转到 chat 视图并按此项目目录过滤"
+                    title={t("跳转到 chat 视图并按此项目目录过滤")}
                   >
                     在 Chat 中查看全部 {dirConvs.length} 条 →
                   </div>
@@ -255,9 +256,9 @@ export default function ProjectsView({
       </div>
       {pager.needed && (
         <div className="pager" style={{ justifyContent: "center" }}>
-          <button className="pager-btn" onClick={pager.prev} disabled={pager.page === 0}>‹ 上一页</button>
+          <button className="pager-btn" onClick={pager.prev} disabled={pager.page === 0}>{t("‹ 上一页")}</button>
           <span className="pager-info">{pager.page + 1} / {pager.totalPages} 页 · 共 {pager.total} 个项目</span>
-          <button className="pager-btn" onClick={pager.next} disabled={pager.page >= pager.totalPages - 1}>下一页 ›</button>
+          <button className="pager-btn" onClick={pager.next} disabled={pager.page >= pager.totalPages - 1}>{t("下一页 ›")}</button>
         </div>
       )}
     </ScrollArea>

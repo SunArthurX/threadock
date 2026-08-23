@@ -1,11 +1,12 @@
 // 统一空态 / 加载态 / 错误态 组件。
 // 之前有 3 档 size × 3 档 tone，现在再加 4 档 state：default / loading / error / empty
 // 用法：
-//   <EmptyState icon="inbox" title="还没有任何会话" desc="..." action={...} />
-//   <EmptyState state="loading" title="正在拉取数据…" />
-//   <EmptyState state="error" title="拉取失败" desc="..." action={<button>重试</button>} />
-//   <EmptyState state="empty" title="无匹配结果" />
+//   <EmptyState icon="inbox" title=还没有任何会话 desc="..." action={...} />
+//   <EmptyState state="loading" title=正在拉取数据… />
+//   <EmptyState state="error" title=拉取失败 desc="..." action={<button>重试</button>} />
+//   <EmptyState state="empty" title=无匹配结果 />
 import type { ReactNode } from "react";
+import { t } from "./i18n";
 import { Icon, type IconName } from "./Icon";
 import { Skeleton, SkeletonGroup } from "./Skeleton";
 
@@ -68,7 +69,7 @@ export function EmptyState({
 
 /** 表格内联的轻量"无数据"提示（区别于 EmptyState 的大块占位） */
 export function InlineEmpty({
-  message = "暂无数据",
+  message = t("暂无数据"),
   hint,
   action,
 }: {
@@ -86,7 +87,7 @@ export function InlineEmpty({
 }
 
 /** 加载中文本（替代 "加载中..." 这种裸字符串） */
-export function LoadingText({ text = "加载中…", className = "" }: { text?: string; className?: string }) {
+export function LoadingText({ text = t("加载中…"), className = "" }: { text?: string; className?: string }) {
   return (
     <span className={`inline-loading ${className}`.trim()}>
       <Icon name="sync" size={11} className="inline-loading-spin" />
