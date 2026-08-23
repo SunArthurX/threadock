@@ -80,6 +80,29 @@ pub fn run() {
             })
             .expect("open daemon state");
             app.manage(daemon_state);
+
+            // 索引 schema 迁移：旧索引缺 created_at_ms（时间倒序排序键）→
+            // 后台全量重建灌回（一次性；期间搜索拿不到索引锁会短暂等待）
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let outdated = state
+                        .search_index
+                        .lock()
+                        .map(|idx| !idx.has_time_field())
+                        .unwrap_or(false);
+                    if outdated {
+                        tracing::info!("旧版搜索索引 schema，后台全量重建中……");
+                        match rebuild_index_inner(&state, &mut |_| {}) {
+                            Ok(n) => tracing::info!("索引迁移完成：重灌 {n} 条消息"),
+                            Err(e) => {
+                                tracing::warn!("索引迁移失败（设置→存储→重建索引 可重试）：{e}")
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

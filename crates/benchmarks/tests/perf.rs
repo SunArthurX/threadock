@@ -101,6 +101,7 @@ fn tantivy_search_latency() {
                         role: m.role,
                         title: c.title.clone(),
                         body: m.content_text.clone(),
+                        created_at: m.created_at,
                     },
                 )
                 .expect("unexpected None");

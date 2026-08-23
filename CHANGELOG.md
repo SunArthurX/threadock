@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+- **搜索按消息时间倒序**：索引新增 `created_at_ms` fast 字段，搜索改为
+  全局取「最新的 N 条命中消息」（`TopDocs.order_by_fast_field`），不再受
+  BM25 相关性截断——搜常见词时最近的会话排在最前。`SearchHit` 透出
+  `created_at_ms`（时间序模式下 `score` 恒 0）。所有入库路径（导入/
+  sync/CLI/重建）写入消息时间
+
+### Changed
+- **索引 schema 自动迁移**：启动时检测旧索引（无时间字段）→ 后台全量
+  重建（实测 1012 会话 / 5 万消息 ~5s，重建期 256MiB writer 堆）；
+  「设置 → 存储 → 重建索引」同样先升级 schema。旧 schema 索引在迁移
+  前仍可搜索（回退相关性排序），不破坏只读场景（如 CLI）
+
 ### Fixed
 - **搜索常见中文词丢失低频命中会话**：GUI 搜索（`search_grouped` /
   `search_tree_hits`）的 tantivy 路径未把 `base_limit`（500）透传给查询，

@@ -68,6 +68,7 @@ pub(crate) fn import_file_inner(
             role: m.role,
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
+            created_at: m.created_at,
         };
         idx.index_message(&mut writer, &im)
             .map_err(|e| search_err(e))?;
@@ -916,6 +917,7 @@ pub(crate) fn import_raw_inner(
             role: m.role,
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
+            created_at: m.created_at,
         })
         .collect();
 

@@ -216,7 +216,10 @@ pub(crate) async fn rebuild_search_index(
 }
 
 /// 重建核心：清空索引 → 全量重灌所有会话消息。
-fn rebuild_index_inner(
+///
+/// schema 过期（旧索引缺 `created_at_ms` 排序字段）时先 `recreate` 原地
+/// 换新 schema，再重灌——时间倒序搜索在重建完成后生效。
+pub(crate) fn rebuild_index_inner(
     state: &DaemonState,
     progress: &mut dyn FnMut(u64),
 ) -> Result<usize, String> {
@@ -240,6 +243,7 @@ fn rebuild_index_inner(
                     role: m.role,
                     title: Some(title.clone()),
                     body: m.content_text.clone(),
+                    created_at: m.created_at,
                 });
             }
             done += 1;
@@ -248,10 +252,14 @@ fn rebuild_index_inner(
     }
     let n = docs.len();
     {
-        let idx = state.search_index.lock().map_err(|e| storage_err(e))?;
-        let mut writer = idx
-            .writer(ch_search::index::DEFAULT_WRITER_HEAP)
-            .map_err(|e| search_err(e))?;
+        let mut idx = state.search_index.lock().map_err(|e| search_err(e))?;
+        if !idx.has_time_field() {
+            idx.recreate().map_err(|e| search_err(e))?;
+            tracing::info!("索引 schema 过期，已原地重建（时间倒序排序就绪）");
+        }
+        // 全量重建用大堆：实测 5 万消息 15MiB 堆 ~43s（频繁刷盘合并），
+        // 256MiB 降到十余秒；仅重建期间临时占用，桌面可接受
+        let mut writer = idx.writer(256_000_000).map_err(|e| search_err(e))?;
         idx.rebuild(&mut writer, |w| -> Result<usize, ch_search::SearchError> {
             for d in &docs {
                 idx.index_message(w, d)?;

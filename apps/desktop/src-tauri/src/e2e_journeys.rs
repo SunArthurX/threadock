@@ -428,6 +428,7 @@ fn journey_search_grouped_and_tree_hits() {
                 role: ch_domain::Role::Assistant,
                 title: Some("子任务：后台任务".into()),
                 body: Some("WorkManager 在子任务里也被提到".into()),
+                created_at: None,
             },
         )
         .expect("index message");

@@ -515,6 +515,7 @@ fn import_raw(
             role: m.role,
             title: Some(conv_title.clone()),
             body: m.content_text.clone(),
+            created_at: m.created_at,
         };
         search_index.index_message(&mut writer, &im)?;
     }
@@ -551,6 +552,7 @@ fn index_imported(
             role: m.role,
             title: Some(conv.effective_title().to_string()),
             body: m.content_text.clone(),
+            created_at: m.created_at,
         };
         index.index_message(&mut writer, &im)?;
     }
