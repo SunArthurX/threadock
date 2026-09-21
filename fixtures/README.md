@@ -10,6 +10,7 @@
 | `markdown/rust-error-handling.md` | 中文会话；仅消息无事件 |
 | `jsonl/opencode-style.jsonl` | meta 行 + 三种 role 消息 + 4 类事件 |
 | `jsonl/minimal.jsonl` | 无 meta、只有消息的最小合法输入 |
+| `deepseek-harness/session-golden/session.jsonl` | dsh 会话头 + 标题三段演进（fallback→provider→user 手动重命名）+ 注入块 + bash 输出配对 + 未知工具降级 |
 
 ## 脱敏原则
 
@@ -20,12 +21,15 @@
 
 ## 使用
 
-golden tests 位于 `crates/adapter-markdown/tests/golden.rs` 与
-`crates/adapter-jsonl/tests/golden.rs`，通过 `CARGO_MANIFEST_DIR` 相对路径读取本目录：
+golden tests 位于 `crates/adapter-markdown/tests/golden.rs`、
+`crates/adapter-jsonl/tests/golden.rs` 与
+`crates/adapter-deepseek-harness/tests/golden.rs`，
+通过 `CARGO_MANIFEST_DIR` 相对路径读取本目录：
 
 ```bash
 cargo test -p ch-adapter-markdown --test golden
 cargo test -p ch-adapter-jsonl --test golden
+cargo test -p ch-adapter-deepseek-harness --test golden
 ```
 
 新增 Adapter 时：在对应 crate 加 `tests/golden.rs` 并在本目录补样本，

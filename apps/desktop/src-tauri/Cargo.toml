@@ -42,6 +42,7 @@ ch-adapter-zcode = { path = "../../../crates/adapter-zcode" }
 ch-adapter-cursor = { path = "../../../crates/adapter-cursor" }
 ch-adapter-minimax = { path = "../../../crates/adapter-minimax" }
 ch-adapter-codex = { path = "../../../crates/adapter-codex" }
+ch-adapter-deepseek-harness = { path = "../../../crates/adapter-deepseek-harness" }
 ch-ops-metrics = { path = "../../../crates/ops-metrics" }
 ch-audit = { path = "../../../crates/audit" }
 ch-knowledge = { path = "../../../crates/knowledge" }

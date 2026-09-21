@@ -112,6 +112,7 @@ pub(crate) fn import_ctx(state: &DaemonState) -> ImportCtx {
         "prov_cursor",
         "prov_minimax-code",
         "prov_codex",
+        "prov_deepseek-harness",
     ] {
         if let Ok(m) = repo.import_state_map(pid) {
             states.insert(pid.to_string(), m);
@@ -403,6 +404,53 @@ pub(crate) async fn import_from_codex(
     })
 }
 
+/// DeepSeek Harness (dsh) home 路径。
+pub(crate) fn dsh_home() -> Result<String, String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    Ok(format!("{home}/.dsh"))
+}
+
+/// 列出 DeepSeek Harness 会话（面板只列顶层会话）。
+#[tauri::command]
+pub(crate) async fn list_deepseek_sessions(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<Vec<SourceSessionDto>, String> {
+    let home = dsh_home()?;
+    let sessions = ch_adapter_deepseek_harness::discover_sessions(&home)
+        .map_err(|e| format!("discover deepseek harness: {e}"))?;
+    let ictx = import_ctx(&state);
+    Ok(sessions
+        .into_iter()
+        .map(|s| SourceSessionDto {
+            imported: imported_flag(&ictx, "prov_deepseek-harness", &s.session_id, s.mtime_ms),
+            session_id: s.session_id,
+            title: s.title,
+            detail: format!("{} 条消息", s.message_count),
+            message_count: Some(s.message_count),
+        })
+        .collect())
+}
+
+/// 从 DeepSeek Harness 导入一条会话。
+#[tauri::command]
+pub(crate) async fn import_from_deepseek(
+    state: tauri::State<'_, DaemonState>,
+    session_id: String,
+) -> Result<ImportResultDto, String> {
+    run_blocking(|| {
+        let home = dsh_home()?;
+        let sessions = ch_adapter_deepseek_harness::discover_all_sessions(&home)
+            .map_err(|e| format!("discover deepseek harness: {e}"))?;
+        let session = sessions
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .ok_or_else(|| format!("session not found: {session_id}"))?;
+        let raw = ch_adapter_deepseek_harness::parse_session(&session.file_path)
+            .map_err(|e| format!("parse deepseek harness: {e}"))?;
+        import_raw_to_state(&state, raw, Some("DeepSeek Harness"), session.mtime_ms)
+    })
+}
+
 /// 启动时自动拉取 ZCode / Claude Code / Cursor / MiniMax 最新会话（plan §6.1 自动发现/同步）。
 /// 返回导入统计。最多各导入 limit 个最新会话。
 /// 若已有重置/同步在进行中，返回「同步中」标记（不阻塞 UI）。
@@ -442,10 +490,23 @@ pub(crate) struct SourceItem {
     src_ms: i64,
     /// 传给 import_raw_inner 的观察时间（None = 源无可靠时间）。
     observed_ms: Option<i64>,
-    /// 文件型来源（Claude Code / Codex）的会话文件路径。
+    /// 文件型来源（Claude Code / Codex / dsh）的会话文件路径。
     file_path: Option<String>,
-    /// 子任务 → 主任务的父链（ZCode / MiniMax），用于 repair。
+    /// 子任务 → 主任务的父链（ZCode / MiniMax / dsh），用于 repair。
     parent_id: Option<String>,
+    /// 发现阶段可得的源侧标题（Some = 来源提供真实标题，如 ZCode/MiniMax/dsh；
+    /// None = 列表阶段无真实标题，如 Claude Code/Codex）。
+    /// 跳过重解析的会话用它做「源侧是否改名」比对（title sync）。
+    title: Option<String>,
+}
+
+/// 列表标题 → 可比对标题：空白视为「无标题」（避免把未命名会话刷成空串）。
+fn listing_title(t: String) -> Option<String> {
+    if t.trim().is_empty() {
+        None
+    } else {
+        Some(t)
+    }
 }
 
 /// 来源描述：发现 + 解析闭包，驱动统一同步循环（旧实现为 5 段复制粘贴）。
@@ -487,9 +548,10 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                             .map(|s| SourceItem {
                                 src_ms: s.time_updated,
                                 observed_ms: Some(s.time_updated),
-                                session_id: s.session_id,
+                                session_id: s.session_id.clone(),
                                 file_path: None,
                                 parent_id: s.parent_id,
+                                title: listing_title(s.title),
                             })
                             .collect()
                     })
@@ -520,6 +582,8 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                                 observed_ms: s.mtime_ms,
                                 file_path: Some(s.file_path.to_string_lossy().into_owned()),
                                 parent_id: None,
+                                // 列表阶段只有项目目录名，无会话真实标题（aiTitle 在 parse 阶段）
+                                title: None,
                             })
                             .collect()
                     })
@@ -548,11 +612,12 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                     .map(|v| {
                         v.into_iter()
                             .map(|s| SourceItem {
-                                session_id: s.session_id,
+                                session_id: s.session_id.clone(),
                                 src_ms: 0,
                                 observed_ms: None,
                                 file_path: None,
                                 parent_id: None,
+                                title: listing_title(s.title),
                             })
                             .collect()
                     })
@@ -579,11 +644,12 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                     .map(|v| {
                         v.into_iter()
                             .map(|s| SourceItem {
-                                session_id: s.session_id,
+                                session_id: s.session_id.clone(),
                                 src_ms: s.updated_at_ms,
                                 observed_ms: Some(s.updated_at_ms),
                                 file_path: None,
                                 parent_id: s.parent_session_id,
+                                title: listing_title(s.title),
                             })
                             .collect()
                     })
@@ -613,6 +679,8 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                                 observed_ms: s.mtime_ms,
                                 file_path: Some(s.file_path),
                                 parent_id: None,
+                                // 列表标题是占位（"Codex 会话 (N KB)"），不可比对
+                                title: None,
                             })
                             .collect()
                     })
@@ -621,6 +689,39 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
             parse: Box::new(move |it| {
                 ch_adapter_codex::parse_session(it.file_path.as_deref().unwrap_or_default())
                     .map_err(|e| e.to_string())
+            }),
+        });
+    }
+
+    // DeepSeek Harness (dsh)：~/.dsh/sessions 下 session.jsonl(.zstd)
+    if mk(std::path::Path::new(&format!("{home}/.dsh/sessions")).exists()) {
+        let dsh_root = format!("{home}/.dsh");
+        out.push(SourceSync {
+            provider_id: "prov_deepseek-harness",
+            stat_key: "deepseek",
+            workspace: "DeepSeek Harness",
+            records_observed: true,
+            discover: Box::new(move || {
+                ch_adapter_deepseek_harness::discover_all_sessions(&dsh_root)
+                    .map(|v| {
+                        v.into_iter()
+                            .map(|s| SourceItem {
+                                session_id: s.session_id.clone(),
+                                src_ms: s.mtime_ms.unwrap_or(0),
+                                observed_ms: s.mtime_ms,
+                                file_path: Some(s.file_path),
+                                parent_id: s.parent_id,
+                                title: listing_title(s.title),
+                            })
+                            .collect()
+                    })
+                    .map_err(|e| e.to_string())
+            }),
+            parse: Box::new(move |it| {
+                ch_adapter_deepseek_harness::parse_session(
+                    it.file_path.as_deref().unwrap_or_default(),
+                )
+                .map_err(|e| e.to_string())
             }),
         });
     }
@@ -693,6 +794,14 @@ fn auto_sync_inner_with(
         (set, state_map)
     };
 
+    // 标题表：跳过分支比对「源侧是否改名」（title sync）
+    let title_map: std::collections::HashMap<SrcKey, Option<String>> = state
+        .repo
+        .lock()
+        .map_err(|e| storage_err(e))?
+        .list_conversation_source_titles()
+        .unwrap_or_default();
+
     // stale = 源更新时间 > 导入时观察时间 → 有新消息，需重导入（增量）
     let is_stale = |pid: &str, sid: &str, src_ms: i64| -> bool {
         match istate.get(&(pid.to_string(), sid.to_string())) {
@@ -721,9 +830,12 @@ fn auto_sync_inner_with(
         ("cursor", (0, 0)),
         ("minimax", (0, 0)),
         ("codex", (0, 0)),
+        ("deepseek", (0, 0)),
     ]
     .into_iter()
     .collect();
+    // 源侧标题改名传播计数（跨来源累计，输出为 titles_synced）
+    let mut titles_synced: u64 = 0;
     for src in source_table(&home) {
         let items = match (src.discover)() {
             Ok(v) => v,
@@ -757,6 +869,8 @@ fn auto_sync_inner_with(
         let mut imported_count = 0u32;
         let mut repairs: Vec<(String, String)> = Vec::new();
         let mut observed: Vec<(String, Option<i64>)> = Vec::new();
+        // 源侧标题改名（跳过重解析的会话也要跟随源标题；user_title 保留优先）
+        let mut title_syncs: Vec<(String, String)> = Vec::new();
         // 配额语义修复（2026-08-15 真实事故）：lim 只限「本轮新导入」条数，
         // 已最新的跳过不占额度。旧实现 take(lim) 按更新时间降序截断——
         // 源 641 条 / 库 506 条时，未导入的 135 条永远排在尾部轮不到，
@@ -774,6 +888,16 @@ fn auto_sync_inner_with(
             {
                 if let Some(parent) = item.parent_id {
                     repairs.push((item.session_id.clone(), parent));
+                }
+                // 源侧标题比对：discovery 给出真实标题且与库内 title 不一致 → 收集改名
+                if let Some(src_title) = item.title.as_ref() {
+                    let changed = match title_map.get(&key) {
+                        Some(Some(stored)) => stored != src_title,
+                        _ => true,
+                    };
+                    if changed {
+                        title_syncs.push((item.session_id.clone(), src_title.clone()));
+                    }
                 }
                 skip += 1;
                 continue;
@@ -827,6 +951,45 @@ fn auto_sync_inner_with(
                 }
             }
         }
+        // 源侧标题改名传播：批量刷新 title（user_title 不在 UPDATE 列，自定义重命名
+        // 仍以 effective_title 优先展示），并用新 effective_title 重建这些会话的
+        // 搜索索引文档（index_message 按 message_id 先删后插，幂等替换）
+        if !title_syncs.is_empty() {
+            let sids: Vec<String> = title_syncs.iter().map(|(s, _)| s.clone()).collect();
+            if let Ok(repo) = state.repo.lock() {
+                match repo.sync_source_titles_batch(src.provider_id, &title_syncs) {
+                    Ok(n) => {
+                        titles_synced += n as u64;
+                        tracing::info!(
+                            provider = src.provider_id,
+                            count = n,
+                            "source titles synced"
+                        );
+                    }
+                    Err(e) => tracing::warn!(error = %e, "sync source titles failed"),
+                }
+                if let Ok(convs) = repo.conversations_by_source_ids(src.provider_id, &sids) {
+                    for c in convs {
+                        let Ok(msgs) = repo.list_messages(&c.id) else {
+                            continue;
+                        };
+                        let title = c.effective_title().to_string();
+                        pending_index.extend(msgs.iter().map(|m| {
+                            ch_search::index::IndexableMessage {
+                                message_id: m.id.clone(),
+                                conversation_id: c.id.clone(),
+                                provider: c.provider,
+                                workspace_id: c.workspace_id.clone(),
+                                role: m.role,
+                                title: Some(title.clone()),
+                                body: m.content_text.clone(),
+                                created_at: m.created_at,
+                            }
+                        }));
+                    }
+                }
+            }
+        }
         if src.records_observed {
             if let Ok(repo) = state.repo.lock() {
                 if let Err(e) = repo.record_import_states(src.provider_id, &observed) {
@@ -853,10 +1016,12 @@ fn auto_sync_inner_with(
     }
 
     // 输出键与旧版完全一致（前端契约不变）+ 新增 new_counts（红点/菜单计数瞬时刷新）
+    // + titles_synced（源侧改名传播计数，附加键，前端可忽略）
     let mut map = serde_json::Map::new();
     map.insert("cancelled".into(), serde_json::json!(cancelled));
     map.insert("new_counts".into(), serde_json::Value::Object(new_counts));
     map.insert("new_total".into(), serde_json::json!(new_total));
+    map.insert("titles_synced".into(), serde_json::json!(titles_synced));
     for (key, (ok, skip)) in stats {
         map.insert(format!("{key}_imported"), serde_json::json!(ok));
         map.insert(format!("{key}_skipped"), serde_json::json!(skip));
@@ -903,7 +1068,14 @@ pub(crate) fn import_raw_inner(
     let messages = repo
         .list_messages(&conversation_id)
         .map_err(|e| storage_err(e))?;
-    let conv_title = conv.effective_title().to_string();
+    // 索引标题用「入库后的 effective_title」：重新导入时 upsert 保留了库内
+    // user_title，回读可避免索引标题被源标题覆盖（与列表/详情展示口径一致）
+    let conv_title = repo
+        .get_conversation(&conversation_id)
+        .ok()
+        .flatten()
+        .map(|c| c.effective_title().to_string())
+        .unwrap_or_else(|| conv.effective_title().to_string());
     drop(repo);
 
     // 构建待索引消息（调用方决定何时提交：单条立即，批量最后一次性）
@@ -952,6 +1124,25 @@ pub(crate) fn commit_index(
     }
     idx.commit(writer).map_err(|e| search_err(e))?;
     Ok(())
+}
+
+/// dsh「外部导入镜像」存量清理（一次性迁移用）：dsh 的 session-import 会把
+/// ZCode / Codex / Claude Code 等外部会话以 `ext-<provider>-<原id>` 镜像进
+/// ~/.dsh/sessions。这些会话的本体由各自来源 adapter 导入；dsh adapter 早期
+/// 版本曾把镜像整体导入为 dsh 会话（重复 + 错误归属——如 ZCode 的「参考炉石
+/// 传说优化」会话被标成 dsh）。适配器已在发现层排除镜像；本迁移删除存量。
+pub(crate) fn dsh_ext_cleanup(state: &DaemonState) -> Result<usize, String> {
+    let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+    let n = repo
+        .delete_conversations_by_source_prefix("prov_deepseek-harness", "ext-")
+        .map_err(|e| storage_err(e))?;
+    if n > 0 {
+        tracing::info!(
+            count = n,
+            "dsh 外部导入镜像清理完成（本体保留在各来源 provider 下）"
+        );
+    }
+    Ok(n)
 }
 
 /// 通用导入：RawConversation → DaemonState（repo + search_index + raw_store）。
@@ -1082,6 +1273,29 @@ fn sources_new_count_inner(state: &DaemonState) -> Result<serde_json::Value, Str
     Ok(serde_json::Value::Object(map))
 }
 
+/// HOME 环境变量互斥：改动 HOME 的测试必须串行（cargo 默认并行）。
+/// 跨模块共享（lib.rs 的 auto_sync 空环境测试同样改 HOME）。
+#[cfg(test)]
+pub(crate) static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// RAII：临时切换 HOME 并在退出时恢复。
+#[cfg(test)]
+pub(crate) struct HomeGuard(String);
+
+#[cfg(test)]
+impl Drop for HomeGuard {
+    fn drop(&mut self) {
+        std::env::set_var("HOME", &self.0);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_home(dir: &std::path::Path) -> HomeGuard {
+    let prev = std::env::var("HOME").unwrap_or_default();
+    std::env::set_var("HOME", dir);
+    HomeGuard(prev)
+}
+
 #[cfg(test)]
 mod new_count_tests {
     use super::*;
@@ -1089,11 +1303,302 @@ mod new_count_tests {
     #[test]
     fn sources_new_count_empty_home_is_zero() {
         // 空环境：无来源可发现 → total = 0（红点灭）
+        let _lock = HOME_LOCK.lock().expect("home lock");
         let state = DaemonState::open_in_memory().expect("state open");
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
-        std::env::set_var("HOME", dir.path());
+        let _home = set_home(dir.path());
         let v = sources_new_count_inner(&state).expect("count");
         assert_eq!(v.get("total"), Some(&serde_json::json!(0)));
+    }
+}
+
+/// 源侧标题改名传播（title sync）回归：dsh 会话在源侧重命名后，
+/// 即使 mtime 未前移（staleness 跳过重解析），threadock 侧 title 也应跟随；
+/// 用户自定义重命名（user_title）永远保留并以 effective_title 优先展示。
+#[cfg(test)]
+mod title_sync_tests {
+    use super::*;
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    /// 把会话文件 mtime 固定到指定时刻（同一测试内共用一个时刻，
+    /// 保证第二次同步「不 stale」走跳过分支而非重导入）。
+    fn freeze_mtime(file: &std::path::Path, at: std::time::SystemTime) {
+        let f = std::fs::File::options()
+            .write(true)
+            .open(file)
+            .expect("open for mtime");
+        f.set_times(std::fs::FileTimes::new().set_modified(at))
+            .expect("set mtime");
+    }
+
+    fn write_dsh_session(
+        home: &std::path::Path,
+        sid: &str,
+        title: &str,
+        at: std::time::SystemTime,
+    ) {
+        let dir = home.join(".dsh/sessions/-tmp-proj").join(sid);
+        std::fs::create_dir_all(&dir).expect("mkdir failed");
+        let file = dir.join("session.jsonl");
+        let lines = format!(
+            concat!(
+                r#"{{"type":"session","version":0,"id":"{sid}","createdAt":1788601901335,"delegationDepth":0}}"#,
+                "\n",
+                r#"{{"type":"session/title","seq":2,"time":1788601902997,"data":{{"title":"{title}","messageSeqs":[1],"source":{{"kind":"fallback"}}}}}}"#,
+                "\n",
+                r#"{{"type":"user/message","seq":1,"time":1788601902996,"data":{{"content":[{{"type":"text","text":"内容 {sid}"}}],"role":"user","id":"m-{sid}-1"}}}}"#,
+                "\n",
+                r#"{{"type":"assistant/message","seq":3,"time":1788601903709,"data":{{"message":{{"role":"assistant","content":[{{"type":"text","text":"回复 {sid}"}}],"source":{{"kind":"model","provider":"p","model":"deepseek-v4-flash"}},"id":"m-{sid}-2"}}}}}}"#,
+            ),
+            sid = sid,
+            title = title,
+        );
+        std::fs::write(&file, lines).expect("write session failed");
+        freeze_mtime(&file, at);
+    }
+
+    fn conv_by_source(state: &DaemonState, sid: &str) -> ch_domain::Conversation {
+        let repo = state.repo.lock().expect("repo lock");
+        repo.find_conversation_by_source("prov_deepseek-harness", sid)
+            .expect("query failed")
+            .unwrap_or_else(|| panic!("conversation {sid} should exist"))
+    }
+
+    #[test]
+    fn sync_propagates_source_rename_preserving_user_title() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::TempDir::new().expect("tempdir failed");
+        let _home_guard = set_home(home.path());
+        let data = tempfile::TempDir::new().expect("tempdir failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: data.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("state open");
+
+        // 第一次同步：导入两个 dsh 会话（A 将设自定义重命名，B 保持默认）
+        let frozen_at = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        write_dsh_session(home.path(), "session-a", "原始标题A", frozen_at);
+        write_dsh_session(home.path(), "session-b", "原始标题B", frozen_at);
+        let v1 = auto_sync_inner(&state, None).expect("first sync");
+        assert_eq!(v1.get("deepseek_imported"), Some(&serde_json::json!(2)));
+        assert_eq!(v1.get("titles_synced"), Some(&serde_json::json!(0)));
+
+        // 用户在 threadock 给 A 自定义重命名
+        let conv_a = conv_by_source(&state, "session-a");
+        {
+            let repo = state.repo.lock().expect("repo lock");
+            repo.set_user_title(&conv_a.id, Some("我的自定义名"))
+                .expect("set user title");
+        }
+
+        // 源侧把 A、B 都重命名（mtime 冻结回同一时刻 → staleness 判定跳过重解析）
+        write_dsh_session(home.path(), "session-a", "源侧新标题A", frozen_at);
+        write_dsh_session(home.path(), "session-b", "源侧新标题B", frozen_at);
+
+        let v2 = auto_sync_inner(&state, None).expect("second sync");
+        assert_eq!(
+            v2.get("deepseek_imported"),
+            Some(&serde_json::json!(0)),
+            "mtime 未变不应重导入"
+        );
+        assert_eq!(
+            v2.get("titles_synced"),
+            Some(&serde_json::json!(2)),
+            "两条源侧改名都应传播"
+        );
+
+        // B（无自定义）：title 跟随源侧
+        let conv_b = conv_by_source(&state, "session-b");
+        assert_eq!(conv_b.title.as_deref(), Some("源侧新标题B"));
+        assert_eq!(conv_b.user_title, None);
+        assert_eq!(conv_b.effective_title(), "源侧新标题B");
+
+        // A（有自定义）：title 仍跟随源侧刷新，但展示以自定义优先
+        let conv_a2 = conv_by_source(&state, "session-a");
+        assert_eq!(
+            conv_a2.title.as_deref(),
+            Some("源侧新标题A"),
+            "源标题应同步"
+        );
+        assert_eq!(
+            conv_a2.user_title.as_deref(),
+            Some("我的自定义名"),
+            "自定义重命名必须保留"
+        );
+        assert_eq!(conv_a2.effective_title(), "我的自定义名");
+
+        // 第三次同步：标题未再变化 → 不产生新的传播
+        let v3 = auto_sync_inner(&state, None).expect("third sync");
+        assert_eq!(v3.get("titles_synced"), Some(&serde_json::json!(0)));
+    }
+
+    /// 源侧真正更新（mtime 前移）时走重导入路径：upsert 本就覆盖 title、
+    /// 保留 user_title；titles_synced 不重复计数（该路径不算改名传播）。
+    #[test]
+    fn stale_reimport_refreshes_title_via_upsert() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::TempDir::new().expect("tempdir failed");
+        let _home_guard = set_home(home.path());
+        let data = tempfile::TempDir::new().expect("tempdir failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: data.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("state open");
+
+        let frozen_at = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        write_dsh_session(home.path(), "session-c", "旧标题C", frozen_at);
+        assert!(
+            auto_sync_inner(&state, None)
+                .expect("first sync")
+                .get("deepseek_imported")
+                == Some(&serde_json::json!(1))
+        );
+        let conv = conv_by_source(&state, "session-c");
+        {
+            let repo = state.repo.lock().expect("repo lock");
+            repo.set_user_title(&conv.id, Some("自定义C"))
+                .expect("set user title");
+        }
+
+        // 源侧重命名 + mtime 前移到「现在」（stale → 重解析 → upsert 覆盖 title）
+        let file = home
+            .path()
+            .join(".dsh/sessions/-tmp-proj/session-c/session.jsonl");
+        let content = std::fs::read_to_string(&file)
+            .expect("read failed")
+            .replace("旧标题C", "新标题C（源侧更新）");
+        std::fs::write(&file, content).expect("write failed");
+
+        let v = auto_sync_inner(&state, None).expect("second sync");
+        assert_eq!(
+            v.get("deepseek_imported"),
+            Some(&serde_json::json!(1)),
+            "stale 应重导入"
+        );
+        let conv2 = conv_by_source(&state, "session-c");
+        assert_eq!(conv2.title.as_deref(), Some("新标题C（源侧更新）"));
+        assert_eq!(
+            conv2.user_title.as_deref(),
+            Some("自定义C"),
+            "重导入也必须保留 user_title"
+        );
+        assert_eq!(conv2.effective_title(), "自定义C");
+    }
+}
+
+/// dsh 外部导入镜像（session-import）回归：镜像不进发现结果、不被同步导入；
+/// 存量误导入数据由 dsh_ext_cleanup 清理（原生会话保留）。
+#[cfg(test)]
+mod dsh_ext_tests {
+    use super::*; // HOME_LOCK / set_home 已上移到模块顶层（pub(crate)）
+    use ch_daemon::{DaemonState, DaemonStateConfig};
+
+    fn write_session(home: &std::path::Path, dir_name: &str, marker: bool) {
+        let dir = home.join(".dsh/sessions/-tmp-proj").join(dir_name);
+        std::fs::create_dir_all(&dir).expect("mkdir failed");
+        let marker_line = r#"{"type":"session-import/source","seq":1,"time":1788607545294,"data":{"provider":"zcode","sourceId":"sess_orig","sourcePath":"/x/.zcode/cli/db/db.sqlite"}}"#;
+        let lines = format!(
+            concat!(
+                r#"{{"type":"session","version":0,"id":"{id}","createdAt":1788601901335,"delegationDepth":0}}"#,
+                "\n",
+                r#"{{"type":"session/title","seq":2,"time":1788601902997,"data":{{"title":"{title}","messageSeqs":[1],"source":{{"kind":"fallback"}}}}}}"#,
+                "\n",
+                r#"{{"type":"user/message","seq":1,"time":1788601902996,"data":{{"content":[{{"type":"text","text":"内容"}}],"role":"user","id":"m-1"}}}}"#,
+            ),
+            id = dir_name,
+            title = if marker {
+                "外部镜像标题"
+            } else {
+                "原生会话标题"
+            },
+        );
+        let body = if marker {
+            // 镜像：来源事件插在会话头之后（真实布局：seq 0 请求头、seq 1 来源事件）
+            let mut l: Vec<String> = lines.split('\n').map(String::from).collect();
+            l.insert(1, marker_line.to_string());
+            l.join("\n")
+        } else {
+            lines
+        };
+        std::fs::write(dir.join("session.jsonl"), body).expect("write failed");
+    }
+
+    #[test]
+    fn sync_skips_ext_mirrors_and_cleanup_removes_legacy() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::TempDir::new().expect("tempdir failed");
+        let _home_guard = set_home(home.path());
+        let data = tempfile::TempDir::new().expect("tempdir failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: data.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("state open");
+
+        // 原生会话 + 两类外部镜像（ext-zcode 目录、无前缀但带来源事件的异常文件）
+        write_session(home.path(), "session-native", false);
+        write_session(home.path(), "ext-zcode-sess_orig", true);
+        write_session(home.path(), "session-odd-marker", true);
+
+        let v = auto_sync_inner(&state, None).expect("sync");
+        assert_eq!(
+            v.get("deepseek_imported"),
+            Some(&serde_json::json!(1)),
+            "只导入原生会话"
+        );
+        {
+            let repo = state.repo.lock().expect("repo lock");
+            let mirrors: Vec<String> = repo
+                .list_conversation_sources()
+                .expect("sources")
+                .into_iter()
+                .filter(|(pid, _)| pid == "prov_deepseek-harness")
+                .map(|(_, sid)| sid)
+                .collect();
+            assert_eq!(mirrors, vec!["session-native".to_string()]);
+        }
+
+        // 存量清理：模拟早期版本已误导入的镜像行 → dsh_ext_cleanup 删除、原生保留
+        {
+            let repo = state.repo.lock().expect("repo lock");
+            let mut ext = ch_domain::Conversation::new(
+                ch_domain::Provider::DeepSeekHarness,
+                "ext-zcode-sess_legacy",
+            );
+            ext.title = Some("误导入的镜像".into());
+            repo.upsert_conversation(&ext).expect("upsert failed");
+            repo.record_import_states(
+                "prov_deepseek-harness",
+                &[("ext-zcode-sess_legacy".into(), Some(1))],
+            )
+            .expect("record");
+        }
+        let n = dsh_ext_cleanup(&state).expect("cleanup");
+        assert_eq!(n, 1, "存量镜像应被清理");
+        {
+            let repo = state.repo.lock().expect("repo lock");
+            let sources: Vec<String> = repo
+                .list_conversation_sources()
+                .expect("sources")
+                .into_iter()
+                .filter(|(pid, _)| pid == "prov_deepseek-harness")
+                .map(|(_, sid)| sid)
+                .collect();
+            assert_eq!(
+                sources,
+                vec!["session-native".to_string()],
+                "清理后只剩原生会话"
+            );
+            assert!(
+                !repo
+                    .import_state_map("prov_deepseek-harness")
+                    .expect("state")
+                    .contains_key("ext-zcode-sess_legacy"),
+                "镜像 import_state 一并清理"
+            );
+        }
     }
 }
 

@@ -7,12 +7,15 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Conversation, sourceLabel } from "./types";
 import { showToast } from "./toast";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import { buildConvMenuItems, TagInputPopup, loadPinnedIds } from "./ConvMenu";
+import type { ListScope } from "./ConvMenu";
 import ConvItem from "./ConvItem";
 import { EmptyState } from "./EmptyState";
 import { Icon } from "./Icon";
 
-/** 列表视图维度：全部 / 收藏 / 已归档 / 已删除。 */
-export type ListScope = "all" | "favorite" | "archived" | "deleted";
+// 视图维度 / 置顶读取迁移至共享模块（搜索面板与普通列表共用同一套右键菜单）
+export type { ListScope } from "./ConvMenu";
+export { loadPinnedIds } from "./ConvMenu";
 
 /** 日期快筛：今日 / 近 7 天 / 近 30 天 / 全部（默认全部）。 */
 export type DateFilter = "all" | "today" | "week" | "month";
@@ -44,11 +47,6 @@ const PIN_KEY = "ch-conv-pins";
 const SORT_KEY = "ch-sort-by";
 const DATE_KEY = "ch-date-filter";
 
-/** 读取置顶 ID 集合（localStorage 持久化）。 */
-export function loadPinnedIds(): Set<string> {
-  try { return new Set(JSON.parse(localStorage.getItem(PIN_KEY) ?? "[]") as string[]); }
-  catch { return new Set(); }
-}
 function savePinnedIds(s: Set<string>) {
   try { localStorage.setItem(PIN_KEY, JSON.stringify([...s])); } catch { /* 静默 */ }
 }
@@ -271,82 +269,27 @@ export default function ConversationList({
     setCtxMenu({ conv: c, x: e.clientX, y: e.clientY });
   }, [selectedIds, onSelect]);
 
-  const buildMenu = (c: Conversation, c_x: number, c_y: number): MenuItem[] => {
-    const isMulti = selectedIds.size > 1 && selectedIds.has(c.id);
-    const targetCount = isMulti ? selectedIds.size : 1;
-    const targetIds = isMulti ? [...selectedIds] : [c.id];
-    const items: MenuItem[] = [];
-    if (scope !== "deleted") {
-      items.push({
-        icon: c.favorite ? "☆" : "★",
-        label: isMulti ? `${c.favorite ? t("取消收藏") : t("收藏")} ${targetCount} 条` : (c.favorite ? t("取消收藏") : t("收藏")),
-        onClick: async () => {
-          const fn = onBulkFavorite ? (ids: string[]) => onBulkFavorite(ids, !c.favorite) : undefined;
-          if (fn) { await fn(targetIds); showToast(`✓ ${!c.favorite ? t("已收藏") : t("已取消收藏")} ${targetCount} 条`, "info"); }
-          else onToggleFavorite?.(c);
-        },
-        group: 1,
-      });
-      items.push({
-        icon: c.archived ? "📤" : "🗄",
-        label: isMulti ? `${c.archived ? t("取消归档") : t("归档")} ${targetCount} 条` : (c.archived ? t("取消归档") : t("归档")),
-        onClick: async () => {
-          if (isMulti) {
-            const fn = onBulkArchive ? (ids: string[]) => onBulkArchive(ids, !c.archived) : undefined;
-            if (fn) { await fn(targetIds); showToast(`✓ ${!c.archived ? t("已归档") : t("已取消归档")} ${targetCount} 条`, "info"); }
-          } else if (onArchiveOne) onArchiveOne(c);
-        },
-        group: 1,
-      });
-      items.push({
-        icon: pinned.has(c.id) ? "📍" : "📌",
-        label: pinned.has(c.id) ? t("取消置顶") : t("置顶（排在最前）"),
-        onClick: () => togglePin(c.id),
-        group: 1,
-      });
-    }
-    if (scope === "deleted") {
-      items.push({
-        icon: "↩",
-        label: isMulti ? t("恢复这 {__0__} 条会话", { __0__: targetCount }) : t("恢复此会话"),
-        onClick: () => {
-          for (const id of targetIds) {
-            const cc = conversations.find((x) => x.id === id);
-            if (cc) onRestore?.(cc);
-          }
-        },
-        group: 1,
-      });
-    } else {
-      items.push({
-        icon: "🏷",
-        label: isMulti ? t("给 {__0__} 条加标签…", { __0__: targetCount }) : t("加标签…"),
-        onClick: () => {
-          // 打开内联输入（位置贴 context menu 下方），不在此处用 window.prompt 阻断流程
-          setTagInput({ ids: targetIds, count: targetCount, value: "", x: c_x, y: c_y });
-        },
-        group: 1,
-      });
-      items.push({
-        icon: "📋",
-        label: t("复制标题"),
-        onClick: () => { if (onCopyTitle) onCopyTitle(c); else { navigator.clipboard?.writeText(c.user_title ?? c.title ?? "").then(() => showToast("✓ 标题已复制", "info", 1500)).catch(() => showToast("剪贴板不可用", "error")); } },
-        group: 2,
-      });
-      items.push({
-        icon: "🗑",
-        label: isMulti ? t("删除 {__0__} 条（带撤销）", { __0__: (targetCount) }) : t("删除（带撤销）"),
-        danger: true,
-        onClick: () => {
-          const fn = onBulkDelete ? (ids: string[]) => onBulkDelete(ids) : undefined;
-          if (fn) fn(targetIds);
-          else if (onDeleteOne) onDeleteOne(c);
-        },
-        group: 3,
-      });
-    }
-    return items;
-  };
+  const buildMenu = (c: Conversation, c_x: number, c_y: number): MenuItem[] =>
+    buildConvMenuItems({
+      conv: c,
+      x: c_x,
+      y: c_y,
+      scope,
+      pinned,
+      onTogglePin: togglePin,
+      selectedIds,
+      conversations,
+      onToggleFavorite,
+      onArchiveOne,
+      onDeleteOne,
+      onCopyTitle,
+      onRestore,
+      onBulkFavorite,
+      onBulkArchive,
+      onBulkDelete,
+      onBulkAddTag,
+      openTagInput: (ids, count, x, y) => setTagInput({ ids, count, value: "", x, y }),
+    });
 
   // per-item flags（useMemo Map：避免每行重新计算 set.has）
   const itemFlags = useMemo(() => {
@@ -384,7 +327,7 @@ export default function ConversationList({
   });
 
   // 来源 chip：仅显示有数据的来源
-  const providerChips = (["zcode", "claude-code", "cursor", "minimax-code", "codex"] as const)
+  const providerChips = (["zcode", "claude-code", "cursor", "minimax-code", "codex", "deepseek-harness"] as const)
     .filter((p) => !availableProviders || availableProviders.size === 0 || availableProviders.has(p));
 
   // 提交右键菜单触发的「加标签」内联输入
@@ -590,7 +533,7 @@ export default function ConversationList({
           icon="mailbox"
           size="md"
           title={t("还没有任何会话")}
-          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} />{t("同步")}</span> 按钮把 Cursor / Claude Code / ZCode / Codex 里的历史对话拉进来</>}
+          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} />{t("同步")}</span> 按钮把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness 里的历史对话拉进来</>}
         />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length === 0 && (
@@ -605,33 +548,21 @@ export default function ConversationList({
           x={ctxMenu.x}
           y={ctxMenu.y}
           items={buildMenu(ctxMenu.conv, ctxMenu.x, ctxMenu.y)}
-          onClose={() => { setCtxMenu(null); setTagInput(null); }}
+          // 只关菜单：菜单项触发的「加标签」内联输入由 TagInputPopup 自身生命周期管理
+          // （旧写法在此一并 setTagInput(null)，会把刚打开的输入层立即清掉）
+          onClose={() => setCtxMenu(null)}
         />
       )}
       {/* 右键「加标签」触发的内联输入（替代 window.prompt） */}
       {tagInput && (
-        <>
-          <div className="contextmenu-backdrop" onClick={() => { setTagInput(null); setCtxMenu(null); }} />
-          <div
-            className="contextmenu"
-            style={{ left: tagInput.x, top: tagInput.y + 32, padding: 6 }}
-            role="menu"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              className="bulk-tag-input"
-              autoFocus
-              placeholder={t("# 标签名（自动去 # 前缀）")}
-              value={tagInput.value}
-              onChange={(e) => setTagInput({ ...tagInput, value: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); void submitTagInput(); }
-                else if (e.key === "Escape") { e.preventDefault(); setTagInput(null); setCtxMenu(null); }
-              }}
-              title={t("Enter 提交 · Esc 取消")}
-            />
-          </div>
-        </>
+        <TagInputPopup
+          x={tagInput.x}
+          y={tagInput.y}
+          value={tagInput.value}
+          onChange={(v) => setTagInput({ ...tagInput, value: v })}
+          onSubmit={() => void submitTagInput()}
+          onClose={() => { setTagInput(null); setCtxMenu(null); }}
+        />
       )}
     </>
   );

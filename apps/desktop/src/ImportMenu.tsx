@@ -11,6 +11,7 @@ export interface NewCount {
   cursor?: number;
   minimax?: number;
   codex?: number;
+  deepseek?: number;
   total?: number;
 }
 

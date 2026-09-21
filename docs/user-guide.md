@@ -108,7 +108,7 @@ Threadock 按功能分为七个视图。侧边栏上有八个导航入口（`⌘
 
 - **关键指标卡片**：会话数、消息数、最近活动、新增会话数（可点击跳转到对应视图；每张卡片可单独隐藏）；
 - **最近会话与最近提问**：快速回到最近的工作上下文；
-- **来源分布**：五个 IDE 来源各自的会话占比。
+- **来源分布**：各 IDE 来源的会话占比。
 
 ![概览视图](images/user-guide/overview.png)
 *（截图待补充）*
@@ -216,9 +216,9 @@ Threadock 按功能分为七个视图。侧边栏上有八个导航入口（`⌘
 
 ## 5. 数据来源与自动同步
 
-### 5.1 五个数据来源（只读）
+### 5.1 六个数据来源（只读）
 
-Threadock 目前支持从以下五个 AI IDE 导入会话，**全部只读**：
+Threadock 目前支持从以下六个 AI 编程工具导入会话，**全部只读**：
 
 | 来源 | 读取位置（以 macOS 为例） | 形式 |
 |---|---|---|
@@ -227,10 +227,21 @@ Threadock 目前支持从以下五个 AI IDE 导入会话，**全部只读**：
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | SQLite 数据库 |
 | MiniMax Code | `~/.minimax/v2/sqlite/runtime-state.sqlite` | SQLite 数据库 |
 | Codex | `~/.codex/sessions/` 下的 `.jsonl` 文件 | JSONL 会话文件 |
+| DeepSeek Harness (dsh) | `~/.dsh/sessions/` 下的 `session.jsonl(.zstd)` | JSONL 事件日志（可 zstd 压缩） |
+
+> **dsh 外部导入镜像不消费**：dsh 自身的 session-import 功能会把 ZCode / Codex /
+> Claude Code 等工具的历史会话以 `ext-<provider>-<原id>` 镜像进 `~/.dsh/sessions`。
+> 这些镜像的本体由各自来源的只读导入覆盖，Threadock 的 dsh 适配器会整体排除它们，
+> 避免同一会话重复出现、且被错误标成 dsh 来源。
 
 只要本机安装过对应工具，Threadock 就能自动发现其数据；未安装的来源会被自动跳过。
 
 此外还支持**手动导入通用文件**：在「导入」菜单中选择任意 Markdown / JSONL 会话文件，并指定归属的工作区名称。
+
+**源侧标题改名同步**：在源应用里重命名会话后，Threadock 会在下次同步时把该会话
+的标题一并更新（即使会话内容没有新消息）——包括 dsh 里的手动重命名、ZCode /
+MiniMax 侧的标题修改。若你在 Threadock 里对该会话做过**自定义重命名**（详情页
+双击标题），则以你的命名为准，源侧改名只更新内部标题、不再改变展示名。
 
 ### 5.2 只读原则
 

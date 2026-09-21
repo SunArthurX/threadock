@@ -1360,6 +1360,56 @@ impl Repository {
         Ok(n)
     }
 
+    /// 已导入会话的 (`provider_id`, `source_id`) → `title` 全集。
+    /// 供 auto_sync 跳过分支比对「源侧标题是否改名」（title sync 用）。
+    pub fn list_conversation_source_titles(
+        &self,
+    ) -> StorageResult<std::collections::HashMap<(String, String), Option<String>>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let mut stmt =
+            conn.prepare("SELECT provider_id, source_conversation_id, title FROM conversations")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+        let mut m = std::collections::HashMap::new();
+        for r in rows {
+            let (pid, sid, title) = r?;
+            m.insert((pid, sid), title);
+        }
+        Ok(m)
+    }
+
+    /// 批量同步源侧标题：源应用里会话被重命名后，把 threadock 侧
+    /// `conversations.title` 刷新为源标题。`user_title`（用户在 threadock
+    /// 里的自定义重命名）不在 UPDATE 列表中，展示层 `effective_title()`
+    /// 仍以自定义优先（plan §11.5：用户数据优先）。单事务批量执行。
+    pub fn sync_source_titles_batch(
+        &self,
+        provider_id: &str,
+        entries: &[(String, String)],
+    ) -> StorageResult<usize> {
+        if entries.is_empty() {
+            return Ok(0);
+        }
+        let mut conn = self.conn.lock().expect("mutex poisoned");
+        let tx = conn.transaction()?;
+        let mut n = 0;
+        for (source_id, title) in entries {
+            n += tx.execute(
+                "UPDATE conversations SET title = ?1
+                 WHERE provider_id = ?2 AND source_conversation_id = ?3
+                   AND title IS NOT ?1",
+                params![title, provider_id, source_id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
     /// 已导入会话的 (`provider_id`, `source_id`) `全集（auto_sync` 幂等快速检查用）。
     pub fn list_conversation_sources(&self) -> StorageResult<Vec<(String, String)>> {
         let conn = self.conn.lock().expect("mutex poisoned");
@@ -1835,6 +1885,87 @@ impl Repository {
         Ok(())
     }
 
+    /// 按 `source_conversation_id` 前缀批量硬删会话，返回删除数。
+    /// 用于 dsh「外部导入镜像」（`ext-*`）等错误归属数据的存量清理。
+    ///
+    /// 性能要点：FTS 触发器按 `message_id` 列值删除，FTS5 对列值无索引 →
+    /// 逐行触发是 O(全索引)×N（真实库 2.7 万行实测 20 分钟未完成）。
+    /// 因此事务内临时 DROP 删除触发器，改为**一条批量** FTS 清理（一次索引
+    /// 扫描，实测秒级），结束后按 schema.rs 原文重建触发器。消息/会话随后
+    /// 删除（events/tags/knowledge 走 FK CASCADE）；import_state 无外键，
+    /// 按同前缀显式清理。顺带清扫 messages_fts 里 message_id 已不存在的
+    /// 历史残渣（FK 级联不触发触发器，长期累积）。
+    pub fn delete_conversations_by_source_prefix(
+        &self,
+        provider_id: &str,
+        prefix: &str,
+    ) -> StorageResult<usize> {
+        let mut conn = self.conn.lock().expect("mutex poisoned");
+        let tx = conn.transaction()?;
+        let ids: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT id FROM conversations
+                 WHERE provider_id = ?1 AND source_conversation_id LIKE ?2 || '%'",
+            )?;
+            let rows = stmt.query_map(params![provider_id, prefix], |r| r.get(0))?;
+            let mut v = Vec::new();
+            for r in rows {
+                v.push(r?);
+            }
+            v
+        };
+        // FTS 批量清理（触发器已摘除，扫一次索引）：目标会话的消息行
+        // + message_id 已不存在的任意历史残渣（FK 级联不触发触发器，长期累积）；
+        // 触发器在所有消息删除完成后再重建（避免逐行触发再次全扫 FTS）
+        tx.execute("DROP TRIGGER IF EXISTS messages_ad_fts", [])?;
+        tx.execute(
+            "DELETE FROM messages_fts WHERE message_id IN (
+                 SELECT m.id FROM messages m JOIN conversations c ON c.id = m.conversation_id
+                 WHERE c.provider_id = ?1 AND c.source_conversation_id LIKE ?2 || '%')
+                OR message_id NOT IN (SELECT id FROM messages)",
+            params![provider_id, prefix],
+        )?;
+        if ids.is_empty() {
+            // 无匹配也清理 import_state 残留（会话已删而观察记录尚在的场景）
+            tx.execute(
+                "DELETE FROM import_state WHERE provider_id = ?1 AND source_id LIKE ?2 || '%'",
+                params![provider_id, prefix],
+            )?;
+            tx.execute(
+                "CREATE TRIGGER messages_ad_fts AFTER DELETE ON messages BEGIN
+                     DELETE FROM messages_fts WHERE message_id = OLD.id;
+                 END",
+                [],
+            )?;
+            tx.commit()?;
+            return Ok(0);
+        }
+        // 删消息（触发器仍摘除中 → 无逐行 FTS 扫描），再删会话
+        for id in &ids {
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1",
+                params![id],
+            )?;
+        }
+        let mut n = 0;
+        for id in &ids {
+            n += tx.execute("DELETE FROM conversations WHERE id = ?1", params![id])?;
+        }
+        tx.execute(
+            "DELETE FROM import_state WHERE provider_id = ?1 AND source_id LIKE ?2 || '%'",
+            params![provider_id, prefix],
+        )?;
+        // 按原文重建触发器（与 schema.rs 定义逐字一致）
+        tx.execute(
+            "CREATE TRIGGER messages_ad_fts AFTER DELETE ON messages BEGIN
+                 DELETE FROM messages_fts WHERE message_id = OLD.id;
+             END",
+            [],
+        )?;
+        tx.commit()?;
+        Ok(n)
+    }
+
     // ── 自定义脱敏规则（plan §14.6）──────────────────────────────────────
 }
 
@@ -2079,6 +2210,211 @@ mod tests {
             .expect("unexpected None");
         assert_eq!(got.user_title.as_deref(), Some("my custom title")); // 保留
         assert_eq!(got.title.as_deref(), Some("source changed")); // 更新
+    }
+
+    #[test]
+    fn sync_source_titles_updates_title_preserves_user_title() {
+        // 源侧重命名 → title 跟随；threadock 自定义重命名 → user_title 保留
+        let r = repo();
+        r.upsert_provider(Provider::ZCode).expect("upsert failed");
+        let mut plain = Conversation::new(Provider::ZCode, "src-title-a");
+        plain.title = Some("旧标题".into());
+        let id_plain = r.upsert_conversation(&plain).expect("upsert failed");
+
+        let mut custom = Conversation::new(Provider::ZCode, "src-title-b");
+        custom.title = Some("旧标题".into());
+        custom.user_title = Some("我的自定义名".into());
+        let id_custom = r.upsert_conversation(&custom).expect("upsert failed");
+
+        let n = r
+            .sync_source_titles_batch(
+                "prov_zcode",
+                &[
+                    ("src-title-a".into(), "源侧新标题".into()),
+                    ("src-title-b".into(), "源侧新标题".into()),
+                    ("src-not-exist".into(), "无目标".into()),
+                ],
+            )
+            .expect("sync titles failed");
+        assert_eq!(n, 2, "两条已存在会话的标题应被更新");
+
+        let got = r
+            .get_conversation(&id_plain)
+            .expect("unexpected None")
+            .expect("unexpected None");
+        assert_eq!(got.title.as_deref(), Some("源侧新标题"));
+        assert_eq!(got.user_title, None);
+        assert_eq!(got.effective_title(), "源侧新标题");
+
+        let got = r
+            .get_conversation(&id_custom)
+            .expect("unexpected None")
+            .expect("unexpected None");
+        assert_eq!(got.title.as_deref(), Some("源侧新标题"), "源标题仍应刷新");
+        assert_eq!(
+            got.user_title.as_deref(),
+            Some("我的自定义名"),
+            "自定义重命名必须保留"
+        );
+        assert_eq!(got.effective_title(), "我的自定义名", "展示仍以自定义优先");
+
+        // 幂等：标题未再变化时第二次同步不产生更新
+        let n2 = r
+            .sync_source_titles_batch("prov_zcode", &[("src-title-a".into(), "源侧新标题".into())])
+            .expect("sync titles failed");
+        assert_eq!(n2, 0);
+    }
+
+    #[test]
+    fn list_conversation_source_titles_map() {
+        let r = repo();
+        r.upsert_provider(Provider::Codex).expect("upsert failed");
+        let mut c = Conversation::new(Provider::Codex, "src-title-map");
+        c.title = Some("t1".into());
+        r.upsert_conversation(&c).expect("upsert failed");
+        let c2 = Conversation::new(Provider::Codex, "src-title-none");
+        r.upsert_conversation(&c2).expect("upsert failed");
+
+        let m = r
+            .list_conversation_source_titles()
+            .expect("unexpected None");
+        assert_eq!(
+            m.get(&("prov_codex".to_string(), "src-title-map".to_string())),
+            Some(&Some("t1".to_string()))
+        );
+        assert_eq!(
+            m.get(&("prov_codex".to_string(), "src-title-none".to_string())),
+            Some(&None)
+        );
+        assert!(!m.contains_key(&("prov_codex".to_string(), "missing".to_string())));
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // 单测：删除-级联-触发器-残渣清扫一条链
+    fn delete_conversations_by_source_prefix_cleans_children_and_state() {
+        // dsh 外部镜像清理：只删 ext- 前缀，原生会话与其消息/状态保留
+        let r = repo();
+        r.upsert_provider(Provider::DeepSeekHarness)
+            .expect("upsert failed");
+
+        let mut native = Conversation::new(Provider::DeepSeekHarness, "session-native");
+        native.title = Some("原生".into());
+        let native_id = r.upsert_conversation(&native).expect("upsert failed");
+        let mut ext1 = Conversation::new(Provider::DeepSeekHarness, "ext-zcode-sess_aaa");
+        ext1.title = Some("镜像A".into());
+        let ext1_id = r.upsert_conversation(&ext1).expect("upsert failed");
+        let ext2_id = {
+            let mut c = Conversation::new(Provider::DeepSeekHarness, "ext-codex-bbb");
+            c.title = Some("镜像B".into());
+            r.upsert_conversation(&c).expect("upsert failed")
+        };
+        // 镜像会话挂消息 + import_state（验证级联与观察表清理）
+        let m = Message::new(&ext1_id, Role::User, 1);
+        r.upsert_message(&m).expect("upsert failed");
+        r.record_import_states(
+            "prov_deepseek-harness",
+            &[
+                ("ext-zcode-sess_aaa".into(), Some(1)),
+                ("session-native".into(), Some(2)),
+            ],
+        )
+        .expect("record failed");
+        // 其它 provider 的 ext- 前缀会话不应被波及
+        r.upsert_provider(Provider::Generic).expect("upsert failed");
+        let other = Conversation::new(Provider::Generic, "ext-zcode-ccc");
+        let other_id = r.upsert_conversation(&other).expect("upsert failed");
+
+        let n = r
+            .delete_conversations_by_source_prefix("prov_deepseek-harness", "ext-")
+            .expect("delete failed");
+        assert_eq!(n, 2, "两条 ext- 镜像应被删除");
+
+        assert!(
+            r.get_conversation(&native_id)
+                .expect("unexpected None")
+                .is_some(),
+            "原生会话保留"
+        );
+        assert!(r
+            .get_conversation(&ext1_id)
+            .expect("unexpected None")
+            .is_none());
+        assert!(r
+            .get_conversation(&ext2_id)
+            .expect("unexpected None")
+            .is_none());
+        assert!(
+            r.get_conversation(&other_id)
+                .expect("unexpected None")
+                .is_some(),
+            "其它 provider 不受影响"
+        );
+        assert!(
+            r.list_messages(&ext1_id)
+                .expect("unexpected None")
+                .is_empty(),
+            "消息级联清理"
+        );
+        let state = r
+            .import_state_map("prov_deepseek-harness")
+            .expect("unexpected None");
+        assert!(
+            !state.contains_key("ext-zcode-sess_aaa"),
+            "镜像 import_state 清理"
+        );
+        assert_eq!(
+            state.get("session-native"),
+            Some(&Some(2)),
+            "原生 import_state 保留"
+        );
+
+        // FTS 触发器保持存在（临时摘除后按原文重建），且 FTS 已无目标消息行
+        {
+            let conn = r.conn.lock().expect("mutex poisoned");
+            let trigger: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master
+                     WHERE name='messages_ad_fts' AND type='trigger'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("trigger check");
+            let fts_left: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages_fts WHERE message_id = ?1",
+                    params![m.id],
+                    |row| row.get(0),
+                )
+                .expect("fts check");
+            assert_eq!(trigger, 1, "触发器必须原样重建");
+            assert_eq!(fts_left, 0, "目标消息的 FTS 行应被清理");
+        }
+
+        // 幂等：再次执行返回 0，且顺带清扫 message_id 不存在的历史 FTS 残渣
+        {
+            let conn = r.conn.lock().expect("mutex poisoned");
+            conn.execute(
+                "INSERT INTO messages_fts(message_id, conversation_id, provider, workspace_id, role, title, body)
+                 VALUES ('ghost-msg', 'ghost-conv', 'zcode', NULL, 'user', '残渣', 'body')",
+                [],
+            )
+            .expect("seed stale fts");
+        }
+        let n2 = r
+            .delete_conversations_by_source_prefix("prov_deepseek-harness", "ext-")
+            .expect("delete failed");
+        assert_eq!(n2, 0);
+        {
+            let conn = r.conn.lock().expect("mutex poisoned");
+            let stale_left: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM messages_fts WHERE message_id = 'ghost-msg'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("fts check");
+            assert_eq!(stale_left, 0, "历史 FTS 残渣应被顺带清扫");
+        }
     }
 
     #[test]

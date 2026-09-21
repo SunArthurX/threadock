@@ -49,6 +49,10 @@ pub enum Provider {
     /// Markdown / JSONL / ZIP 等通用导入
     Generic,
     Unknown,
+    /// DeepSeek Harness（dsh）CLI。
+    /// 按上方约定追加到枚举末尾，保证已有成员序列化稳定。
+    #[serde(rename = "deepseek-harness")]
+    DeepSeekHarness,
 }
 
 impl Provider {
@@ -64,6 +68,7 @@ impl Provider {
             Provider::OpenCode => "opencode",
             Provider::Generic => "generic",
             Provider::Unknown => "unknown",
+            Provider::DeepSeekHarness => "deepseek-harness",
         }
     }
 }
@@ -86,6 +91,7 @@ impl std::str::FromStr for Provider {
             "opencode" => Ok(Provider::OpenCode),
             "generic" => Ok(Provider::Generic),
             "unknown" => Ok(Provider::Unknown),
+            "deepseek-harness" => Ok(Provider::DeepSeekHarness),
             other => Err(DomainError::UnknownProvider(other.to_string())),
         }
     }
@@ -644,6 +650,7 @@ mod tests {
             Provider::OpenCode,
             Provider::Generic,
             Provider::Unknown,
+            Provider::DeepSeekHarness,
         ] {
             let s = p.as_str();
             let back: Provider = s.parse().expect("parse failed");

@@ -130,6 +130,35 @@ pub fn run() {
                     }
                 });
             }
+            // dsh 外部导入镜像清理：dsh 的 session-import 把 ZCode/Codex 等
+            // 外部会话以 `ext-*` 镜像进 ~/.dsh，早期 dsh adapter 误将镜像导入
+            // 为 dsh 会话（重复 + 错误归属）。适配器已在发现层排除；此处删除
+            // 存量（本体由各来源 adapter 导入，不受影响）。app_settings 标记只跑一次。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let done =
+                        state.read_repo.lock().ok().and_then(|repo| {
+                            repo.get_setting("dsh_ext_import_cleanup").ok().flatten()
+                        });
+                    if done.is_none() {
+                        match dsh_ext_cleanup(&state) {
+                            Ok(n) => {
+                                if n > 0 {
+                                    tracing::info!("dsh 外部镜像清理：删除 {n} 条错误归属会话");
+                                }
+                                if let Ok(repo) = state.repo.lock() {
+                                    let _ = repo.set_setting("dsh_ext_import_cleanup", "1");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("dsh 外部镜像清理失败（下次启动重试）：{e}")
+                            }
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -167,6 +196,8 @@ pub fn run() {
             import_from_minimax,
             list_codex_sessions,
             import_from_codex,
+            list_deepseek_sessions,
+            import_from_deepseek,
             ops_sync,
             ops_overview,
             ops_by_provider,
@@ -288,12 +319,21 @@ mod tests {
     #[test]
     fn auto_sync_empty_home_reports_all_sources() {
         // 空环境完整跑一轮：全部来源 0 导入 0 跳过，JSON 键与旧版逐键一致（前端契约）
+        // HOME 属进程级全局：与其他改 HOME 的同步测试互斥串行
+        let _lock = commands::HOME_LOCK.lock().expect("home lock");
         let state = DaemonState::open_in_memory().expect("state open");
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
         std::env::set_var("HOME", dir.path());
         let v = auto_sync_inner(&state, None).expect("auto sync");
         assert_eq!(v.get("cancelled"), Some(&serde_json::json!(false)));
-        for k in ["zcode", "claude_code", "cursor", "minimax", "codex"] {
+        for k in [
+            "zcode",
+            "claude_code",
+            "cursor",
+            "minimax",
+            "codex",
+            "deepseek",
+        ] {
             assert_eq!(
                 v.get(format!("{k}_imported")),
                 Some(&serde_json::json!(0)),

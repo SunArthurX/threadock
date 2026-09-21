@@ -105,3 +105,79 @@ fn journey_codex_js_bridge_import_to_detail() {
         k.commands
     );
 }
+
+/// 合成一个 DeepSeek Harness (dsh) 会话文件（标题演进 + bash 输出配对 + 未知工具降级）。
+fn make_dsh_session(dir: &std::path::Path) -> std::path::PathBuf {
+    let session_dir = dir.join("session-dsh-journey");
+    std::fs::create_dir_all(&session_dir).expect("mkdir failed");
+    let f = session_dir.join("session.jsonl");
+    let lines = [
+        r#"{"type":"session","version":0,"id":"session-dsh-journey","createdAt":1788601901335,"cwd":"/tmp/proj","delegationDepth":0}"#,
+        r#"{"type":"session/title","seq":2,"time":1788601902997,"data":{"title":"初始标题","messageSeqs":[1],"source":{"kind":"fallback"}}}"#,
+        r#"{"type":"user/message","seq":1,"time":1788601902996,"data":{"content":[{"type":"text","text":"跑一下测试"}],"role":"user","id":"dm-1"},"surfaceOp":"append"}"#,
+        r#"{"type":"assistant/message","seq":3,"time":1788601903709,"data":{"message":{"role":"assistant","content":[{"type":"reasoning","text":"思考"},{"type":"text","text":"先跑 cargo test。"}],"source":{"kind":"model","provider":"deepseek-official","model":"deepseek-v4-flash"},"id":"dm-2"}}}"#,
+        r#"{"type":"tool/call","seq":4,"time":1788602305674,"data":{"turn":2,"step":1,"callId":"cd1","name":"bash","arguments":"{\"command\":\"cargo test -p app\",\"workdir\":\"/tmp/proj\"}"}}"#,
+        r#"{"type":"tool/result","seq":5,"time":1788602305833,"data":{"turn":2,"step":1,"message":{"source":{"kind":"tool","callId":"cd1"},"content":[{"type":"tool-result","toolCallId":"cd1","content":[{"type":"text","text":"test result: ok. 3 passed"}]}]}}}"#,
+        r#"{"type":"tool/call","seq":6,"time":1788602400000,"data":{"turn":3,"step":1,"callId":"cd2","name":"mystery_tool","arguments":"{\"x\":1}"}}"#,
+        r#"{"type":"session/title","seq":7,"time":1788602500000,"data":{"title":"源侧重命名","messageSeqs":[],"source":{"kind":"user"}}}"#,
+    ];
+    std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+    f
+}
+
+/// 旅程：dsh 会话 → 入库 → 详情（标题取最后 title 事件、命令配对输出、未知工具降级）。
+#[test]
+fn journey_deepseek_harness_import_to_detail() {
+    let app = tauri::test::mock_app();
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    use tauri::Manager as _;
+    let state = DaemonState::open(DaemonStateConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .expect("open state");
+    app.manage(state);
+    let state = app.state::<DaemonState>();
+
+    // 1. 解析
+    let session_file = make_dsh_session(dir.path());
+    let raw = ch_adapter_deepseek_harness::parse_session(&session_file).expect("parse dsh session");
+    assert_eq!(
+        raw.title.as_deref(),
+        Some("源侧重命名"),
+        "最后的 title 事件（含手动重命名）生效"
+    );
+    assert_eq!(raw.events.len(), 2, "bash + 未知工具应各有 1 个事件");
+
+    // 2. 入库
+    let dto = crate::commands::import_raw_to_state(&state, raw, Some("DeepSeek Harness"), None)
+        .expect("import");
+    let conv_id = dto.conversation_id.clone();
+
+    // 3. 详情：标题 / provider / 命令完成 / 未知工具降级全链路可见
+    let detail = tauri::async_runtime::block_on(crate::commands::get_conversation_detail(
+        state.clone(),
+        conv_id.clone(),
+    ))
+    .expect("detail");
+    assert_eq!(detail.conversation.title.as_deref(), Some("源侧重命名"));
+    assert_eq!(detail.conversation.provider, "deepseek-harness");
+    assert_eq!(detail.events.len(), 2);
+    let cmd = detail
+        .events
+        .iter()
+        .find(|e| e.event_type == "command_completed")
+        .expect("bash 事件配对输出后应 Completed");
+    assert!(
+        cmd.payload_json.as_deref().unwrap().contains("3 passed"),
+        "payload 应含配对输出"
+    );
+    assert!(
+        detail
+            .events
+            .iter()
+            .any(|e| e.event_type == "tool_call_started"
+                && e.payload_json.as_deref().unwrap().contains("mystery_tool")),
+        "未知工具应降级为 ToolCallStarted 并保留原始名"
+    );
+}

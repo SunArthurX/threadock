@@ -21,6 +21,7 @@ members = [
     "crates/adapter-cursor",
     "crates/adapter-minimax",
     "crates/adapter-codex",
+    "crates/adapter-deepseek-harness",
     "crates/ops-metrics",
     "crates/audit",
     "crates/adapter-jsonl",

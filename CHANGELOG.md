@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased]
+
+DeepSeek Harness (dsh) 对话导入 + 源侧标题改名同步。
+
+### Added
+- **搜索结果左栏右键菜单**：搜索模式下左侧命中列表（主对话行 / 子对话
+  行 / 分组头）支持右键，菜单与普通会话列表完全一致（收藏 / 归档 /
+  置顶 / 加标签 / 复制标题 / 删除带撤销）——菜单构建逻辑提取为共享模块
+  `ConvMenu`（`buildConvMenuItems` / `TagInputPopup` / 置顶持久化），
+  两个左栏同源共用；治理 handler（批量收藏/归档/删除/加标签）在 App
+  层提取为命名函数复用，搜索面板动作完成后自动刷新搜索结果与会话列表
+- **DeepSeek Harness (dsh) 会话导入**：新增 `ch-adapter-deepseek-harness`
+  适配器（会话徽标统一显示为 `dsh`：列表/详情/搜索/Ops 各视图 + 来源
+  筛选 chip + DeepSeek 品牌蓝徽标配色，亮暗双主题），读取 `~/.dsh/sessions/<project>/<sessionId>/session.jsonl(.zstd)`
+  （zstd 压缩或纯文本 JSONL 事件日志）。解析会话头（createdAt / cwd /
+  parentSession 委派链）、`session/title` 标题事件（fallback → LLM →
+  用户手动重命名，最后一条生效）、user/assistant 消息（runtime 注入块与
+  reasoning 块过滤）、tool/call + tool/result 配对（bash → 命令事件并
+  升格 Completed、read/write/edit 语义映射、未知工具降级 ToolCallStarted
+  保留原名）。接入 auto_sync 增量同步（mtime 新鲜度 + 主子链路 repair）、
+  `list_deepseek_sessions` / `import_from_deepseek` 命令、前端来源标签
+  与统计。含单测、golden fixture、真实 `~/.dsh` 数据冒烟（1103 行压缩
+  日志 → 16 消息 / 31 事件）与命令层旅程测试
+- **源侧标题改名同步（title sync）**：源应用里重命名会话后（如 dsh 的
+  手动重命名、ZCode / MiniMax / Cursor 侧改标题），下次同步时
+  Threadock 侧标题一并更新——包括 staleness 判定跳过重解析的会话
+  （对比 discovery 标题与库内 title，差异即批量刷新，输出
+  `titles_synced` 计数）。**用户自定义重命名永远优先**：`user_title`
+  不在任何同步 UPDATE 列中，`effective_title()` 展示口径不变；同时
+  修复重导入后搜索索引标题被源标题覆盖的问题（索引改用入库后回读的
+  effective_title），改名传播后同步重建对应会话的索引文档
+
+### Fixed
+- **dsh「外部导入镜像」误导入为 dsh 会话（错误归属 + 重复）**：dsh 的
+  session-import 功能会把 ZCode / Codex / Claude Code 等外部工具的历史
+  会话以 `ext-<provider>-<原id>` 镜像进 `~/.dsh/sessions`（真实库中
+  201 条）。早期 dsh adapter 把这些镜像当作 dsh 会话整体导入——导致
+  ZCode 的会话（如「参考炉石传说优化游戏项目」）同时出现在 ZCode 和
+  dsh 两个来源下、且被标上 dsh 徽标。适配器现按双重信号在发现层排除
+  镜像（目录/会话 id 的 `ext-` 前缀 + 日志内 `session-import/source`
+  来源事件，后者也是 `parse_session` 的防御性拒绝依据）；启动时一次性
+  迁移清理存量误导入（`delete_conversations_by_source_prefix`：消息
+  先显式删以触发 FTS 触发器，import_state 同步清理；本体由各来源
+  adapter 导入、不受影响）
+- **右键「加标签」内联输入被立即关闭（存量 bug）**：菜单项点击后
+  `onClose` 一并清空 `tagInput` 状态，导致输入层刚打开就被清掉；
+  现改为只关菜单，输入层由自身生命周期管理（普通列表与搜索面板同修）
+
 ## [1.4.0] - 2026-08-23
 
 中英文双语界面 + MiniMax v2 同步三轮修复（无标题会话/内部事件/列化元数据）。

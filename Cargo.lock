@@ -319,6 +319,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-adapter-deepseek-harness"
+version = "1.4.0"
+dependencies = [
+ "ch-domain",
+ "ch-normalization",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "time",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
 name = "ch-adapter-host"
 version = "1.4.0"
 dependencies = [

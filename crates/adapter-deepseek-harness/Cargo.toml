@@ -1,0 +1,20 @@
+[package]
+name = "ch-adapter-deepseek-harness"
+description = "DeepSeek Harness (dsh) Adapter：读取 ~/.dsh/sessions 下 session.jsonl(.zstd)（plan §10.5）"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-domain = { path = "../domain" }
+ch-normalization = { path = "../normalization" }
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+time.workspace = true
+zstd.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

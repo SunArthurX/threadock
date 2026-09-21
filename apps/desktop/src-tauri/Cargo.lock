@@ -653,6 +653,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-adapter-deepseek-harness"
+version = "1.4.0"
+dependencies = [
+ "ch-domain",
+ "ch-normalization",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "time",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
 name = "ch-adapter-jsonl"
 version = "1.4.0"
 dependencies = [
@@ -5069,6 +5083,7 @@ dependencies = [
  "ch-adapter-claude-code",
  "ch-adapter-codex",
  "ch-adapter-cursor",
+ "ch-adapter-deepseek-harness",
  "ch-adapter-jsonl",
  "ch-adapter-markdown",
  "ch-adapter-minimax",

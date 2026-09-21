@@ -1,0 +1,17 @@
+{"type":"session","version":0,"id":"session-golden","createdAt":1788601901335,"cwd":"/Users/demo/proj","delegationDepth":0,"agentPreset":"standard"}
+{"type":"permission/preset","seq":0,"time":1788601901520,"data":{"preset":"workspace-write"}}
+{"type":"sandbox/mode","seq":1,"time":1788601901521,"data":{"mode":"workspace-write"}}
+{"type":"approval/policy","seq":2,"time":1788601901522,"data":{"policy":"ask"}}
+{"type":"session/title","seq":11,"time":1788601902997,"data":{"title":"看下构建","messageSeqs":[7],"source":{"kind":"fallback"}}}
+{"type":"user/message","seq":7,"time":1788601902996,"data":{"content":[{"type":"text","text":"构建挂了，帮我看看"}],"source":{"kind":"user","rpcId":"rpc-1","clientTimeZone":"Asia/Shanghai"},"role":"user","id":"g-user-1"},"surfaceOp":"append"}
+{"type":"user/message","seq":8,"time":1788601902996,"data":{"content":[{"type":"text","text":"<system-reminder>\nAGENTS.md 注入内容\n</system-reminder>"}],"source":{"kind":"user","rpcId":"rpc-2"},"role":"user","id":"g-injected"},"surfaceOp":"append"}
+{"type":"turn/start","seq":4,"time":1788601902976,"data":{"turn":1}}
+{"type":"assistant/message","seq":55,"time":1788601903709,"data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"reasoning","text":"先跑构建复现"},{"type":"text","text":"我先复现一下构建错误。"}],"source":{"kind":"model","provider":"deepseek-official","model":"deepseek-v4-flash"},"id":"g-asst-1"},"usage":{"inputTokens":12880,"outputTokens":34,"totalTokens":12914}},"sourceEventSeqs":[15,16,[18,54]],"surfaceOp":"append"}
+{"type":"tool/call","seq":60,"time":1788602305674,"data":{"turn":2,"step":1,"callId":"call_g1","name":"bash","arguments":"{\"command\":\"cargo build 2>&1 | tail -20\",\"workdir\":\"/Users/demo/proj\"}"}}
+{"type":"tool/result","seq":61,"time":1788602305833,"data":{"turn":2,"step":1,"message":{"source":{"kind":"tool","callId":"call_g1"},"content":[{"type":"tool-result","toolCallId":"call_g1","content":[{"type":"text","text":"error[E0308]: mismatched types in src/lib.rs"}]}]}}}
+{"type":"tool/call","seq":62,"time":1788602400000,"data":{"turn":3,"step":1,"callId":"call_g2","name":"read","arguments":"{\"path\":\"src/lib.rs\"}"}}
+{"type":"tool/call","seq":63,"time":1788602500000,"data":{"turn":4,"step":1,"callId":"call_g3","name":"future_tool_x","arguments":"not json at all"}}
+{"type":"model/selection","seq":70,"time":1788602600000,"data":{"provider":"zai-coding-cn","model":"glm-5.3"}}
+{"type":"session/title","seq":71,"time":1788602700000,"data":{"title":"修复构建错误","messageSeqs":[7],"source":{"kind":"provider","provider":"session-title-first-prompt-llm","model":{"provider":"deepseek-official","model":"deepseek-v4-flash"}}}}
+{"type":"session/title","seq":72,"time":1788602800000,"data":{"title":"我的手动重命名","messageSeqs":[],"source":{"kind":"user"}}}
+{"type":"turn/end","seq":73,"time":1788602810000,"data":{"turn":4,"reason":{"kind":"completed"}}}

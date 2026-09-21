@@ -255,7 +255,7 @@ export default function App() {
         setAvailableProviders(new Set(result.providers as unknown as string[]));
       }
       const parts: string[] = [];
-      for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"]] as [string,string][]) {
+      for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"],["deepseek","dsh"]] as [string,string][]) {
         const ok = result[`${key}_imported`] ?? 0;
         if (ok > 0) parts.push(t("{__0__}: {__1__} 新", { __0__: (label), __1__: (ok) }));
       }
@@ -932,6 +932,41 @@ export default function App() {
     } catch (e) { showError(e); }
   };
 
+  // ── 批量治理（普通列表与搜索结果左栏的右键菜单共用同一组 handler）──
+  const bulkFavorite = async (ids: string[], favorite: boolean) => {
+    // 单次逐条 set_favorite：未来如需可换 batch 接口
+    for (const id of ids) {
+      try {
+        await invoke("set_favorite", { id, favorite });
+      } catch {
+        /* 单条失败不影响批量提交 */
+      }
+    }
+    await loadConversations();
+  };
+  const bulkArchive = async (ids: string[], archived: boolean) => {
+    for (const id of ids) {
+      try {
+        await invoke("set_archived", { id, archived });
+      } catch {
+        /* 单条失败不影响批量提交 */
+      }
+    }
+    await loadConversations();
+  };
+  const bulkAddTag = async (ids: string[], tag: string) => {
+    // 逐条 add_tag：未来如需可换 batch 接口
+    for (const id of ids) {
+      try { await invoke("add_tag", { id, tag }); } catch { /* 单条失败不影响整体 */ }
+    }
+    showToast(t("✓ 已为 {__0__} 条会话加标签 #{__1__}", { __0__: ids.length, __1__: tag }), "info");
+  };
+  const bulkDelete = async (ids: string[]) => {
+    // 复用单条同款助手：避免「用 source_conversation_id 撤销导致恢复失败」
+    const targets = conversations.filter((c) => ids.includes(c.id));
+    await performSoftDeleteWithUndo(targets);
+  };
+
   const rescanAudit = async () => {
     if (!selectedConv) return;
     try {
@@ -1292,7 +1327,13 @@ export default function App() {
               {searchGroups
                 ? <SearchResultsPanel groups={searchGroups} query={searchQuery} role={searchRole}
                     onRoleChange={(r) => { setSearchRole(r); void runSearch(searchQuery.trim(), r); }}
-                    onOpen={openSearchGroup} activeConversationId={selectedConv?.id ?? null} />
+                    onOpen={openSearchGroup} activeConversationId={selectedConv?.id ?? null}
+                    conversations={conversations}
+                    onAfterAction={() => { loadConversations(); void runSearch(searchQuery.trim(), searchRole); }}
+                    onToggleFavorite={toggleFavorite}
+                    onArchiveOne={archiveOne} onDeleteOne={deleteOneWithUndo} onCopyTitle={copyConvTitle}
+                    onBulkFavorite={bulkFavorite} onBulkArchive={bulkArchive}
+                    onBulkAddTag={bulkAddTag} onBulkDelete={bulkDelete} />
                 : <ConversationList conversations={conversations} selectedConv={selectedConv}
                     loading={convsLoading} providerFilter={providerFilter} selectedWs={selectedWs}
                     expandedParents={expandedParents} childConvs={childConvs}
@@ -1301,43 +1342,14 @@ export default function App() {
                     onToggleExpand={toggleExpand} onToggleFavorite={toggleFavorite}
                     onArchiveOne={archiveOne} onDeleteOne={deleteOneWithUndo} onCopyTitle={copyConvTitle}
                     onRestore={restoreConv}
-                    onBulkFavorite={async (ids, favorite) => {
-                      // 单次逐条 set_favorite：未来如需可换 batch 接口
-                      for (const id of ids) {
-                        try {
-                          await invoke("set_favorite", { id, favorite });
-                        } catch {
-                          /* 单条失败不影响批量提交 */
-                        }
-                      }
-                      await loadConversations();
-                    }}
-                    onBulkArchive={async (ids, archived) => {
-                      for (const id of ids) {
-                        try {
-                          await invoke("set_archived", { id, archived });
-                        } catch {
-                          /* 单条失败不影响批量提交 */
-                        }
-                      }
-                      await loadConversations();
-                    }}
-                    onBulkAddTag={async (ids, tag) => {
-                      // 逐条 add_tag：未来如需可加 batch 接口
-                      for (const id of ids) {
-                        try { await invoke("add_tag", { id, tag }); } catch { /* 单条失败不影响整体 */ }
-                      }
-                      showToast(t("✓ 已为 {__0__} 条会话加标签 #{__1__}", { __0__: (ids.length), __1__: (tag) }), "info");
-                    }}
-                    onBulkDelete={async (ids) => {
-                      // 复用单条同款助手：避免「用 source_conversation_id 撤销导致恢复失败」
-                      const targets = conversations.filter((c) => ids.includes(c.id));
-                      await performSoftDeleteWithUndo(targets);
-                    }}
+                    onBulkFavorite={bulkFavorite}
+                    onBulkArchive={bulkArchive}
+                    onBulkAddTag={bulkAddTag}
+                    onBulkDelete={bulkDelete}
                     onBulkSplit={async (ids, name) => {
                       try {
                         await invoke("workspace_split", { conversationIds: ids, newName: name });
-                        showToast(t("✓ 已把 {__0__} 条会话拆分到「{__1__}」", { __0__: (ids.length), __1__: (name) }), "info");
+                        showToast(t("✓ 已把 {__0__} 条会话拆分到「{__1__}」", { __0__: ids.length, __1__: name }), "info");
                         loadConversations();
                       } catch (e) { showError(e); }
                     }}
@@ -1403,7 +1415,7 @@ export default function App() {
                     icon="mailbox"
                     size="lg"
                     title={t("还没有任何会话")}
-                    desc={<>把 Cursor / Claude Code / ZCode / Codex 里的历史对话同步进来，统一管理。</>}
+                    desc={<>把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness 里的历史对话同步进来，统一管理。</>}
                     action={
                       <>
                         <button className="action-btn primary" onClick={() => setImportMenu(true)}>
