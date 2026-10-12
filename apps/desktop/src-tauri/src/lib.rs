@@ -130,6 +130,33 @@ pub fn run() {
                     }
                 });
             }
+            // Codex 注入过滤补全 + Claude Code 标题兜底：适配器修复后，一次性
+            // 重导修正存量标题（codex 5 个被 <external_codex_apps_open_page>
+            // 等注入事件顶替、claude-code 无 aiTitle 的会话显示「(无标题)」）。
+            // app_settings 标记只跑一次。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let done = state.read_repo.lock().ok().and_then(|repo| {
+                        repo.get_setting("title_fallback_migration").ok().flatten()
+                    });
+                    if done.is_none() {
+                        tracing::info!("标题兜底迁移：codex/claude-code 存量标题重导中……");
+                        match title_fallback_reimport_all(&state) {
+                            Ok(n) => {
+                                tracing::info!("标题兜底迁移完成：重导 {n} 个会话");
+                                if let Ok(repo) = state.repo.lock() {
+                                    let _ = repo.set_setting("title_fallback_migration", "1");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("标题兜底迁移失败（下次启动重试）：{e}")
+                            }
+                        }
+                    }
+                });
+            }
             // dsh 外部导入镜像清理：dsh 的 session-import 把 ZCode/Codex 等
             // 外部会话以 `ext-*` 镜像进 ~/.dsh，早期 dsh adapter 误将镜像导入
             // 为 dsh 会话（重复 + 错误归属）。适配器已在发现层排除；此处删除

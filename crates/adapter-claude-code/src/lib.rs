@@ -249,6 +249,11 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
         return Err(ClaudeCodeError::Empty);
     }
 
+    // 标题兜底：绝大多数会话没有 ai-title/summary 记录（实测 1386 个会话
+    // 仅 32 个有），无标题时用首条真实用户消息生成（对齐 Codex/MiniMax 适配器，
+    // GUI 不再显示「(无标题)」）。
+    let title = title.or_else(|| fallback_title(&messages));
+
     Ok(RawConversation {
         provider: PROVIDER,
         source_conversation_id: session_id.to_string(),
@@ -259,6 +264,44 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
         events,
         source_parent_id: None,
     })
+}
+
+/// Claude Code 注入块标签（2026-10 扫描真实会话库归纳）：IDE 选区、
+/// 命令回显、后台任务通知等以 user 角色入档但非用户真实输入，不作标题。
+const INJECTED_TAGS: &[&str] = &[
+    "<task-notification>",
+    "<bash-input>",
+    "<bash-stdout>",
+    "<local-command-caveat>",
+    "<local-command-stdout>",
+    "<command-name>",
+    "<ide_selection>",
+    "<system-reminder>",
+];
+
+fn is_injected(text: &str) -> bool {
+    let t = text.trim_start();
+    INJECTED_TAGS.iter().any(|tag| t.starts_with(tag))
+}
+
+/// 无 aiTitle/summary 时的标题兜底：首条非注入 user 消息，回退首条
+/// assistant 消息，截 60 字符（超出加省略号，与 Codex 适配器一致）。
+fn fallback_title(messages: &[RawMessage]) -> Option<String> {
+    messages
+        .iter()
+        .find(|m| m.role == Role::User && !m.text.as_deref().is_some_and(is_injected))
+        .or_else(|| messages.iter().find(|m| m.role == Role::Assistant))
+        .and_then(|m| m.text.as_deref())
+        .map(|t| {
+            let t = t.trim();
+            let mut chars = t.chars();
+            let head: String = chars.by_ref().take(60).collect();
+            if chars.next().is_some() {
+                format!("{head}…")
+            } else {
+                head
+            }
+        })
 }
 
 /// 解析 ISO 8601 时间戳（如 `2026-07-28T00:45:13.191Z`）。
@@ -547,5 +590,52 @@ mod tests {
     fn provider_is_claude_code() {
         let raw = parse_str(SAMPLE, "s").expect("parse failed");
         assert_eq!(raw.provider, Provider::ClaudeCode);
+    }
+
+    /// 回归（2026-10 真实库发现）：绝大多数会话没有 ai-title/summary 记录，
+    /// 标题需回退到首条用户消息，GUI 不再显示「(无标题)」。
+    #[test]
+    fn title_falls_back_to_first_user_message() {
+        let no_title = r#"{"type":"user","message":{"role":"user","content":"执行 claude-obsidian 的 wiki-ingest skill 方法论"}}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-4","content":"开始执行。"}}"#;
+        let raw = parse_str(no_title, "s").expect("parse failed");
+        assert_eq!(
+            raw.title.as_deref(),
+            Some("执行 claude-obsidian 的 wiki-ingest skill 方法论")
+        );
+    }
+
+    /// aiTitle 存在时优先于首条消息兜底。
+    #[test]
+    fn ai_title_takes_precedence_over_fallback() {
+        let with_title = r#"{"type":"ai-title","aiTitle":"知识库摄取"}
+{"type":"user","message":{"role":"user","content":"执行 wiki-ingest"}}"#;
+        let raw = parse_str(with_title, "s").expect("parse failed");
+        assert_eq!(raw.title.as_deref(), Some("知识库摄取"));
+    }
+
+    /// 注入块（任务通知 / IDE 选区 / 命令回显）不作标题，跳到下一条真实输入。
+    #[test]
+    fn fallback_skips_injected_first_messages() {
+        let injected_first = r#"{"type":"user","message":{"role":"user","content":"<task-notification>\n<task-id>bf7os1swy</task-id>\n</task-notification>"}}
+{"type":"user","message":{"role":"user","content":"<ide_selection>The user selected the lines 88 to 103</ide_selection>"}}
+{"type":"user","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}
+{"type":"user","message":{"role":"user","content":"帮我看看选中的这段代码为什么慢"}}"#;
+        let raw = parse_str(injected_first, "s").expect("parse failed");
+        assert_eq!(raw.title.as_deref(), Some("帮我看看选中的这段代码为什么慢"));
+    }
+
+    /// 超长首条消息截 60 字符加省略号。
+    #[test]
+    fn fallback_title_truncates_to_60_chars() {
+        let long = "一".repeat(80);
+        let raw = parse_str(
+            &format!(r#"{{"type":"user","message":{{"role":"user","content":"{long}"}}}}"#),
+            "s",
+        )
+        .expect("parse failed");
+        let title = raw.title.expect("unexpected None");
+        assert_eq!(title.chars().count(), 61, "60 字 + 省略号");
+        assert!(title.ends_with('…'));
     }
 }

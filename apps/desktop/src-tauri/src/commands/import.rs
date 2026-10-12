@@ -1170,6 +1170,130 @@ pub(crate) fn minimax_reimport_all(state: &DaemonState) -> Result<usize, String>
     Ok(ok)
 }
 
+/// Codex 注入过滤补全 + Claude Code 标题兜底后的存量重导（一次性迁移用）：
+/// 只修库内标题缺失（claude-code 无 aiTitle 的会话此前是「(无标题)」）或被
+/// Codex 注入标签顶替（如 `<external_codex_apps_open_page>…`）的会话——
+/// 走 auto_sync 改名传播同款轻路径（批量 UPDATE title + 重建这些会话的
+/// 索引文档、整轮单次 commit），不逐条重导消息（1338 条 × 全量导入过慢）。
+/// `user_title` 不在 UPDATE 列，自定义重命名保留。返回修正数。
+pub(crate) fn title_fallback_reimport_all(state: &DaemonState) -> Result<usize, String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
+    // 库内 (provider, source_id) → title：标题正常的会话直接跳过
+    let stored = {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.list_conversation_source_titles()
+            .map_err(|e| storage_err(e))?
+    };
+    let needs_fix = |provider_id: &str, sid: &str| {
+        stored
+            .get(&(provider_id.to_string(), sid.to_string()))
+            .is_none_or(|t| {
+                t.as_deref().is_none_or(|t| {
+                    let t = t.trim();
+                    t.is_empty() || ch_adapter_codex::is_injected_context(t)
+                })
+            })
+    };
+
+    // (provider_id, workspace, (session_id, file_path)[])：发现 + 过滤 + 解析出标题
+    let mut fixed_total = 0usize;
+    let mut pending_index: Vec<ch_search::index::IndexableMessage> = Vec::new();
+    for (provider_id, root, subdir) in [
+        ("prov_codex", format!("{home}/.codex"), "sessions"),
+        ("prov_claude-code", format!("{home}/.claude"), "projects"),
+    ] {
+        if !Path::new(&root).join(subdir).exists() {
+            continue;
+        }
+        // 发现 → 逐条解析出适配器推导的新标题（失败/空标题跳过留痕）
+        let mut title_syncs: Vec<(String, String)> = Vec::new();
+        let discovered: Result<Vec<(String, String)>, String> = if provider_id == "prov_codex" {
+            ch_adapter_codex::discover_sessions(&root)
+                .map(|v| {
+                    v.into_iter()
+                        .map(|s| (s.session_id, s.file_path))
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|e| e.to_string())
+        } else {
+            ch_adapter_claude_code::discover_sessions(&root)
+                .map(|v| {
+                    v.into_iter()
+                        .map(|s| (s.session_id, s.file_path.to_string_lossy().into_owned()))
+                        .collect::<Vec<_>>()
+                })
+                .map_err(|e| e.to_string())
+        };
+        match discovered {
+            Ok(items) => {
+                for (session_id, file_path) in items {
+                    if !needs_fix(provider_id, &session_id) {
+                        continue;
+                    }
+                    let parsed: Result<RawConversation, String> = if provider_id == "prov_codex" {
+                        ch_adapter_codex::parse_session(&file_path).map_err(|e| e.to_string())
+                    } else {
+                        ch_adapter_claude_code::parse_session(&file_path).map_err(|e| e.to_string())
+                    };
+                    match parsed {
+                        Ok(raw) => {
+                            if let Some(title) = raw.title.filter(|t| !t.trim().is_empty()) {
+                                title_syncs.push((session_id, title));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(session = %session_id, error = %e, "标题修复跳过")
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(provider = provider_id, error = %e, "标题修复发现失败");
+                continue;
+            }
+        }
+
+        // 批量刷新 title + 用新 effective_title 重建这些会话的索引文档
+        if title_syncs.is_empty() {
+            continue;
+        }
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        match repo.sync_source_titles_batch(provider_id, &title_syncs) {
+            Ok(n) => {
+                fixed_total += n;
+                tracing::info!(provider = provider_id, count = n, "存量标题修复完成");
+            }
+            Err(e) => {
+                tracing::warn!(provider = provider_id, error = %e, "存量标题修复失败");
+                continue;
+            }
+        }
+        let sids: Vec<String> = title_syncs.iter().map(|(s, _)| s.clone()).collect();
+        if let Ok(convs) = repo.conversations_by_source_ids(provider_id, &sids) {
+            for c in convs {
+                let Ok(msgs) = repo.list_messages(&c.id) else {
+                    continue;
+                };
+                let title = c.effective_title().to_string();
+                pending_index.extend(msgs.iter().map(|m| ch_search::index::IndexableMessage {
+                    message_id: m.id.clone(),
+                    conversation_id: c.id.clone(),
+                    provider: c.provider,
+                    workspace_id: c.workspace_id.clone(),
+                    role: m.role,
+                    title: Some(title.clone()),
+                    body: m.content_text.clone(),
+                    created_at: m.created_at,
+                }));
+            }
+        }
+    }
+
+    // 索引统一提交：整轮迁移只有 1 次 tantivy commit
+    commit_index(state, &pending_index)?;
+    Ok(fixed_total)
+}
+
 pub(crate) fn import_raw_to_state(
     state: &DaemonState,
     raw: RawConversation,

@@ -475,6 +475,9 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// Codex 注入块标签：环境上下文 / 系统指令 / 插件推荐等（runtime 注入而非用户输入）。
+/// 后半部分为 2026-10 扫描真实会话库归纳的桌面端/内部注入家族：
+/// `<external_codex_` 按前缀匹配，覆盖 `external_codex_apps_open_page` /
+/// `external_codex_apps_writing_block_edits` 等桌面端事件。
 const INJECTED_TAGS: &[&str] = &[
     "<environment_context>",
     "<user_instructions>",
@@ -485,11 +488,21 @@ const INJECTED_TAGS: &[&str] = &[
     "<IDE_INFORMATION>",
     "<system-reminder>",
     "<ENVIRONMENT",
+    "<codex_internal_context>",
+    "<subagent_notification>",
+    "<goal_context>",
+    "<realtime_delegation>",
+    "<in-app-browser-context>",
+    "<send_user_message_question_reply>",
+    "<heartbeat>",
+    "<external_codex_",
 ];
 
 /// Codex 注入块判定：上述 XML 标签开头，或 AGENTS.md 头。
 /// 这些是 runtime 注入而非用户真实输入，不应入库为消息或用作标题。
-fn is_injected_context(text: &str) -> bool {
+/// 公开给导入侧迁移用（识别被注入标签顶替的存量标题）。
+#[must_use]
+pub fn is_injected_context(text: &str) -> bool {
     let t = text.trim_start();
     if t.starts_with("# AGENTS.md") || t.starts_with("# Systems") {
         return true;
@@ -682,5 +695,32 @@ mod tests {
         assert_eq!(raw.messages[0].role, Role::Assistant);
         // 无真实用户消息 → 标题回退到助手消息
         assert_eq!(raw.title.as_deref(), Some("好的，我先分析项目结构。"));
+    }
+
+    /// 回归（2026-10-12 真实库发现）：Codex 桌面端把 open_page 等事件以
+    /// role=user 注入且排在真实提问之前，标题被 `<external_codex_apps_open_page>`
+    /// 顶替；`<codex_internal_context>` 等内部注入同理。
+    #[test]
+    fn filters_desktop_and_internal_injected_events() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let f = dir.path().join("rollout-desktop.jsonl");
+        let lines = [
+            r#"{"timestamp":"2026-10-12T09:21:39.000Z","type":"session_meta","payload":{"id":"desk1"}}"#,
+            r##"{"timestamp":"2026-10-12T09:21:39.210Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /Users/x/proj"}]}}"##,
+            r#"{"timestamp":"2026-10-12T09:21:39.218Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<external_codex_apps_open_page>{\"page_id\":null}</external_codex_apps_open_page>"}]}}"#,
+            r#"{"timestamp":"2026-10-12T09:21:39.219Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<codex_internal_context>内部上下文</codex_internal_context>"}]}}"#,
+            r#"{"timestamp":"2026-10-12T09:21:39.220Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<subagent_notification>子代理通知</subagent_notification>"}]}}"#,
+            r#"{"timestamp":"2026-10-12T09:21:39.221Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<goal_context>目标上下文</goal_context>"}]}}"#,
+            r#"{"timestamp":"2026-10-12T09:21:40.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"给我分析这个整个知识库，我想做成一个知识库管理工具"}]}}"#,
+        ];
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+
+        let raw = parse_session(&f).expect("parse failed");
+        assert_eq!(raw.messages.len(), 1, "AGENTS.md 与全部注入事件均应被过滤");
+        assert_eq!(
+            raw.title.as_deref(),
+            Some("给我分析这个整个知识库，我想做成一个知识库管理工具"),
+            "标题应取真实用户提问而非桌面端注入事件"
+        );
     }
 }

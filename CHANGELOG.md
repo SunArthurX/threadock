@@ -47,6 +47,26 @@ DeepSeek Harness (dsh) 对话导入 + 源侧标题改名同步。
 - **右键「加标签」内联输入被立即关闭（存量 bug）**：菜单项点击后
   `onClose` 一并清空 `tagInput` 状态，导致输入层刚打开就被清掉；
   现改为只关菜单，输入层由自身生命周期管理（普通列表与搜索面板同修）
+- **Codex 会话标题被桌面端注入事件顶替**：Codex 桌面端把
+  `<external_codex_apps_open_page>`（打开页面）等事件以 role=user 写进
+  rollout 且排在真实提问之前，被当成「首条真实用户消息」当了标题（真实
+  库 5 条中招）。注入过滤清单 `INJECTED_TAGS` 增补真实库扫描归纳的标签
+  家族（`<external_codex_` 前缀、`<codex_internal_context>` /
+  `<subagent_notification>` / `<goal_context>` / `<realtime_delegation>` /
+  `<in-app-browser-context>` 等）——既不进正文也不再作标题；
+  `is_injected_context` 改 pub 供迁移复用
+- **Claude Code 会话大量「(无标题)」**：源文件只有 2% 带 aiTitle/summary
+  记录（真实库 1386 个会话仅 32 个有），适配器此前只认这两种记录、无
+  兜底。现对齐 Codex/MiniMax：无 aiTitle 时用首条非注入用户消息前 60 字
+  生成标题（注入开头如 `<task-notification>` / `<bash-input>` /
+  `<ide_selection>` / `<command-name>` 等跳过，仅影响标题选择不动正文），
+  取不到再回退首条助手消息
+- **存量标题一次性迁移（title_fallback_migration）**：适配器修复后已
+  导入且 mtime 未变的会话不会自动纠正（增量同步按 mtime 跳过），启动时
+  对库内标题为空或被注入标签顶替的会话走轻路径修复（解析出新标题后
+  批量 UPDATE + 单次索引重建 commit，复用 title sync 同款机制，不逐条
+  重导；user_title 保留）。真实库 7 秒修复 claude-code 1254 条 +
+  codex 5 条，`app_settings` 标记只跑一次
 
 ## [1.4.0] - 2026-08-23
 
