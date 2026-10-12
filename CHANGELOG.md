@@ -1,8 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.0] - 2026-10-12
 
-DeepSeek Harness (dsh) 对话导入 + 源侧标题改名同步。
+DeepSeek Harness (dsh) 对话导入 + 源侧标题改名同步 + Codex/Claude Code 标题修复 + 会话列表同名折叠。
 
 ### Added
 - **会话列表同名折叠**：标题完全相同的会话（批量脚本拉起的一次性任务，
