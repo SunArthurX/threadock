@@ -1,7 +1,8 @@
 // 会话列表测试：日期 dropdown + ⌘点击多选 + 批量操作
 // 第 11 轮改版：4 行 filter-chip → 1 行 toolbar + 3 dropdown；checkbox 移除 → ⌘点击多选。
+// 同名折叠：同标题会话折叠成一行（组头 ×N），展开显示其余成员。
 import { fireEvent, render, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationList from "../ConversationList";
 import type { Conversation } from "../types";
 
@@ -174,5 +175,87 @@ describe("ConversationList ⌘点击多选 + 批量操作", () => {
     await waitFor(() => expect(container.querySelector(".bulk-bar")?.textContent).toContain("已选 1"));
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(container.querySelector(".bulk-bar")).toBeNull());
+  });
+});
+
+describe("ConversationList 同名折叠", () => {
+  const dupProps = (convs: Conversation[]) => makeProps(convs);
+
+  // 开关写 localStorage，用例间复位避免顺序依赖
+  beforeEach(() => localStorage.removeItem("ch-collapse-dup"));
+
+  /** 标题可覆盖的构造器。 */
+  const makeTitled = (id: string, title: string | null, agoDays = 0): Conversation => ({
+    ...make(id, agoDays),
+    title,
+  });
+
+  it("同标题会话折叠成一行，组头显示 ×N，其余为子行", () => {
+    const convs = [
+      makeTitled("w1", "文档梳理引擎"),
+      makeTitled("w2", "文档梳理引擎"),
+      makeTitled("w3", "文档梳理引擎"),
+      makeTitled("other", "正常会话"),
+    ];
+    const { container } = render(<ConversationList {...dupProps(convs)} />);
+    const topItems = container.querySelectorAll(".list-virtual-container > div > .list-item");
+    // 3 个同名 + 1 个普通 = 2 个顶层行
+    expect(topItems.length).toBe(2);
+    const badge = container.querySelector(".dup-group-count");
+    expect(badge?.textContent).toBe("×3");
+    expect(container.querySelector(".child-list")).toBeNull();
+  });
+
+  it("点组头展开箭头显示其余同名成员（子行）", async () => {
+    const convs = [
+      makeTitled("w1", "文档梳理引擎"),
+      makeTitled("w2", "文档梳理引擎"),
+    ];
+    const { container } = render(<ConversationList {...dupProps(convs)} />);
+    const toggle = container.querySelector<HTMLSpanElement>(".expand-toggle")!;
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      const childItems = container.querySelectorAll(".child-list .child-item");
+      // 展开后显示第 2 个成员
+      expect(childItems.length).toBe(1);
+    });
+    // 再点收起
+    fireEvent.click(container.querySelector<HTMLSpanElement>(".expand-toggle")!);
+    await waitFor(() => expect(container.querySelector(".child-list")).toBeNull());
+  });
+
+  it("关掉「同名折叠」开关后恢复逐条显示", async () => {
+    const convs = [
+      makeTitled("w1", "文档梳理引擎"),
+      makeTitled("w2", "文档梳理引擎"),
+    ];
+    const { container } = render(<ConversationList {...dupProps(convs)} />);
+    expect(container.querySelectorAll(".list-item").length).toBe(1);
+    const btn = container.querySelector<HTMLButtonElement>(".dup-collapse-toggle")!;
+    fireEvent.click(btn);
+    await waitFor(() => expect(container.querySelectorAll(".list-item").length).toBe(2));
+  });
+
+  it("无标题会话不参与折叠（避免不同上下文的「(无标题)」误并）", () => {
+    const convs = [
+      makeTitled("u1", null),
+      makeTitled("u2", null),
+    ];
+    const { container } = render(<ConversationList {...dupProps(convs)} />);
+    const topItems = container.querySelectorAll(".list-virtual-container > div > .list-item");
+    expect(topItems.length).toBe(2);
+    expect(container.querySelector(".dup-group-count")).toBeNull();
+  });
+
+  it("user_title 改名后脱离折叠组（用户显式重命名优先）", () => {
+    const convs = [
+      makeTitled("w1", "文档梳理引擎"),
+      { ...makeTitled("w2", "文档梳理引擎"), user_title: "我改的名" },
+    ];
+    const { container } = render(<ConversationList {...dupProps(convs)} />);
+    const topItems = container.querySelectorAll(".list-virtual-container > div > .list-item");
+    // 改名后标题不同，各自独立
+    expect(topItems.length).toBe(2);
   });
 });

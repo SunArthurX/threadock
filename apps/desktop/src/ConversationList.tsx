@@ -46,6 +46,12 @@ const SCOPE_OPTIONS = (): { key: ListScope; label: string; icon: string }[] => [
 const PIN_KEY = "ch-conv-pins";
 const SORT_KEY = "ch-sort-by";
 const DATE_KEY = "ch-date-filter";
+/** 同名折叠开关（"1" 开 / "0" 关，默认开：批处理拉起的大量同名会话折叠成一行）。 */
+const DUP_KEY = "ch-collapse-dup";
+
+function loadCollapseDup(): boolean {
+  try { return localStorage.getItem(DUP_KEY) !== "0"; } catch { return true; }
+}
 
 function savePinnedIds(s: Set<string>) {
   try { localStorage.setItem(PIN_KEY, JSON.stringify([...s])); } catch { /* 静默 */ }
@@ -167,8 +173,19 @@ export default function ConversationList({
   const [ctxMenu, setCtxMenu] = useState<{ conv: Conversation; x: number; y: number } | null>(null);
   // 右键菜单触发的「加标签」内联输入：避免原生 window.prompt 阻断流程
   const [tagInput, setTagInput] = useState<{ ids: string[]; count: number; value: string; x: number; y: number } | null>(null);
+  // 同名折叠：同标题会话折叠成一行（组头 + 展开显示其余）；expandedGroups 按标题记展开态
+  const [collapseDup, setCollapseDup] = useState<boolean>(loadCollapseDup);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   // 虚拟列表的滚动容器 ref
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const toggleGroup = useCallback((title: string) => {
+    setExpandedGroups((s) => {
+      const n = new Set(s);
+      if (n.has(title)) n.delete(title); else n.add(title);
+      return n;
+    });
+  }, []);
 
   const togglePin = (id: string) => {
     setPinned((p) => {
@@ -218,6 +235,40 @@ export default function ConversationList({
     });
     return arr;
   }, [searchFiltered, sortBy, pinned]);
+
+  // 同名折叠：显示标题（user_title 优先）完全相同的会话折叠成一行，
+  // 组头取排序后首个成员的位置，展开显示其余成员。无标题（空串）不参与
+  // 折叠——不同上下文的「(无标题)」合并会误导。纯展示层，不改数据。
+  const rows = useMemo(() => {
+    if (!collapseDup) {
+      return sorted.map((c) => ({ kind: "single" as const, conv: c, title: "", members: [c] }));
+    }
+    const groups = new Map<string, Conversation[]>();
+    for (const c of sorted) {
+      const title = (c.user_title ?? c.title ?? "").trim();
+      if (!title) continue;
+      const arr = groups.get(title);
+      if (arr) arr.push(c); else groups.set(title, [c]);
+    }
+    const out: { kind: "single" | "group"; conv: Conversation; title: string; members: Conversation[] }[] = [];
+    const emitted = new Set<string>();
+    for (const c of sorted) {
+      const title = (c.user_title ?? c.title ?? "").trim();
+      if (!title) {
+        out.push({ kind: "single", conv: c, title: "", members: [c] });
+        continue;
+      }
+      if (emitted.has(title)) continue;
+      emitted.add(title);
+      const members = groups.get(title) ?? [c];
+      if (members.length === 1) {
+        out.push({ kind: "single", conv: c, title, members });
+      } else {
+        out.push({ kind: "group", conv: members[0]!, title, members });
+      }
+    }
+    return out;
+  }, [sorted, collapseDup]);
 
   // ⌘点击多选 / ⌘A 全选 / Esc 清空
   useEffect(() => {
@@ -314,12 +365,12 @@ export default function ConversationList({
     if (el && el.getBoundingClientRect().height > 0) {
       setEnableVirtualization(true);
     }
-  }, [sorted.length]);
+  }, [rows.length]);
   // TanStack Virtual 的 useVirtualizer 返回不可安全 memo 化的函数句柄，
   // 属第三方库 API 设计与 React Compiler 的兼容性限制，非本仓库代码问题。
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
-    count: sorted.length,
+    count: rows.length,
     getScrollElement: () => (enableVirtualization ? parentRef.current : null),
     estimateSize: () => 80,
     overscan: 8,
@@ -389,6 +440,15 @@ export default function ConversationList({
             onChange={setSortBy}
             align="right"
           />
+          <button
+            className={`provider-chip dup-collapse-toggle ${collapseDup ? "active" : ""}`}
+            onClick={() => setCollapseDup((v) => {
+              const n = !v;
+              try { localStorage.setItem(DUP_KEY, n ? "1" : "0"); } catch { /* 静默 */ }
+              return n;
+            })}
+            title={t("标题完全相同的会话折叠成一行（批量任务不再刷屏）")}
+          >{t("同名折叠")}</button>
         </div>
         {providerChips.length > 1 && (
           <div className="list-provider-chips">
@@ -459,19 +519,25 @@ export default function ConversationList({
       {loading && (
         <div className="panel-loading"><div className="spinner spinner-sm" /><span>{t("加载会话…")}</span></div>
       )}
-      {!loading && sorted.length > 0 && (
+      {!loading && rows.length > 0 && (
         <div
           ref={parentRef}
           className="list-virtual-container"
           style={{ position: "relative", height: rowVirtualizer.getTotalSize() }}
         >
           {rowVirtualizer.getVirtualItems().map((vi) => {
-            const c = sorted[vi.index];
-            if (!c) return null;
+            const row = rows[vi.index];
+            if (!row) return null;
+            const c = row.conv;
             const flags = itemFlags.get(c.id);
             if (!flags) return null;
-            const isExpanded = flags.isExpanded;
-            const children = isExpanded ? (childConvs[c.id] ?? []) : [];
+            // 组行：展开态与展开内容由同名折叠组接管（成员以 ↳ 子行展示）；
+            // 单行走既有父子任务展开
+            const isGroup = row.kind === "group";
+            const expanded = isGroup ? expandedGroups.has(row.title) : flags.isExpanded;
+            const children = isGroup
+              ? (expanded ? row.members.slice(1) : [])
+              : (expanded ? (childConvs[c.id] ?? []) : []);
             return (
               <div
                 key={c.id}
@@ -493,15 +559,20 @@ export default function ConversationList({
                   isActive={flags.isActive}
                   isSelected={flags.isSelected}
                   isPinned={flags.isPinned}
-                  isExpanded={isExpanded}
+                  isExpanded={expanded}
                   scope={scope}
-                  childCount={c.child_count}
+                  childCount={isGroup ? 0 : c.child_count}
+                  groupCount={row.members.length}
                   onItemClick={(e) => handleItemClick(c, e)}
                   onContextMenu={(e) => handleContextMenu(c, e)}
-                  onToggleExpand={(e) => { e.stopPropagation(); onToggleExpand(c); }}
+                  onToggleExpand={(e) => {
+                    e.stopPropagation();
+                    if (isGroup) toggleGroup(row.title);
+                    else onToggleExpand(c);
+                  }}
                   onRestore={(e) => { e.stopPropagation(); onRestore?.(c); }}
                 />
-                {isExpanded && (
+                {expanded && (
                   <div className="child-list">
                     {children.length === 0 && <div className="child-empty">{t("无子任务")}</div>}
                     {children.map((ch) => (

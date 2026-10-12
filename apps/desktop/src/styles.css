@@ -5134,6 +5134,10 @@ button {
 .list-search-clear:hover { color: var(--text); }
 .list-toolbar-row { display: flex; gap: 4px; align-items: stretch; min-width: 0; }
 .list-toolbar-row .list-dropdown { flex: 1; min-width: 0; }
+/* 同名折叠开关：工具栏行内的紧凑 pill（复用 provider-chip 视觉，不参与 flex 平分） */
+.dup-collapse-toggle { flex: 0 0 auto; align-self: center; font-size: 11px; white-space: nowrap; }
+/* 折叠组头「×N」角标：meta-child 的字号基础上加 accent 色 */
+.dup-group-count { color: var(--c-accent, var(--accent, #4f8cff)); }
 
 .panel-header-count { font-size: 10.5px; opacity: 0.55; font-weight: 540; margin-left: 6px; }
 
