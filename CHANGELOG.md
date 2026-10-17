@@ -1,6 +1,8 @@
 # Changelog
 
-## [Unreleased]
+## [1.5.1] - 2026-10-17
+
+Cursor 新版 state.vscdb 兼容——导入发现层修复。
 
 ### Fixed
 - **Cursor 导入对新版库失效（发现层全挂）**：新版 Cursor 的
