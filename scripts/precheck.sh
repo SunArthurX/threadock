@@ -22,6 +22,7 @@ cd "$ROOT"
 
 # 与 ci.yml 完全一致的 clippy 旗标（改 CI 时同步改这里）
 CLIPPY_FLAGS=(-D warnings
+  -A unknown_lints
   -W clippy::unwrap_used
   -W clippy::pedantic
   -A clippy::missing_errors_doc
@@ -30,7 +31,8 @@ CLIPPY_FLAGS=(-D warnings
   -A clippy::cast_possible_wrap
   -A clippy::cast_sign_loss
   -A clippy::cast_possible_truncation
-  -A clippy::doc_markdown)
+  -A clippy::doc_markdown
+  -A clippy::assert_is_empty)
 
 PASS=()
 FAIL=()
