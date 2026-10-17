@@ -10,13 +10,13 @@
 MiniMax Code · Codex · DeepSeek Harness 等工具里的会话、工具调用、命令、Diff、Artifact 统一收集、标准化、
 全文检索、知识化,并对用量 / 成本 / 安全做持续治理。
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
 
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/版本-1.3.0-0071e3?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/版本-1.5.0-0071e3?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
@@ -86,7 +86,7 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 
 三层架构,一个铁律:**第三方数据只读**。
 
-- **Adapters** —— 七个来源(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
+- **Adapters** —— 八个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
   跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
 - **Core(`DaemonState`)** —— 唯一的写者。BLAKE3 内容寻址、zstd 压缩、幂等去重、完整度
   评分、审计日志。SQLite V16(25+ 表) + Tantivy 索引(N-gram 中文 + 可选 jieba)
@@ -99,14 +99,14 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 
 | | |
 |---|---|
-| 🔌 **7 个只读 Adapter** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown/JSONL —— 进程隔离,崩溃安全 |
+| 🔌 **8 个只读 Adapter** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown · JSONL —— 进程隔离,崩溃安全 |
 | 🗄️ **SQLite V16 + WAL** | 25+ 表、FTS5 兜底、启动自动迁移 schema |
 | 🔍 **双引擎搜索** | Tantivy(N-gram + jieba 可选)主,FTS5 兜底;支持查询语法,按消息时间倒序 |
 | 🧬 **统一标准化** | 6 来源 × 19 事件类型领域模型;BLAKE3 哈希、幂等、完整度评分 |
 | 📦 **内容寻址 Raw Store** | 原始 payload 全部保留,可重复提取 / 审计 |
 | 🏷️ **Workspace 自动合并** | 7 级优先级 + 置信度,支持手动覆盖 |
 | ⭐ **收藏 / 标签 / 归档 / 软删 / 硬删** | 软删可恢复;硬删级联清理搜索索引与 Raw Store |
-| 🔁 **增量同步** | `import_state` 新鲜度检测;10 分钟自动同步;重置后自动重算 |
+| 🔁 **增量同步** | `import_state` 新鲜度检测;10 分钟自动同步;重置后自动重算;源侧改名下次同步自动跟上(用户手动改名永远优先) |
 | 💡 **知识提取** | 默认规则引擎;可选 LLM 引擎(OpenAI / DeepSeek / GLM / Ollama / LM Studio / llama.cpp);schema 版本化,运行历史可查 |
 | 🔐 **加密备份 / 恢复** | XChaCha20-Poly1305 + Argon2id,主密钥不离盘 |
 | 🧪 **相似会话推荐** | 有界候选集,适合回溯历史上下文 |
@@ -135,9 +135,11 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 热力图 + 会话甘特图)· `项目` · `治理`(成本 · 资产 · 安全 · 自动化)· `设置`。
 
 - Apple 风格浅色 / 深色主题,4 档字号(macOS *Larger Text*)
+- 中英文双语界面(930+ 条文案,设置 → 外观 → 语言)
 - Command Palette、首次启动引导、启动更新日志
 - 每会话私人笔记、⌘1–⌘8 侧栏快捷键、应用内底部终端 dock(⌘J)
 - 搜索历史下拉(单条删除)、会话甘特图、列表横向滚动、消息内联本机图片预览
+- 同名会话折叠(批量任务折成一行 ×N)、搜索左栏右键菜单(收藏 / 归档 / 置顶 / 加标签 / 删除)
 
 ## 快速开始
 
@@ -318,7 +320,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 ## 路线图
 
-- [ ] OpenCode Adapter(第 6 → 7 来源)
+- [ ] OpenCode Adapter(第 7 个 IDE 来源)
 - [ ] Daemon UDS / Named Pipe IPC + 本地认证 Token(当前仅 stdio)
 - [ ] Adapter Host 资源配额(内存 / CPU / 文件白名单 / 禁网)
 - [ ] Tauri Updater 自动更新 + 安装包签名 / 公证

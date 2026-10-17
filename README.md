@@ -10,13 +10,13 @@ A local-first desktop app that unifies conversations, tool calls, commands, diff
 ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness — normalizes them into a single searchable corpus,
 and continuously governs usage, cost, and security.
 
-[English](README.md) · [简体中文](README.zh-CN.md)
+[English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
 
 </div>
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/version-1.3.0-0071e3?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.5.0-0071e3?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
@@ -92,7 +92,7 @@ Light and dark themes are supported; the dark theme is shown.
 
 Three layers, one invariant: **third-party data is read-only**.
 
-- **Adapters** — seven sources (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
+- **Adapters** — eight adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
   isolated child processes over stdio JSON-RPC. Crashes don't take down the host; timeouts
   don't hang the UI.
 - **Core (`DaemonState`)** — the only writer. BLAKE3 content addressing, zstd compression,
@@ -107,14 +107,14 @@ Three layers, one invariant: **third-party data is read-only**.
 
 | | |
 |---|---|
-| 🔌 **7 read-only adapters** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown/JSONL — process-isolated, crash-safe |
+| 🔌 **8 read-only adapters** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown · JSONL — process-isolated, crash-safe |
 | 🗄️ **SQLite V16 + WAL** | 25+ tables, FTS5 fallback, automatic schema migration on startup |
 | 🔍 **Dual search engines** | Tantivy (N-gram Chinese + jieba) primary, FTS5 fallback, query syntax, time-ordered hits |
 | 🧬 **Canonical normalization** | Unified 6-source × 19-event-type domain model, BLAKE3-hashed, idempotent, completeness-scored |
 | 📦 **Content-addressed raw store** | Every original payload preserved verbatim for re-extraction and audit |
 | 🏷️ **Workspace auto-merge** | 7-level priority + confidence, with manual override UI |
 | ⭐ **Favorites, tags, archive, soft + hard delete** | With cascade cleanup across search index and raw store |
-| 🔁 **Incremental sync** | `import_state` freshness tracking, 10-minute auto-sync, resync after reset |
+| 🔁 **Incremental sync** | `import_state` freshness tracking, 10-minute auto-sync, resync after reset, source-side title renames picked up on next sync (your own renames always win) |
 | 💡 **Knowledge extraction** | Rule engine by default, LLM engine opt-in (OpenAI / DeepSeek / GLM / Ollama / LM Studio / llama.cpp), schema-versioned, with run history |
 | 🔐 **Encrypted backup / restore** | XChaCha20-Poly1305 + Argon2id, key never leaves disk |
 | 🧪 **Similar-session recommendations** | Bounded candidate set, useful for rediscovering past context |
@@ -144,10 +144,13 @@ A second surface for teams and heavy users: usage, cost, security, automation.
 security · automation) · `Settings`.
 
 - Apple-style light / dark themes, 4 font-size presets (macOS *Larger Text*)
+- English / 简体中文 interface (930+ strings, Settings → Appearance → Language)
 - Command palette, onboarding tour, first-launch changelog
 - Per-conversation private notes, sticky ⌘1–⌘8 sidebar, in-app bottom terminal dock (⌘J)
 - Search history dropdown with per-entry delete, conversation gantt chart, conversation list
   horizontal scroll, in-message native image preview
+- Same-title conversation collapse (batch runs fold into one `×N` row), search left-panel
+  context menu (favorite / archive / pin / tag / delete)
 
 ## Quick start
 
@@ -328,7 +331,7 @@ Full rationale: [docs/conversation-hub-execution-plan.md §1.3](docs/conversatio
 
 ## Roadmap
 
-- [ ] OpenCode adapter (6th → 7th source)
+- [ ] OpenCode adapter (7th IDE source)
 - [ ] Daemon UDS / Named Pipe IPC + local auth token (today: stdio only)
 - [ ] Adapter host resource quotas (memory / CPU / file whitelist / network denial)
 - [ ] Tauri Updater auto-update + installer code-signing / notarization
