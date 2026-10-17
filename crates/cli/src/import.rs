@@ -417,8 +417,8 @@ mod tests {
         let jl_raw: RawConversation = parse_by_extension(jl.path()).expect("parse failed");
 
         // 都应解析出消息，但来源不同 adapter
-        assert!(!md_raw.messages.is_empty());
-        assert!(!jl_raw.messages.is_empty());
+        assert_ne!(md_raw.messages, [] as [ch_normalization::RawMessage; 0]);
+        assert_ne!(jl_raw.messages, [] as [ch_normalization::RawMessage; 0]);
     }
 
     /// Round 22 回归：项目页「查看会话」SQL JOIN 列名错误。
