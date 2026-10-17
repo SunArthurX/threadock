@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Cursor 导入对新版库失效（发现层全挂）**：新版 Cursor 的
+  `state.vscdb` 有两处破坏性变化——① `cursorDiskKV.value` 从 BLOB 改为
+  **TEXT** 存储（真实库实测 composerData/bubbleId 全为 text），旧读取按
+  `Vec<u8>` 强转在第一行即报 "Invalid column type Text"；② 会话头迁移到
+  新表 `composerHeaders`（`value` 列存会话头 JSON，含 LLM 生成的会话
+  `name`）。适配器两处跟进：`kv_value_bytes` 统一 TEXT/BLOB 兼容读；
+  发现列表与解析标题优先取 `composerHeaders` 的真实会话名（如
+  "Project optimization analysis"），旧版库无此表时回退原路径不受影响。
+  真实库验证：13 个 composer 发现 → 2 个有内容的会话导入（21/9 条消息），
+  空草稿正确跳过
+
 ## [1.5.0] - 2026-10-12
 
 DeepSeek Harness (dsh) 对话导入 + 源侧标题改名同步 + Codex/Claude Code 标题修复 + 会话列表同名折叠。

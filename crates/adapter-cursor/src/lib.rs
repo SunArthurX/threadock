@@ -5,6 +5,8 @@
 //! Cursor 把会话存在 VS Code 风格的 leveldb 兼容 `SQLite` 库
 //! `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb`，
 //! 表 `cursorDiskKV(key TEXT PRIMARY KEY, value BLOB)`。
+//! 注意 `value` 的实际存储类型随 Cursor 版本漂移：旧版 BLOB、新版 TEXT
+//! （JSON 字符串）——读取统一走 [`kv_value_bytes`] 兼容两种形态。
 //!
 //! 关键 key 体系：
 //! - `composerData:<conversationId>` → 对话索引 JSON，含字段
@@ -12,6 +14,10 @@
 //!   `bubbleId`、`type`（1=用户 / 2=助手）、`grouping`）
 //! - `bubbleId:<conversationId>:<bubbleId>` → 单条消息 JSON，含
 //!   `text`（正文）、`createdAt`（ISO 8601）、`type`
+//!
+//! 新版 Cursor 另有 `composerHeaders` 表（`composerId` 主键 + `value`
+//! 列存会话头 JSON，含 LLM 生成的会话 `name` 与 `createdAt` 毫秒）——
+//! 发现与标题优先取该表的真实会话名，表不存在时回退旧 KV 路径。
 //!
 //! ## 能力
 //!
@@ -65,6 +71,50 @@ fn open_db(db_path: impl AsRef<Path>) -> AdapterResult<Connection> {
     Ok(ch_adapter_sdk::open_readonly(db_path)?)
 }
 
+/// `cursorDiskKV.value` 兼容读：新版 Cursor 把 JSON 以 **TEXT** 存储（真实库
+/// 实测 composerData/bubbleId 全为 text），旧版为 BLOB——SQLite 列无强类型，
+/// 统一转字节，两种形态都能解析（Null/数字等异常形态回空串，由调用方
+/// 的 JSON 解析兜底跳过）。
+fn kv_value_bytes(r: &rusqlite::Row<'_>, idx: usize) -> rusqlite::Result<Vec<u8>> {
+    match r.get::<_, rusqlite::types::Value>(idx)? {
+        rusqlite::types::Value::Text(s) => Ok(s.into_bytes()),
+        rusqlite::types::Value::Blob(b) => Ok(b),
+        rusqlite::types::Value::Null => Ok(Vec::new()),
+        rusqlite::types::Value::Integer(i) => Ok(i.to_string().into_bytes()),
+        rusqlite::types::Value::Real(f) => Ok(f.to_string().into_bytes()),
+    }
+}
+
+/// 新版 Cursor 的 `composerHeaders` 表：composerId → 会话头 JSON 里的
+/// LLM 生成会话名（`name`）。表不存在（旧版库）返回空 Map，调用方回退。
+fn composer_names(conn: &Connection) -> AdapterResult<std::collections::HashMap<String, String>> {
+    let mut names = std::collections::HashMap::new();
+    let has_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='composerHeaders'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .is_ok_and(|n| n > 0);
+    if !has_table {
+        return Ok(names);
+    }
+    let mut stmt = conn.prepare("SELECT composerId, value FROM composerHeaders")?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, kv_value_bytes(r, 1)?)))?;
+    for row in rows {
+        let (composer_id, value) = row?;
+        let Ok(obj) = serde_json::from_slice::<serde_json::Value>(&value) else {
+            continue;
+        };
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+            if !name.trim().is_empty() {
+                names.insert(composer_id, name.trim().to_string());
+            }
+        }
+    }
+    Ok(names)
+}
+
 /// 列出 Cursor 所有会话（按首条消息时间降序，无时间的排最后）。
 pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<DiscoveredSession>> {
     let conn = open_db(&db_path)?;
@@ -72,11 +122,10 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
     let mut stmt = conn.prepare(
         "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%' AND key != 'composerData:empty-state-draft'",
     )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-    })?;
+    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, kv_value_bytes(r, 1)?)))?;
 
     let mut sessions = Vec::new();
+    let names = composer_names(&conn)?;
     for row in rows {
         let (key, value) = row?;
         let session_id = key
@@ -89,9 +138,12 @@ pub fn discover_sessions(db_path: impl AsRef<Path>) -> AdapterResult<Vec<Discove
             .and_then(|v| v.as_array());
         let bubble_count = headers.map_or(0, std::vec::Vec::len);
 
-        // 首条用户消息的 text 作为 title 候选；时间从 headers[0] 推断需读 bubble，这里先用首 bubble 的 createdAt（若 composerData 内联了）。
-        // 多数 composerData 不含 text，title 留空，由 parse 时填充；此处先给个粗标题。
-        let title = format!("Cursor 会话 ({bubble_count} 条消息)");
+        // 标题：新版 composerHeaders 表的 LLM 会话名优先；旧版无表用占位。
+        // title 候选（首条用户消息文本）多数 composerData 不含，由 parse 填充。
+        let title = names
+            .get(&session_id)
+            .cloned()
+            .unwrap_or_else(|| format!("Cursor 会话 ({bubble_count} 条消息)"));
         sessions.push(DiscoveredSession {
             session_id,
             title,
@@ -119,7 +171,7 @@ pub fn parse_session(
         .query_row(
             "SELECT value FROM cursorDiskKV WHERE key = ?1",
             rusqlite::params![&composer_key],
-            |r| r.get::<_, Vec<u8>>(0),
+            |r| kv_value_bytes(r, 0),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => {
@@ -157,7 +209,7 @@ pub fn parse_session(
         let bubble_value: Vec<u8> = match conn.query_row(
             "SELECT value FROM cursorDiskKV WHERE key = ?1",
             rusqlite::params![&bubble_key],
-            |r| r.get::<_, Vec<u8>>(0),
+            |r| kv_value_bytes(r, 0),
         ) {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => continue,
@@ -231,8 +283,9 @@ pub fn parse_session(
         return Err(CursorError::Empty(conversation_id.to_string()));
     }
 
-    // 标题：取首条用户消息前 60 字
-    let title = messages
+    // 标题：新版 composerHeaders 表的 LLM 会话名（源侧真实标题）优先，
+    // 回退首条用户消息前 60 字
+    let fallback_title = messages
         .iter()
         .find(|m| m.role == Role::User)
         .and_then(|m| m.text.as_deref())
@@ -244,6 +297,10 @@ pub fn parse_session(
                 t.chars().take(60).collect::<String>() + "…"
             }
         });
+    let title = composer_names(&conn)?
+        .get(conversation_id)
+        .cloned()
+        .or(fallback_title);
 
     Ok(RawConversation {
         provider: PROVIDER,
@@ -352,5 +409,105 @@ mod tests {
             parse_session(&db, "nope"),
             Err(CursorError::NotFound(_))
         ));
+    }
+
+    /// 回归（2026-10 真实库发现）：新版 Cursor 的 cursorDiskKV.value 以
+    /// TEXT（JSON 字符串）存储而非 BLOB——旧读取按 Vec<u8> 强转在第一行
+    /// 就报 "Invalid column type Text"，发现/解析全挂。
+    #[test]
+    fn text_stored_values_are_supported() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("state.vscdb");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);")
+            .expect("unexpected None");
+        let composer = serde_json::json!({
+            "composerId": "t1",
+            "fullConversationHeadersOnly": [
+                {"bubbleId": "tb1", "type": 1, "grouping": {"hasText": true}}
+            ]
+        });
+        // String 绑定 → SQLite 存为 TEXT（新版形态）
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES ('composerData:t1', CAST(?1 AS TEXT))",
+            rusqlite::params![serde_json::to_string(&composer).expect("unexpected None")],
+        )
+        .expect("unexpected None");
+        let bubble = serde_json::json!({
+            "bubbleId": "tb1",
+            "type": 1,
+            "text": "TEXT 形态的会话",
+            "createdAt": "2026-10-12T08:00:00.000Z"
+        });
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES ('bubbleId:t1:tb1', CAST(?1 AS TEXT))",
+            rusqlite::params![serde_json::to_string(&bubble).expect("unexpected None")],
+        )
+        .expect("unexpected None");
+        drop(conn);
+
+        let sessions = discover_sessions(&db).expect("discover failed on TEXT-stored values");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, "t1");
+        let raw = parse_session(&db, "t1").expect("parse failed on TEXT-stored values");
+        assert_eq!(raw.title.as_deref(), Some("TEXT 形态的会话"));
+    }
+
+    /// 回归（2026-10 真实库发现）：新版 Cursor 另有 composerHeaders 表
+    /// （value = 会话头 JSON，含 LLM 生成的 `name`）——发现列表与解析标题
+    /// 都应优先用它；旧版库无此表时回退旧路径不受影响。
+    #[test]
+    fn composer_headers_table_name_takes_precedence() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("state.vscdb");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);
+             CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, workspaceId TEXT, createdAt INTEGER, lastUpdatedAt INTEGER, isArchived INTEGER, isSubagent INTEGER, recency INTEGER, checkpointAt INTEGER, subagentTypeName TEXT, value TEXT);",
+        )
+        .expect("unexpected None");
+        let composer = serde_json::json!({
+            "composerId": "n1",
+            "fullConversationHeadersOnly": [
+                {"bubbleId": "nb1", "type": 1, "grouping": {"hasText": true}}
+            ]
+        });
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES ('composerData:n1', ?1)",
+            rusqlite::params![serde_json::to_vec(&composer).expect("unexpected None")],
+        )
+        .expect("unexpected None");
+        let bubble = serde_json::json!({
+            "bubbleId": "nb1", "type": 1, "text": "首条用户消息",
+            "createdAt": "2026-10-12T09:00:00.000Z"
+        });
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES ('bubbleId:n1:nb1', ?1)",
+            rusqlite::params![serde_json::to_vec(&bubble).expect("unexpected None")],
+        )
+        .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO composerHeaders (composerId, value) VALUES ('n1', ?1)",
+            rusqlite::params![serde_json::to_string(&serde_json::json!({
+                "type": "head", "composerId": "n1", "name": "Project optimization analysis",
+                "createdAt": 1_791_530_487_614_i64
+            }))
+            .expect("unexpected None")],
+        )
+        .expect("unexpected None");
+        drop(conn);
+
+        let sessions = discover_sessions(&db).expect("unexpected None");
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(
+            sessions[0].title, "Project optimization analysis",
+            "发现列表用 composerHeaders 的 LLM 会话名"
+        );
+        let raw = parse_session(&db, "n1").expect("parse failed");
+        assert_eq!(
+            raw.title.as_deref(),
+            Some("Project optimization analysis"),
+            "解析标题源侧会话名优先，首条用户消息仅兜底"
+        );
     }
 }
