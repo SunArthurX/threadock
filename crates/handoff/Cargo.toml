@@ -1,0 +1,27 @@
+[package]
+name = "ch-handoff"
+description = "Handoff：把归档会话写回各 Agent 的原生会话存储，供其 resume 后继续开发"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-domain = { path = "../domain" }
+ch-storage = { path = "../storage" }
+ch-export = { path = "../export" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+time.workspace = true
+uuid.workspace = true
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+ch-normalization = { path = "../normalization" }
+ch-adapter-claude-code = { path = "../adapter-claude-code" }
+ch-adapter-codex = { path = "../adapter-codex" }
+ch-adapter-zcode = { path = "../adapter-zcode" }
+ch-adapter-minimax = { path = "../adapter-minimax" }
+ch-adapter-cursor = { path = "../adapter-cursor" }

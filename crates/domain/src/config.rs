@@ -40,6 +40,21 @@ pub struct AuditConfig {
     pub scan_dangerous_commands: bool,
 }
 
+/// Cursor 的 `state.vscdb` 路径（按编译目标 OS 解析）。
+///
+/// 读取侧（SourcesConfig / Tauri import）与写回侧（ch-handoff）共用，
+/// 保证两个方向永远指向同一个文件。未知系统按 Linux 形态兜底。
+#[must_use]
+pub fn cursor_db_path(home: &std::path::Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Cursor/User/globalStorage/state.vscdb")
+    } else if cfg!(target_os = "windows") {
+        home.join("AppData/Roaming/Cursor/User/globalStorage/state.vscdb")
+    } else {
+        home.join(".config/Cursor/User/globalStorage/state.vscdb")
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
@@ -47,8 +62,7 @@ impl Default for AgentConfig {
             sources: SourcesConfig {
                 zcode_db: PathBuf::from(&home).join(".zcode/cli/db/db.sqlite"),
                 claude_home: PathBuf::from(&home).join(".claude"),
-                cursor_db: PathBuf::from(&home)
-                    .join("Library/Application Support/Cursor/User/globalStorage/state.vscdb"),
+                cursor_db: cursor_db_path(std::path::Path::new(&home)),
                 minimax_db: PathBuf::from(&home).join(".minimax/v2/sqlite/runtime-state.sqlite"),
                 codex_home: PathBuf::from(&home).join(".codex"),
             },

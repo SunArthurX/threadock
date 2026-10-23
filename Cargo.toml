@@ -8,6 +8,7 @@ members = [
     "crates/identity-resolver",
     "crates/normalization",
     "crates/export",
+    "crates/handoff",
     "crates/backup",
     "crates/knowledge",
     "crates/llm",
