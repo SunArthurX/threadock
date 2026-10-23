@@ -136,6 +136,12 @@ fn main() {
             "ExportOutput",
         ),
         ("save_text_file", "path, content", "void"),
+        ("handoff_targets", "-", "HandoffTargetInfo[]"),
+        (
+            "handoff_conversations",
+            "conversationIds, target, all?, dryRun?, includeContext?, cwd?",
+            "HandoffSummary",
+        ),
         ("saved_search_list", "-", "SavedSearchRecord[]"),
         ("saved_search_upsert", "name, query", "id"),
         ("saved_search_delete", "id", "void"),

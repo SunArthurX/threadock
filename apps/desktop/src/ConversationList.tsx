@@ -151,6 +151,8 @@ interface Props {
   onBulkDelete?: (ids: string[]) => Promise<void> | void;
   /** 批量加标签（每个 id 都会调一次 add_tag，未来可加 batch 接口） */
   onBulkAddTag?: (ids: string[], tag: string) => Promise<void> | void;
+  /** 批量交接：把选中会话（含上下文）写回其他 Agent 的会话存储 */
+  onBulkHandoff?: (ids: string[]) => void;
   /** 批量拆分：把选中会话移到新 Workspace（plan §4.3 手动拆分，v1.0.0） */
   onBulkSplit?: (ids: string[], newWorkspaceName: string) => Promise<void> | void;
 }
@@ -159,7 +161,7 @@ export default function ConversationList({
   conversations, selectedConv, loading, providerFilter, selectedWs,
   expandedParents, childConvs, scope, onScopeChange, availableProviders, onFilter, onSelect,
   onToggleExpand, onClearWs, onToggleFavorite, onArchiveOne, onDeleteOne, onCopyTitle, onRestore,
-  onBulkFavorite, onBulkArchive, onBulkDelete, onBulkAddTag, onBulkSplit,
+  onBulkFavorite, onBulkArchive, onBulkDelete, onBulkAddTag, onBulkHandoff, onBulkSplit,
 }: Props) {
   const [dateFilter, setDateFilter] = useState<DateFilter>(() => loadLS(DATE_KEY, ["all", "today", "week", "month"] as const, "all"));
   const [sortBy, setSortBy] = useState<SortBy>(() => loadLS(SORT_KEY, ["updated", "created", "title"] as const, "updated"));
@@ -339,6 +341,7 @@ export default function ConversationList({
       onBulkArchive,
       onBulkDelete,
       onBulkAddTag,
+      onBulkHandoff,
       openTagInput: (ids, count, x, y) => setTagInput({ ids, count, value: "", x, y }),
     });
 

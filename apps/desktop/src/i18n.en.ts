@@ -935,4 +935,57 @@ export const EN: Record<string, string> = {
   "🗑 已移入回收站（{__0__}）": "🗑 Moved to recycle bin ({__0__})",
   "🤖 助手": "🤖 Assistant",
   "🧹 清理未引用归档": "🧹 Clean unreferenced archives",
+
+  // ── v1.6.0 更新日志 ────────────────────────────────────────────────────
+  "会话交接（Handoff）：把归档会话连同上下文写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的原生会话库，在那边 resume 继续开发":
+    "Handoff: write archived sessions, with context, back into Claude Code / Codex / ZCode / MiniMax Code / Cursor native session stores and resume there",
+  "上下文随行：命令 / 文件改动 / 工具调用折叠为执行时间线前言，再接完整对话":
+    "Context travels along: commands / file changes / tool calls fold into an execution-timeline preamble, followed by the full dialog",
+  "入口：详情工具栏「⇄ 交接」/ 右键批量 / 弹窗一键全部；CLI ch handoff；daemon conversation.handoff":
+    "Entry points: toolbar ⇄ Hand off / right-click bulk / one-click all in the dialog; CLI ch handoff; daemon conversation.handoff",
+  "安全：纯增量新会话 ID、dry-run 预演、schema 守卫、自定义脱敏规则随行":
+    "Safety: additive new session IDs only, dry-run preview, schema guard, custom redaction rules applied",
+  "Cursor 路径跨平台解析（macOS / Windows / Linux），读写同源":
+    "Cursor state.vscdb resolved per OS (macOS / Windows / Linux), shared by reader and writer",
+  "五个写回器全部带往返测试：产出用 threadock 自己的 adapter 读回校验，字段集对齐真实库":
+    "All five writers carry round-trip tests: output is re-read by threadock's own adapters, field sets mirror real stores",
+  // ── Handoff（交接到其他 Agent）────────────────────────────────────────
+  "⇄ 交接到其他 Agent": "⇄ Hand off to another agent",
+  "交接到其他 Agent…": "Hand off to another agent…",
+  "交接 {__0__} 条到其他 Agent…": "Hand off {__0__} conversations…",
+  "把此会话（含上下文）写入其他 Agent 的会话存储，在那边继续开发":
+    "Write this conversation (with context) into another agent's session store to continue there",
+  "将 {__0__} 条会话（含上下文）写入目标 Agent 的本地会话存储，之后可在该工具里继续开发。":
+    "Write {__0__} conversation(s), with context, into the target agent's local session store so you can resume there.",
+  "将把全部会话（排除已删除与子任务，含上下文）写入目标 Agent 的本地会话存储，之后可在该工具里继续开发。":
+    "Write all conversations (excluding deleted and subtasks, with context) into the target agent's local session store so you can resume there.",
+  "写入是纯增量：生成全新会话 ID，不改动目标里已有会话。":
+    "Writes are additive only: a brand-new session ID is created; existing sessions are never touched.",
+  "改为交接全部会话（排除已删除与子任务）": "Hand off ALL conversations instead (excluding deleted and subtasks)",
+  "目标 Agent": "Target agent",
+  "全部可用目标": "All available targets",
+  "{__0__} 个目标可用": "{__0__} target(s) available",
+  "未检测到任何目标": "No target detected",
+  "未检测到": "Not detected",
+  "附带上下文前言（来源、工作目录、执行时间线）": "Include context preamble (origin, working directory, execution timeline)",
+  "工作目录兜底（会话无工作区时使用，留空用主目录）":
+    "Fallback working directory (when a conversation has no workspace; empty = home)",
+  "如 /Users/me/projects/demo": "e.g. /Users/me/projects/demo",
+  "预演（不写入）": "Dry run (no writes)",
+  "开始交接": "Hand off",
+  "交接中…": "Handing off…",
+  "交接完成：成功 {__0__} · 失败 {__1__}": "Handoff done: {__0__} ok · {__1__} failed",
+  "交接失败：{__0__}": "Handoff failed: {__0__}",
+  "交接结果": "Handoff result",
+  "预演结果（未写入）": "Dry-run result (nothing written)",
+  "匹配 {__0__} 条会话": "{__0__} conversation(s) matched",
+  "未找到 {__0__} 条": "{__0__} not found",
+  "✓ 已交接 {__0__} 条会话到 {__1__}": "✓ Handed off {__0__} conversation(s) to {__1__}",
+  "✓ 恢复命令已复制": "✓ Resume command copied",
+  "点击复制恢复命令": "Click to copy the resume command",
+  "在项目目录的终端里执行即可继续。": "Run it in a terminal at the project directory to continue.",
+  "在 {__0__} 的会话列表中打开「{__1__}」即可继续。": "Open “{__1__}” in {__0__}'s session list to continue.",
+  "剪贴板不可用": "Clipboard unavailable",
+  "若你在治理中配置了自定义脱敏规则，内容会先脱敏再写入目标库（与导出一致）。":
+    "If you have custom redaction rules in Governance, content is redacted before being written (same as export).",
 };

@@ -18,6 +18,7 @@ import KnowledgeView from "./KnowledgeView";
 import ActivityView from "./ActivityView";
 import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
+import HandoffModal from "./HandoffModal";
 import HelpShortcuts from "./HelpShortcuts";
 import ChangelogModal, { shouldShowChangelog } from "./ChangelogModal";
 import OnboardingTour, { isOnboardingSeen, markOnboardingSeen, resetOnboarding } from "./OnboardingTour";
@@ -155,6 +156,8 @@ export default function App() {
   };
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
+  // 交接弹窗：待交接的会话 id 列表（null = 关闭）
+  const [handoffReq, setHandoffReq] = useState<string[] | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   // 自动同步间隔（分钟，0 = 关闭）：localStorage 快路径，DB app_settings 持久备份
@@ -1253,6 +1256,8 @@ export default function App() {
 
         {reportsOpen && <ReportModal onClose={() => setReportsOpen(false)} />}
 
+        {handoffReq && <HandoffModal conversationIds={handoffReq} onClose={() => setHandoffReq(null)} />}
+
         {helpOpen && <HelpShortcuts onClose={() => setHelpOpen(false)} />}
 
         {changelogOpen && <ChangelogModal onClose={() => setChangelogOpen(false)} />}
@@ -1346,6 +1351,7 @@ export default function App() {
                     onBulkArchive={bulkArchive}
                     onBulkAddTag={bulkAddTag}
                     onBulkDelete={bulkDelete}
+                    onBulkHandoff={setHandoffReq}
                     onBulkSplit={async (ids, name) => {
                       try {
                         await invoke("workspace_split", { conversationIds: ids, newName: name });
@@ -1409,6 +1415,7 @@ export default function App() {
                     }}
                     onToggleTimeline={() => setTimelineMode(!timelineMode)}
                     onExport={exportCurrent} onExtractKnowledge={() => void extractKnowledge()}
+                    onHandoff={() => setHandoffReq([selectedConv!.id])}
                     onToggleCollapse={(id) => setCollapsedMsgs((p) => { const n = new Set(p); if (n.has(id)) { n.delete(id); } else { n.add(id); } return n; })} />
                 : !conversations.length && !convsLoading ? (
                   <EmptyState

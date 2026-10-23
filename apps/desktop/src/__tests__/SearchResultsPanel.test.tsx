@@ -172,7 +172,7 @@ describe("SearchResultsPanel 右键菜单", () => {
     expect(container.querySelector('[data-testid="contextmenu"]')).toBeNull();
   });
 
-  it("菜单项与普通列表同源：buildConvMenuItems（scope=all 单选）产出同六个动作", () => {
+  it("菜单项与普通列表同源：buildConvMenuItems（scope=all 单选）产出同七个动作", () => {
     const items = buildConvMenuItems({
       conv: conv("c-1"),
       x: 0, y: 0,
@@ -184,7 +184,7 @@ describe("SearchResultsPanel 右键菜单", () => {
       openTagInput: vi.fn(),
     });
     expect(items.map((i) => i.label)).toEqual([
-      "收藏", "归档", "置顶（排在最前）", "加标签…", "复制标题", "删除（带撤销）",
+      "收藏", "归档", "置顶（排在最前）", "加标签…", "复制标题", "交接到其他 Agent…", "删除（带撤销）",
     ]);
   });
 });

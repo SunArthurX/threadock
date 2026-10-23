@@ -48,6 +48,7 @@ ch-audit = { path = "../../../crates/audit" }
 ch-knowledge = { path = "../../../crates/knowledge" }
 ch-llm = { path = "../../../crates/llm" }
 ch-export = { path = "../../../crates/export" }
+ch-handoff = { path = "../../../crates/handoff" }
 ch-backup = { path = "../../../crates/backup" }
 arboard = "3.6.1"
 portable-pty = "0.8"

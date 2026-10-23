@@ -5549,3 +5549,31 @@ button {
   overflow: hidden;
 }
 .bottom-xterm .xterm { height: 100%; }
+
+/* ── 交接弹窗（HandoffModal）：把归档会话写回目标 Agent 原生会话存储 ── */
+.handoff-modal { width: min(640px, calc(100vw - 48px)); height: min(74vh, 660px); }
+.handoff-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 12.5px; cursor: pointer; }
+.handoff-section-title { margin: 16px 0 6px; font-size: 12px; opacity: .7; }
+.handoff-targets { display: flex; flex-direction: column; gap: 4px; }
+.handoff-target {
+  display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
+  border: 1px solid rgba(128, 128, 128, 0.25); cursor: pointer; font-size: 12.5px;
+}
+.handoff-target:hover { border-color: var(--accent); }
+.handoff-target.disabled { opacity: .45; cursor: not-allowed; }
+.handoff-target.disabled:hover { border-color: rgba(128, 128, 128, 0.25); }
+.handoff-target-name { font-weight: 600; flex: 0 0 104px; }
+.handoff-target-dest { opacity: .65; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.handoff-cwd-input {
+  width: 100%; padding: 7px 10px; border-radius: 8px; font-size: 12.5px;
+  border: 1px solid rgba(128, 128, 128, 0.3); background: transparent; color: inherit;
+}
+.handoff-result { margin-top: 16px; display: flex; flex-direction: column; gap: 5px; font-size: 12px; }
+.handoff-result-title { font-weight: 600; }
+.handoff-line { line-height: 1.5; }
+.handoff-line .ok { color: #34c759; }
+.handoff-line.fail { color: #ff6f6f; }
+.handoff-hint { opacity: .7; }
+.handoff-modal .link-btn { background: none; border: none; padding: 0; cursor: pointer; color: inherit; }
+.handoff-modal .link-btn code { font-size: 11.5px; opacity: .85; }
+.handoff-modal .link-btn:hover code { text-decoration: underline; }

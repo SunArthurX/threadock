@@ -15,6 +15,18 @@ interface ChangelogEntry {
 
 const CHANGELOG = (): ChangelogEntry[] => [
   {
+    version: "1.6.0",
+    date: "2026-10-23",
+    highlights: [
+      t("会话交接（Handoff）：把归档会话连同上下文写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的原生会话库，在那边 resume 继续开发"),
+      t("上下文随行：命令 / 文件改动 / 工具调用折叠为执行时间线前言，再接完整对话"),
+      t("入口：详情工具栏「⇄ 交接」/ 右键批量 / 弹窗一键全部；CLI ch handoff；daemon conversation.handoff"),
+      t("安全：纯增量新会话 ID、dry-run 预演、schema 守卫、自定义脱敏规则随行"),
+      t("Cursor 路径跨平台解析（macOS / Windows / Linux），读写同源"),
+      t("五个写回器全部带往返测试：产出用 threadock 自己的 adapter 读回校验，字段集对齐真实库"),
+    ],
+  },
+  {
     version: "1.0.0",
     date: "2026-08-17",
     highlights: [

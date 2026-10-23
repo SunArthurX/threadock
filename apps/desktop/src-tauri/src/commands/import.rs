@@ -254,12 +254,16 @@ pub(crate) async fn import_from_claude_code(
     })
 }
 
-/// Cursor state.vscdb 路径。
+/// Cursor state.vscdb 路径（按 OS 解析，与 ch_domain::config / ch-handoff 同源）。
 pub(crate) fn cursor_db_path() -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
-    Ok(format!(
-        "{home}/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
-    ))
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map_err(|_| "no HOME")?;
+    Ok(
+        ch_domain::config::cursor_db_path(std::path::Path::new(&home))
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 /// MiniMax runtime-state.sqlite 路径。

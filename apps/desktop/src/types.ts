@@ -75,6 +75,20 @@ export interface ExtractionResult {
 }
 export interface ExportOutput { content: string; format: string; filename: string; }
 
+/** 交接目标清单（handoff_targets）：本机是否检测到该 Agent 的会话存储。 */
+export interface HandoffTargetInfo { target: string; available: boolean; destination: string; }
+/** 单条会话交接成功结果（目标侧新会话 ID + 落点）。 */
+export interface HandoffOutcome {
+  target: string; conversation_id: string; title: string; session_id: string;
+  destination: string; items_written: number; dry_run: boolean;
+}
+export interface HandoffFailure { conversation_id: string; title: string; error: string; }
+export interface HandoffTargetResult { target: string; ok: HandoffOutcome[]; failed: HandoffFailure[]; }
+export interface HandoffSummary { matched: number; missing: string[]; dry_run: boolean; results: HandoffTargetResult[]; }
+/** 可交接目标（与后端 HandoffTarget::all 顺序一致）。 */
+export const HANDOFF_TARGETS = ["claude-code", "codex", "zcode", "minimax-code", "cursor"] as const;
+export type HandoffTarget = typeof HANDOFF_TARGETS[number];
+
 /** LLM 提取配置视图（后端 llm_config_get 返回）：永远不含密钥明文/密文。 */
 export interface LlmConfigView {
   enabled: boolean;

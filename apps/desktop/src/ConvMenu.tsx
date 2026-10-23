@@ -53,6 +53,8 @@ export interface ConvMenuArgs {
   onBulkArchive?: (ids: string[], archived: boolean) => Promise<void> | void;
   onBulkDelete?: (ids: string[]) => Promise<void> | void;
   onBulkAddTag?: (ids: string[], tag: string) => Promise<void> | void;
+  /** 交接：把选中会话（含上下文）写回其他 Agent 的会话存储。 */
+  onBulkHandoff?: (ids: string[]) => void;
   /** 「加标签…」点击：打开内联输入（由宿主列表持有状态）。 */
   openTagInput: (ids: string[], count: number, x: number, y: number) => void;
 }
@@ -112,6 +114,12 @@ export function buildConvMenuItems(a: ConvMenuArgs): MenuItem[] {
             .catch(() => showToast("剪贴板不可用", "error"));
         }
       },
+      group: 2,
+    });
+    items.push({
+      icon: "⇄",
+      label: isMulti ? t("交接 {__0__} 条到其他 Agent…", { __0__: targetCount }) : t("交接到其他 Agent…"),
+      onClick: () => a.onBulkHandoff?.(targetIds),
       group: 2,
     });
     items.push({

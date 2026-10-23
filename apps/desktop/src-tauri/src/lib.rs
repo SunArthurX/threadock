@@ -315,6 +315,8 @@ pub fn run() {
             open_source_app,
             resume_command,
             resume_in_terminal,
+            handoff_targets,
+            handoff_conversations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Threadock");

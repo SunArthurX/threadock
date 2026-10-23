@@ -27,6 +27,8 @@ interface Props {
   scrollContainerRef?: React.RefObject<{ inner: HTMLElement | null } | HTMLElement | null>;
   onToggleTimeline: () => void;
   onExport: (format: "markdown" | "json") => void;
+  /** 打开交接弹窗：把此会话（含上下文）写回其他 Agent 的会话存储。 */
+  onHandoff?: () => void;
   onExtractKnowledge: () => void;
   onToggleCollapse: (id: string) => void;
   onAddTag: (tag: string) => void;
@@ -48,7 +50,7 @@ interface Props {
 export default function ConversationDetail({
   conv, messages, events, completenessLabel, loading, exporting,
   timelineMode, highlightMsgId, collapsedMsgs, tags,
-  scrollContainerRef, onToggleTimeline, onExport, onExtractKnowledge, onToggleCollapse,
+  scrollContainerRef, onToggleTimeline, onExport, onHandoff, onExtractKnowledge, onToggleCollapse,
   onAddTag, onRemoveTag, onRescanAudit, onRenameTitle,
   note, onNoteChange, allTags, searchPreset,
 }: Props) {
@@ -375,6 +377,15 @@ export default function ConversationDetail({
         >
           ⏯ 恢复会话
         </button>
+        {onHandoff && (
+          <button
+            className="action-btn"
+            onClick={onHandoff}
+            title={t("把此会话（含上下文）写入其他 Agent 的会话存储，在那边继续开发")}
+          >
+            ⇄ 交接
+          </button>
+        )}
         <button className="action-btn" onClick={() => onExtractKnowledge()} disabled={loading || messages.length === 0}>
           {loading ? t("提取中…") : <><Icon name="sparkle" size={12} />{t("知识")}</>}
         </button>
