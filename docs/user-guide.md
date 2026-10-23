@@ -381,6 +381,57 @@ ch --db <库路径> redaction-rule list
 
 > 注意：脱敏只作用于**导出的副本**；Threadock 本地库中的原始内容不变。导出文件由你自行保管，请仅分享给需要的人。
 
+### 7.5 交接到其他 Agent 继续开发
+
+导出得到的是给人看的 Markdown / JSON；**交接（Handoff）**则是把归档会话**写回目标 Agent 的原生会话存储**，让你在那边 `resume` 后基于完整上下文继续开发。支持五个目标：Claude Code · Codex · ZCode · MiniMax Code · Cursor。
+
+**入口**：
+
+- 会话详情工具栏「**⇄ 交接**」——交接当前会话；
+- 会话列表右键「**交接到其他 Agent…**」——多选时一次交接整批；
+- 弹窗内勾选「改为交接全部会话」——一键交接库里全部会话（自动排除已删除与子任务会话）。
+
+**写入了什么**：每条会话落成目标工具里的一条**全新**会话，内容为：
+
+1. **上下文前言**（可关闭）：来源 Agent、标题、工作目录、模型、会话时间，以及**执行时间线**——存档里的命令、文件读写、补丁、工具调用逐条列出，让目标 Agent 知道「之前做过什么」；
+2. **完整对话记录**：原始的用户 / 助手消息按顺序逐条写入。
+
+> 保真说明：各 Agent 的工具调用协议互不相通，无法跨工具原生重放，因此工具调用统一折叠为前言里的文字时间线；thinking、图片等非文本块不写入。目标工具按自己的方式理解这些历史并继续。
+
+**安全边界**：
+
+- **纯增量**：永远生成全新会话 ID，不改动目标里任何已有会话；
+- **脱敏随行**：若你在治理 → 安全配置了自定义脱敏规则，交接内容会**先脱敏再写入**目标库（与导出同一套规则、同一策略：未配置规则则完全不脱敏，保证保真）；
+- **schema 守卫**：写入前先校验目标库表结构，Agent 升级导致存储格式变更时立即中止并明确报错，不会写坏库；
+- **预演**：弹窗「预演（不写入）」或 CLI `--dry-run` 先列出将创建的会话与落点；
+- ZCode / MiniMax Code / Cursor 的会话库是 SQLite，若对应 Agent 正在运行并持有写锁，会等待 5 秒后报错——先退出该 Agent 再试；
+- 未检测到会话存储（该 Agent 未安装或未初始化）的目标在弹窗里自动灰掉。
+
+**跨平台**：Claude Code / Codex / ZCode / MiniMax 的目标路径在三个平台按各自约定解析；Cursor 的 `state.vscdb` 按 macOS / Windows / Linux 的实际位置解析（读取与写入同源，见 `ch_domain::config::cursor_db_path`）。
+
+**交接后如何继续**：
+
+| 目标 | 继续方式 |
+|---|---|
+| Claude Code | 在项目目录执行 `claude --resume <新会话ID>`（弹窗结果里点一下即复制） |
+| Codex | 在项目目录执行 `codex resume <新会话ID>` |
+| ZCode / MiniMax Code / Cursor | 打开对应应用，在会话列表里找到同名会话继续 |
+
+**命令行**（脚本化 / 一键全部）：
+
+```bash
+# 把全部会话交接到 Claude Code（预演）
+ch --db <库路径> handoff claude-code --all --dry-run
+# 点名两条会话交接到 Codex，会话无工作区时用 --cwd 兜底
+ch --db <库路径> handoff codex --ids conv_a,conv_b --cwd ~/projects/demo
+# 一键写入全部五个目标
+ch --db <库路径> handoff all --all
+# 只交接 Cursor 来源的会话到 ZCode，不带上下文前言
+ch --db <库路径> handoff zcode --provider cursor --no-context
+```
+
+`--dest <路径>` 可把落点改到别处（claude-code / codex 传目录，其余传 sqlite 文件），适合先写到临时位置再人工拷贝。
+
 ---
 
 ## 8. 备份与恢复
@@ -481,6 +532,7 @@ CH_BACKUP_PASSWORD="你的备份密码" ch --db <库路径> restore hub.chbak re
 | `ch --db <db> export markdown <id> <输出.md>` | 导出 Markdown |
 | `ch --db <db> export json <id> <输出.json>` | 导出 JSON |
 | `ch --db <db> export workspace <工作区ID> <目录>/` | 批量导出整个工作区 |
+| `ch --db <db> handoff <目标\|all> --all\|--ids <id,..>\|--provider <p> [--dry-run] [--cwd <目录>]` | 交接会话（含上下文）到 claude-code / codex / zcode / minimax-code / cursor 继续开发 |
 | `ch --db <db> redaction-rule add <名称> <正则>` / `list` | 自定义脱敏规则 |
 | `CH_BACKUP_PASSWORD=密码 ch --db <db> backup <文件>.chbak` | 创建加密备份 |
 | `CH_BACKUP_PASSWORD=密码 ch --db <db> restore <文件>.chbak <目录>/` | 恢复备份 |

@@ -21,7 +21,7 @@ and continuously governs usage, cost, and security.
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-18-61dafb?style=flat-square&logo=react)](https://react.dev)
-[![Tests](https://img.shields.io/badge/tests-Rust%20510%20%2B%20TS%20377-success?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/tests-Rust%20608%20%2B%20TS%20431-success?style=flat-square)](#testing)
 [![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#installation)
 [![Local-first](https://img.shields.io/badge/local--first-100%25-blueviolet?style=flat-square)](docs/privacy.md)
 
@@ -90,7 +90,9 @@ Light and dark themes are supported; the dark theme is shown.
   <img src="docs/images/architecture.svg" alt="Architecture diagram" />
 </p>
 
-Three layers, one invariant: **third-party data is read-only**.
+Three layers, one invariant: **third-party data is read-only** — the single deliberate exception is
+[Handoff](#features), which only ever *appends* brand-new sessions to an agent's store and never
+touches existing ones.
 
 - **Adapters** — eight adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
   isolated child processes over stdio JSON-RPC. Crashes don't take down the host; timeouts
@@ -119,6 +121,7 @@ Three layers, one invariant: **third-party data is read-only**.
 | 🔐 **Encrypted backup / restore** | XChaCha20-Poly1305 + Argon2id, key never leaves disk |
 | 🧪 **Similar-session recommendations** | Bounded candidate set, useful for rediscovering past context |
 | 🧠 **Saved searches** | Cross-session persistence with one-shot re-execute |
+| ⇄ **Handoff — continue in any agent** | Write archived sessions (dialog + context preamble with the execution timeline) back into Claude Code / Codex / ZCode / MiniMax Code / Cursor native session stores as brand-new resumable sessions; additive-only, dry-run preview, one click for all |
 
 ### CodeAgentOps governance
 
@@ -216,7 +219,12 @@ $CH --db ./hub.db export markdown <id> out.md
 $CH --db ./hub.db redaction-rule add my-key 'sk-foo-[0-9]+'
 CH_BACKUP_PASSWORD="..." $CH --db ./hub.db backup hub.chbak
 
-# Daemon (JSON-RPC over stdio, 14 methods)
+# Handoff: write sessions (with context) into another agent's native store, then resume there
+$CH --db ./hub.db handoff claude-code --all --dry-run        # preview destinations
+$CH --db ./hub.db handoff codex --ids <id1>,<id2> --cwd ~/proj
+$CH --db ./hub.db handoff all --all                          # one click, all five agents
+
+# Daemon (JSON-RPC over stdio, 15 methods)
 $CH --db ./data daemon
 ```
 
@@ -228,9 +236,9 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 ```
 
 Methods: `system.getInfo` · `workspace.list` · `conversation.list` · `conversation.get` ·
-`conversation.delete` · `conversation.restore` · `conversation.similar` · `message.list` ·
-`event.list` · `search.query` · `knowledge.extract` · `knowledge.save` · `knowledge.get` ·
-`provider.sync`. See [docs/api.md](docs/api.md) for the full schema.
+`conversation.delete` · `conversation.restore` · `conversation.similar` · `conversation.handoff` ·
+`message.list` · `event.list` · `search.query` · `knowledge.extract` · `knowledge.save` ·
+`knowledge.get` · `provider.sync`. See [docs/api.md](docs/api.md) for the full schema.
 
 ## Repository layout
 
@@ -244,6 +252,7 @@ threadock/
 │   ├── identity-resolver/   workspace auto-merge (7 priority levels)
 │   ├── normalization/       BLAKE3 hash + idempotency + completeness
 │   ├── export/              Markdown / JSON + redaction
+│   ├── handoff/             write sessions back into agent-native stores (the only write path)
 │   ├── backup/              XChaCha20-Poly1305 + Argon2id
 │   ├── knowledge/           rule + LLM dual engine (versioned)
 │   ├── llm/                 LLM client + AEAD secret vault

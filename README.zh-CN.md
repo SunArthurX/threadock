@@ -84,7 +84,8 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
   <img src="docs/images/architecture.svg" alt="架构图" />
 </p>
 
-三层架构,一个铁律:**第三方数据只读**。
+三层架构,一个铁律:**第三方数据只读**——唯一的刻意例外是[交接(Handoff)](#功能特性):
+它只会往目标 Agent 的会话库里*追加*全新会话,绝不改动已有数据。
 
 - **Adapters** —— 八个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
   跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
@@ -111,6 +112,7 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 | 🔐 **加密备份 / 恢复** | XChaCha20-Poly1305 + Argon2id,主密钥不离盘 |
 | 🧪 **相似会话推荐** | 有界候选集,适合回溯历史上下文 |
 | 🧠 **保存搜索** | 跨会话持久化,一键复跑 |
+| ⇄ **交接——在任意 Agent 里继续开发** | 把归档会话(对话 + 含执行时间线的上下文前言)按原生格式写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的会话库,成为可 resume 的全新会话;纯增量写入、可预演、一键全部 |
 
 ### CodeAgentOps 治理
 
@@ -205,7 +207,12 @@ $CH --db ./hub.db export markdown <id> out.md
 $CH --db ./hub.db redaction-rule add my-key 'sk-foo-[0-9]+'
 CH_BACKUP_PASSWORD="..." $CH --db ./hub.db backup hub.chbak
 
-# 启动 Daemon(stdio JSON-RPC,14 个方法)
+# 交接:把会话(含上下文)写回其他 Agent 的原生会话库,去那边继续开发
+$CH --db ./hub.db handoff claude-code --all --dry-run        # 预演,只看落点
+$CH --db ./hub.db handoff codex --ids <id1>,<id2> --cwd ~/proj
+$CH --db ./hub.db handoff all --all                          # 一键写入全部五个 Agent
+
+# 启动 Daemon(stdio JSON-RPC,15 个方法)
 $CH --db ./data daemon
 ```
 
@@ -217,9 +224,9 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 ```
 
 方法清单:`system.getInfo` · `workspace.list` · `conversation.list` · `conversation.get` ·
-`conversation.delete` · `conversation.restore` · `conversation.similar` · `message.list` ·
-`event.list` · `search.query` · `knowledge.extract` · `knowledge.save` · `knowledge.get` ·
-`provider.sync`。完整定义见 [docs/api.md](docs/api.md)。
+`conversation.delete` · `conversation.restore` · `conversation.similar` · `conversation.handoff` ·
+`message.list` · `event.list` · `search.query` · `knowledge.extract` · `knowledge.save` ·
+`knowledge.get` · `provider.sync`。完整定义见 [docs/api.md](docs/api.md)。
 
 ## 项目结构
 
@@ -233,6 +240,7 @@ threadock/
 │   ├── identity-resolver/   Workspace 自动合并(7 级优先级)
 │   ├── normalization/       标准化流水线(哈希 + 幂等 + 完整度)
 │   ├── export/              Markdown / JSON 导出 + 脱敏
+│   ├── handoff/             写回各 Agent 原生会话库(唯一写出口)
 │   ├── backup/              XChaCha20-Poly1305 + Argon2id
 │   ├── knowledge/           规则 + LLM 双引擎(版本化)
 │   ├── llm/                 LLM 客户端 + AEAD 密钥保险库
