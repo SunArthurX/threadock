@@ -12,24 +12,17 @@ MiniMax Code · Codex · DeepSeek Harness 等工具里的会话、工具调用�
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
 
-</div>
+<img src="docs/images/screenshots/chat.png" alt="会话 — 统一列表、详情含内联 tool 事件、命令时间线" width="896" />
 
-<div align="center">
-
-[![Version](https://img.shields.io/badge/版本-1.5.0-0071e3?style=flat-square)](CHANGELOG.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/SunArthurX/threadock/ci.yml?branch=master&style=flat-square)](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/SunArthurX/threadock?include_prereleases&style=flat-square&color=0071e3&label=%E7%89%88%E6%9C%AC)](https://github.com/SunArthurX/threadock/releases)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
+[![Platforms](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#安装)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
-[![React](https://img.shields.io/badge/React-18-61dafb?style=flat-square&logo=react)](https://react.dev)
-[![Tests](https://img.shields.io/badge/测试-Rust%20510%20%2B%20TS%20377-success?style=flat-square)](#测试)
-[![Platforms](https://img.shields.io/badge/平台-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#安装)
 [![Local-first](https://img.shields.io/badge/local--first-100%25-blueviolet?style=flat-square)](docs/privacy.md)
 
-</div>
-
-<div align="center">
-
-[**快速开始**](#快速开始) · [**功能特性**](#功能特性) · [**架构**](#架构) · [**用户指南**](docs/user-guide.md) · [**隐私声明**](docs/privacy.md) · [**更新日志**](CHANGELOG.md)
+[**安装**](#安装) · [**功能特性**](#功能特性) · [**截图**](#截图) · [**使用**](#使用) · [**架构**](#架构) · [**用户指南**](docs/user-guide.md) · [**隐私声明**](docs/privacy.md) · [**更新日志**](CHANGELOG.md)
 
 </div>
 
@@ -57,9 +50,6 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 
 <table>
   <tr>
-    <td colspan="2"><img src="docs/images/screenshots/chat.png" alt="对话 — 列表、详情含内联 tool 事件、命令时间线" /></td>
-  </tr>
-  <tr>
     <td><img src="docs/images/screenshots/overview.png" alt="概览 — KPI 卡片、Agent 用量分布、每日 Token 趋势、模型明细、工具 Top 10" /></td>
     <td><img src="docs/images/screenshots/cost.png" alt="成本 — 月度预算、预测、按项目成本 Top 10" /></td>
   </tr>
@@ -72,27 +62,32 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
     <td><img src="docs/images/screenshots/projects.png" alt="项目 — 按 workspace 成本归因" /></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/images/screenshots/assets.png" alt="资产 — 跨 Agent 的 skills / plugins / 内置技能" /></td>
+    <td><img src="docs/images/screenshots/assets.png" alt="资产 — 跨 Agent 的 skills / plugins / 内置技能" /></td>
+    <td><img src="docs/images/screenshots/settings.png" alt="设置 — 外观、语言、同步、备份" /></td>
   </tr>
 </table>
 
 > 13 轮 UI/UX 打磨历程见 [docs/optimization-rounds/REPORT.md](docs/optimization-rounds/REPORT.md)。
 
-## 架构
+## 安装
 
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="架构图" />
-</p>
+[![Download](https://img.shields.io/badge/%E2%AC%87_%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-latest_release-0071e3?style=for-the-badge)](https://github.com/SunArthurX/threadock/releases/latest)
 
-三层架构,一个铁律:**第三方数据只读**——唯一的刻意例外是[交接(Handoff)](#功能特性):
-它只会往目标 Agent 的会话库里*追加*全新会话,绝不改动已有数据。
+到 [Releases 页面](https://github.com/SunArthurX/threadock/releases) 选对应平台的安装包下载,
+下载后请与发布物里的 `SHA256SUMS` 比对校验。
 
-- **Adapters** —— 八个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
-  跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
-- **Core(`DaemonState`)** —— 唯一的写者。BLAKE3 内容寻址、zstd 压缩、幂等去重、完整度
-  评分、审计日志。SQLite V16(25+ 表) + Tantivy 索引(N-gram 中文 + 可选 jieba)
-- **Frontends** —— Tauri 2 桌面(React + TS,101 个命令,7 个视图)、`ch` CLI、常驻 JSON-RPC
-  Daemon(14 个方法)、公开 API 给外部客户端
+| 平台 | 格式 |
+|---|---|
+| macOS(Apple Silicon · Intel) | `.dmg` |
+| Windows 10 / 11 | `.msi` · NSIS `.exe` |
+| Linux | `.AppImage` · `.deb` |
+| CLI 二进制 | `x86_64` / `aarch64` × macOS · Windows · Linux |
+
+> 安装包**当前未签名**(证书待接入)。macOS 首次打开右键 → 打开(或
+> `xattr -dr com.apple.quarantine <app>`);Windows SmartScreen 选「仍要运行」;下载后请
+> 比对 SHA256SUMS。
+
+想自己构建?见[开发 → 源码构建](#源码构建)。
 
 ## 功能特性
 
@@ -143,40 +138,9 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 - 搜索历史下拉(单条删除)、会话甘特图、列表横向滚动、消息内联本机图片预览
 - 同名会话折叠(批量任务折成一行 ×N)、搜索左栏右键菜单(收藏 / 归档 / 置顶 / 加标签 / 删除)
 
-## 快速开始
+## 使用
 
-### 桌面(开发模式)
-
-```bash
-git clone https://github.com/SunArthurX/threadock.git
-cd threadock
-cd apps/desktop
-npm install
-npx tauri dev          # dev 模式 Dock 同样显示真实应用图标
-```
-
-### 完整构建
-
-```bash
-# CLI + Daemon + Markdown Adapter
-cargo build --release -p ch-cli -p ch-daemon -p ch-adapter-markdown
-
-# Tauri 桌面应用
-cd apps/desktop && npm install && npm run build
-cd src-tauri && cargo build --release
-```
-
-### 安装包
-
-推 `v*` tag → [Release 流水线](.github/workflows/release.yml) 自动构建并发布
-**macOS**(dmg arm64 + x64)、**Windows**(nsis + msi)、**Linux**(appimage + deb) 三平台
-Tauri 安装包 + 四平台 CLI 二进制 + SHA256SUMS。
-
-[![GitHub release](https://img.shields.io/github/v/release/SunArthurX/threadock?include_prereleases&style=flat-square)](https://github.com/SunArthurX/threadock/releases)
-
-> 安装包**当前未签名**(证书待接入)。macOS 首次打开右键 → 打开(或
-> `xattr -dr com.apple.quarantine <app>`);Windows SmartScreen 选「仍要运行」;下载后请
-> 比对 SHA256SUMS。
+`ch` 二进制来自 [Release 发布物](#安装)或本地构建(`./target/release/ch`)。
 
 ### CLI 一览
 
@@ -228,6 +192,22 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 `message.list` · `event.list` · `search.query` · `knowledge.extract` · `knowledge.save` ·
 `knowledge.get` · `provider.sync`。完整定义见 [docs/api.md](docs/api.md)。
 
+## 架构
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="架构图" />
+</p>
+
+三层架构,一个铁律:**第三方数据只读**——唯一的刻意例外是[交接(Handoff)](#功能特性):
+它只会往目标 Agent 的会话库里*追加*全新会话,绝不改动已有数据。
+
+- **Adapters** —— 八个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
+  跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
+- **Core(`DaemonState`)** —— 唯一的写者。BLAKE3 内容寻址、zstd 压缩、幂等去重、完整度
+  评分、审计日志。SQLite V16(25+ 表) + Tantivy 索引(N-gram 中文 + 可选 jieba)
+- **Frontends** —— Tauri 2 桌面(React + TS,101 个命令,7 个视图)、`ch` CLI、常驻 JSON-RPC
+  Daemon(15 个方法)、公开 API 给外部客户端
+
 ## 项目结构
 
 ```
@@ -269,6 +249,28 @@ threadock/
 
 ## 开发
 
+### 源码构建
+
+```bash
+git clone https://github.com/SunArthurX/threadock.git
+cd threadock
+
+# 桌面应用(开发模式)
+cd apps/desktop
+npm install
+npx tauri dev          # dev 模式 Dock 同样显示真实应用图标
+
+# CLI + Daemon + Markdown Adapter
+cargo build --release -p ch-cli -p ch-daemon -p ch-adapter-markdown
+
+# 桌面 Release 构建
+cd apps/desktop && npm install && npm run build
+cd src-tauri && cargo build --release
+```
+
+发版:推 `v*` tag 触发 [Release 流水线](.github/workflows/release.yml),自动构建[安装](#安装)
+小节列出的全部安装包、CLI 二进制与 SHA256SUMS。
+
 ### 提交前预检
 
 ```bash
@@ -296,6 +298,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 | | |
 |---|---|
+| **自动化测试** | Rust 608 + TS 431,由 [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) 强制把关 |
 | **Gate 1** | 10 万会话 / 50 万消息 FTS5 搜索 P95 = **50.9 ms**(红线 300 ms)——见 [docs/benchmark-report-v1.0.0.md](docs/benchmark-report-v1.0.0.md) |
 | **Workspace 合并准确率** | 11 例标注样本 = 100%(错误 AutoMerge = 0) |
 | **ESLint** | 0 error / 0 warning |

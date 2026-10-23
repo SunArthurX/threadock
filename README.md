@@ -12,24 +12,17 @@ and continuously governs usage, cost, and security.
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
 
-</div>
+<img src="docs/images/screenshots/chat.png" alt="Conversations — unified list, detail with inline tool events, command timeline" width="896" />
 
-<div align="center">
-
-[![Version](https://img.shields.io/badge/version-1.5.0-0071e3?style=flat-square)](CHANGELOG.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/SunArthurX/threadock/ci.yml?branch=master&style=flat-square)](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/SunArthurX/threadock?include_prereleases&style=flat-square&color=0071e3)](https://github.com/SunArthurX/threadock/releases)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square)](LICENSE-MIT)
+[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#installation)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange?style=flat-square&logo=rust)](https://www.rust-lang.org)
 [![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
-[![React](https://img.shields.io/badge/React-18-61dafb?style=flat-square&logo=react)](https://react.dev)
-[![Tests](https://img.shields.io/badge/tests-Rust%20608%20%2B%20TS%20431-success?style=flat-square)](#testing)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](#installation)
 [![Local-first](https://img.shields.io/badge/local--first-100%25-blueviolet?style=flat-square)](docs/privacy.md)
 
-</div>
-
-<div align="center">
-
-[**Quick start**](#quick-start) · [**Features**](#features) · [**Architecture**](#architecture) · [**Docs**](docs/user-guide.md) · [**Privacy**](docs/privacy.md) · [**Changelog**](CHANGELOG.md)
+[**Install**](#installation) · [**Features**](#features) · [**Screenshots**](#screenshots) · [**Usage**](#usage) · [**Architecture**](#architecture) · [**Docs**](docs/user-guide.md) · [**Privacy**](docs/privacy.md) · [**Changelog**](CHANGELOG.md)
 
 </div>
 
@@ -56,14 +49,11 @@ gives you:
 
 ## Screenshots
 
-All screenshots below are captured from **v1.3.0** running against a real corpus of
+All screenshots are captured from **v1.3.0** running against a real corpus of
 **48,282 requests · 6.48B tokens · $4,553 spend across 5 agents and 1,184 conversations**.
 Light and dark themes are supported; the dark theme is shown.
 
 <table>
-  <tr>
-    <td colspan="2"><img src="docs/images/screenshots/chat.png" alt="Conversations — list, detail with inline tool events, command timeline" /></td>
-  </tr>
   <tr>
     <td><img src="docs/images/screenshots/overview.png" alt="Overview — KPI cards, agent usage donut, daily token trend, model breakdown, tool top 10" /></td>
     <td><img src="docs/images/screenshots/cost.png" alt="Cost — monthly budget, projection, project cost Top 10" /></td>
@@ -77,31 +67,34 @@ Light and dark themes are supported; the dark theme is shown.
     <td><img src="docs/images/screenshots/projects.png" alt="Projects — cost attribution per workspace" /></td>
   </tr>
   <tr>
-    <td colspan="2"><img src="docs/images/screenshots/assets.png" alt="Assets — skills / plugins / built-in capabilities across agents" /></td>
+    <td><img src="docs/images/screenshots/assets.png" alt="Assets — skills / plugins / built-in capabilities across agents" /></td>
+    <td><img src="docs/images/screenshots/settings.png" alt="Settings — appearance, language, sync, backup" /></td>
   </tr>
 </table>
 
 > See [docs/optimization-rounds/REPORT.md](docs/optimization-rounds/REPORT.md) for the
 > 13-round UI/UX pass that produced the current layout family.
 
-## Architecture
+## Installation
 
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture diagram" />
-</p>
+[![Download](https://img.shields.io/badge/%E2%AC%87_Download-latest_release-0071e3?style=for-the-badge)](https://github.com/SunArthurX/threadock/releases/latest)
 
-Three layers, one invariant: **third-party data is read-only** — the single deliberate exception is
-[Handoff](#features), which only ever *appends* brand-new sessions to an agent's store and never
-touches existing ones.
+Grab the right file for your platform from the
+[Releases page](https://github.com/SunArthurX/threadock/releases), then verify it against the
+published `SHA256SUMS`.
 
-- **Adapters** — eight adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
-  isolated child processes over stdio JSON-RPC. Crashes don't take down the host; timeouts
-  don't hang the UI.
-- **Core (`DaemonState`)** — the only writer. BLAKE3 content addressing, zstd compression,
-  idempotency, completeness scoring, an audit trail. Twenty-five-plus SQLite tables (V16) plus a
-  Tantivy index with N-gram Chinese tokenization (or jieba, opt-in).
-- **Frontends** — a Tauri 2 desktop app (React + TS, 101 commands, 7 views), a `ch` CLI, a
-  long-lived JSON-RPC daemon (14 methods), and a documented public API for external clients.
+| Platform | Formats |
+|---|---|
+| macOS (Apple Silicon · Intel) | `.dmg` |
+| Windows 10 / 11 | `.msi` · NSIS `.exe` |
+| Linux | `.AppImage` · `.deb` |
+| CLI binaries | `x86_64` / `aarch64` × macOS · Windows · Linux |
+
+> Installers are **unsigned** for now (cert in progress). macOS: right-click → Open
+> (or `xattr -dr com.apple.quarantine <app>`). Windows: *More info* → *Run anyway*. Always
+> verify SHA256SUMS.
+
+Prefer building yourself? Jump to [Development → Build from source](#build-from-source).
 
 ## Features
 
@@ -155,40 +148,9 @@ security · automation) · `Settings`.
 - Same-title conversation collapse (batch runs fold into one `×N` row), search left-panel
   context menu (favorite / archive / pin / tag / delete)
 
-## Quick start
+## Usage
 
-### Desktop (dev)
-
-```bash
-git clone https://github.com/SunArthurX/threadock.git
-cd threadock
-cd apps/desktop
-npm install
-npx tauri dev          # dev mode shows the real app icon in the Dock
-```
-
-### Build everything
-
-```bash
-# CLI + Daemon + Markdown adapter
-cargo build --release -p ch-cli -p ch-daemon -p ch-adapter-markdown
-
-# Tauri desktop
-cd apps/desktop && npm install && npm run build
-cd src-tauri && cargo build --release
-```
-
-### Installers
-
-Push a `v*` tag → the [release pipeline](.github/workflows/release.yml) builds and publishes
-Tauri installers for **macOS** (dmg arm64 + x64), **Windows** (nsis + msi), and **Linux**
-(appimage + deb), plus four-platform CLI binaries and SHA256SUMS.
-
-[![GitHub release](https://img.shields.io/github/v/release/SunArthurX/threadock?include_prereleases&style=flat-square)](https://github.com/SunArthurX/threadock/releases)
-
-> Installers are **unsigned** for now (cert in progress). macOS: right-click → Open
-> (or `xattr -dr com.apple.quarantine <app>`). Windows: *More info* → *Run anyway*. Always
-> verify SHA256SUMS.
+`ch` binaries come from a [release](#installation) or a local build (`./target/release/ch`).
 
 ### CLI tour
 
@@ -240,6 +202,25 @@ Methods: `system.getInfo` · `workspace.list` · `conversation.list` · `convers
 `message.list` · `event.list` · `search.query` · `knowledge.extract` · `knowledge.save` ·
 `knowledge.get` · `provider.sync`. See [docs/api.md](docs/api.md) for the full schema.
 
+## Architecture
+
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="Architecture diagram" />
+</p>
+
+Three layers, one invariant: **third-party data is read-only** — the single deliberate exception is
+[Handoff](#features), which only ever *appends* brand-new sessions to an agent's store and never
+touches existing ones.
+
+- **Adapters** — eight adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
+  isolated child processes over stdio JSON-RPC. Crashes don't take down the host; timeouts
+  don't hang the UI.
+- **Core (`DaemonState`)** — the only writer. BLAKE3 content addressing, zstd compression,
+  idempotency, completeness scoring, an audit trail. Twenty-five-plus SQLite tables (V16) plus a
+  Tantivy index with N-gram Chinese tokenization (or jieba, opt-in).
+- **Frontends** — a Tauri 2 desktop app (React + TS, 101 commands, 7 views), a `ch` CLI, a
+  long-lived JSON-RPC daemon (15 methods), and a documented public API for external clients.
+
 ## Repository layout
 
 ```
@@ -281,6 +262,28 @@ threadock/
 
 ## Development
 
+### Build from source
+
+```bash
+git clone https://github.com/SunArthurX/threadock.git
+cd threadock
+
+# Desktop app (dev mode)
+cd apps/desktop
+npm install
+npx tauri dev          # dev mode shows the real app icon in the Dock
+
+# CLI + Daemon + Markdown adapter
+cargo build --release -p ch-cli -p ch-daemon -p ch-adapter-markdown
+
+# Desktop release build
+cd apps/desktop && npm install && npm run build
+cd src-tauri && cargo build --release
+```
+
+Releases: pushing a `v*` tag triggers the [release pipeline](.github/workflows/release.yml),
+which builds the installers, CLI binaries, and SHA256SUMS listed under [Installation](#installation).
+
 ### Pre-commit / pre-push
 
 ```bash
@@ -308,6 +311,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 | | |
 |---|---|
+| **Automated tests** | Rust 608 + TS 431, enforced by [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) |
 | **Gate 1** | 100k sessions / 500k messages FTS5 search P95 = **50.9 ms** (target 300 ms) — see [docs/benchmark-report-v1.0.0.md](docs/benchmark-report-v1.0.0.md) |
 | **Workspace merge accuracy** | 11 hand-labeled samples = 100% (zero erroneous auto-merge) |
 | **ESLint** | 0 errors / 0 warnings |
