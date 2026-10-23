@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 mod export_cmd;
+mod handoff_cmd;
 mod import;
 
 use export_cmd::ExportFormat;
@@ -114,6 +115,10 @@ fn run() -> Result<()> {
                 summary.conversations_exported, summary.workspace_id, summary.output_dir
             );
             println!("files written: {}", summary.files_written);
+        }
+        ["handoff", args @ ..] => {
+            let parsed = handoff_cmd::parse_args(args)?;
+            handoff_cmd::run(&repo, &parsed)?;
         }
         ["backup", out_path] => {
             let password = read_backup_password()?;
@@ -908,6 +913,12 @@ fn print_usage() {
     eprintln!("  export markdown <id> <out.md>           Export conversation to Markdown");
     eprintln!("  export json <id> <out.json>             Export conversation to JSON");
     eprintln!("  export workspace <id> <out-dir>         Export all conversations in a workspace");
+    eprintln!("  handoff <target|all> (--all|--ids <id,..>|--provider <p>|--workspace <id>)");
+    eprintln!("          [--cwd <path>] [--dest <path>] [--dry-run] [--no-context]");
+    eprintln!(
+        "                                          Hand off conversations (with context) into"
+    );
+    eprintln!("                                          claude-code|codex|zcode|minimax-code|cursor to resume there");
     eprintln!("  backup <out.chbak>                      Encrypted backup (password via $CH_BACKUP_PASSWORD)");
     eprintln!("  restore <in.chbak> <target-dir>         Restore backup (password via $CH_BACKUP_PASSWORD)");
     eprintln!("  favorite <id>                           Mark conversation as favorite");

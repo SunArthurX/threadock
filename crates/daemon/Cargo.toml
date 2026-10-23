@@ -24,6 +24,7 @@ ch-normalization = { path = "../normalization" }
 ch-adapter-markdown = { path = "../adapter-markdown" }
 ch-adapter-jsonl = { path = "../adapter-jsonl" }
 ch-knowledge = { path = "../knowledge" }
+ch-handoff = { path = "../handoff" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true

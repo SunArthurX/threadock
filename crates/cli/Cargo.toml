@@ -21,6 +21,7 @@ ch-adapter-jsonl = { path = "../adapter-jsonl" }
 ch-adapter-claude-code = { path = "../adapter-claude-code" }
 ch-adapter-zcode = { path = "../adapter-zcode" }
 ch-export = { path = "../export" }
+ch-handoff = { path = "../handoff" }
 ch-backup = { path = "../backup" }
 ch-search = { path = "../search" }
 ch-daemon = { path = "../daemon" }

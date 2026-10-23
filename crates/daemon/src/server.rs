@@ -131,6 +131,7 @@ fn dispatch(state: &DaemonState, line: &str) -> JsonRpcResponse {
         "workspace.list" => handle_list_workspaces(state),
         "conversation.list" => handle_list_conversations(state, req.params),
         "conversation.get" => handle_get_conversation(state, req.params),
+        "conversation.handoff" => handle_handoff(state, req.params),
         "message.list" => handle_list_messages(state, req.params),
         "event.list" => handle_list_events(state, req.params),
         "conversation.delete" => handle_delete(state, req.params),
@@ -214,6 +215,99 @@ fn handle_get_conversation(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("conversation not found: {}", p.id))?;
     serde_json::to_value(&conv).map_err(|e| e.to_string())
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// `conversation.handoff` 参数：目标 + 会话选择（ids / all / provider）+ 选项。
+#[derive(serde::Deserialize)]
+struct HandoffParams {
+    /// `claude-code | codex | zcode | minimax-code | cursor | all`
+    target: String,
+    #[serde(default)]
+    ids: Vec<String>,
+    #[serde(default)]
+    all: bool,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+    #[serde(default = "default_true")]
+    include_context: bool,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    dest: Option<String>,
+}
+
+/// 把归档会话交接到目标 Agent 的原生会话存储（唯一会写第三方目录的 RPC）。
+fn handle_handoff(
+    state: &DaemonState,
+    params: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let p: HandoffParams =
+        serde_json::from_value(params).map_err(|e| format!("bad params: {e}"))?;
+    let targets = if p.target == "all" {
+        ch_handoff::HandoffTarget::all()
+    } else {
+        vec![p
+            .target
+            .parse::<ch_handoff::HandoffTarget>()
+            .map_err(|e| e.to_string())?]
+    };
+    if p.dest.is_some() && targets.len() > 1 {
+        return Err("dest only applies to a single target".into());
+    }
+
+    let (owned, missing, redact_rules) = {
+        let repo = state.read_repo.lock().map_err(|e| e.to_string())?;
+        let loaded = if !p.ids.is_empty() {
+            ch_handoff::loader::load_by_ids(&repo, &p.ids).map_err(|e| e.to_string())?
+        } else if p.all || p.provider.is_some() {
+            let mut filter = ch_storage::ConversationFilter::new();
+            if let Some(prov) = &p.provider {
+                let prov: ch_domain::Provider = prov.parse().map_err(|e| format!("{e}"))?;
+                filter = filter.with_provider(prov);
+            }
+            (
+                ch_handoff::loader::load_filtered(&repo, &filter).map_err(|e| e.to_string())?,
+                Vec::new(),
+            )
+        } else {
+            return Err("choose conversations with ids / all / provider".into());
+        };
+        // 与导出同策略：用户配置了自定义脱敏规则时，交接内容先脱敏再写入目标库。
+        let rules = ch_handoff::loader::load_redaction_rules(&repo);
+        (loaded.0, loaded.1, rules)
+    };
+
+    let mut opts = ch_handoff::HandoffOptions::new(ch_handoff::user_home());
+    if let Some(cwd) = &p.cwd {
+        opts.fallback_cwd = std::path::PathBuf::from(cwd);
+    }
+    opts.dest_override = p.dest.as_ref().map(std::path::PathBuf::from);
+    opts.dry_run = p.dry_run;
+    opts.include_context = p.include_context;
+    opts.redact_rules = redact_rules;
+
+    let inputs = ch_handoff::loader::as_inputs(&owned);
+    let mut results = Vec::with_capacity(targets.len());
+    for target in targets {
+        let batch = ch_handoff::handoff_batch(&inputs, target, &opts);
+        results.push(serde_json::json!({
+            "target": target.as_str(),
+            "ok": batch.ok,
+            "failed": batch.failed,
+        }));
+    }
+    Ok(serde_json::json!({
+        "matched": owned.len(),
+        "missing": missing,
+        "dry_run": p.dry_run,
+        "results": results,
+    }))
 }
 
 #[derive(serde::Deserialize)]
@@ -1066,5 +1160,75 @@ mod tests {
         // 导入后能搜到
         let repo = state.repo.lock().expect("mutex poisoned");
         assert_eq!(repo.count_conversations().expect("unexpected None"), 2); // seeded 1 + new 1
+    }
+
+    /// `conversation.handoff`：把种子会话交接到 claude-code（dest 指向临时目录），
+    /// 返回 ok 列表且文件真实落盘。
+    #[test]
+    fn conversation_handoff_writes_claude_session() {
+        let state = seeded_state();
+        let dest = tempfile::tempdir().expect("tempdir creation failed");
+        let resp = send(
+            &state,
+            "conversation.handoff",
+            &serde_json::json!({
+                "target": "claude-code",
+                "all": true,
+                "cwd": "/tmp/handoff-proj",
+                "dest": dest.path().to_string_lossy(),
+            }),
+        );
+        assert!(resp.error.is_none(), "handoff failed: {:?}", resp.error);
+        let result = resp.result.expect("unexpected None");
+        assert_eq!(result["matched"], 1);
+        assert_eq!(result["results"][0]["target"], "claude-code");
+        let ok = result["results"][0]["ok"].as_array().expect("ok array");
+        assert_eq!(ok.len(), 1);
+        let dest_file = ok[0]["destination"].as_str().expect("destination");
+        assert!(
+            std::path::Path::new(dest_file).exists(),
+            "session file must exist"
+        );
+        assert!(dest_file.contains("-tmp-handoff-proj"));
+    }
+
+    #[test]
+    fn conversation_handoff_rejects_bad_target_and_empty_selection() {
+        let state = seeded_state();
+        let bad = send(
+            &state,
+            "conversation.handoff",
+            &serde_json::json!({ "target": "nope", "all": true }),
+        );
+        assert!(bad.error.is_some());
+        let none = send(
+            &state,
+            "conversation.handoff",
+            &serde_json::json!({ "target": "codex" }),
+        );
+        assert!(none.error.is_some());
+    }
+
+    #[test]
+    fn conversation_handoff_dry_run_touches_nothing() {
+        let state = seeded_state();
+        let dest = tempfile::tempdir().expect("tempdir creation failed");
+        let resp = send(
+            &state,
+            "conversation.handoff",
+            &serde_json::json!({
+                "target": "codex",
+                "all": true,
+                "dry_run": true,
+                "dest": dest.path().to_string_lossy(),
+            }),
+        );
+        assert!(resp.error.is_none());
+        let result = resp.result.expect("unexpected None");
+        assert_eq!(result["dry_run"], true);
+        assert!(
+            !dest.path().join("sessions").exists(),
+            "dry-run 不得创建目录"
+        );
     }
 }
