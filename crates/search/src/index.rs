@@ -402,20 +402,45 @@ impl SearchIndex {
     /// 原地重建索引目录：删除后按当前代码 schema 新建（空索引）。
     ///
     /// schema 演进（如新增 created_at_ms）后由调用方触发，随后从主数据
-    /// 全量重灌。仅支持持久化索引（内存索引没有目录）。unix 语义下删除
-    /// 仍被旧 reader 映射的文件是安全的；此方法后旧 writer/reader 全部失效，
-    /// 调用方不得再持有。
+    /// 全量重灌。仅支持持久化索引（内存索引没有目录）。删除目录前先
+    /// drop 旧 index/reader（Windows 不允许删除仍被句柄/mmap 占用的文件，
+    /// 详见方法体注释）；此方法后旧 writer/reader 全部失效，调用方不得再持有。
     pub fn recreate(&mut self) -> LibResult<()> {
         let path = self
             .path
             .clone()
             .ok_or_else(|| SearchError::Tantivy("in-memory index cannot recreate".into()))?;
-        match std::fs::remove_dir_all(&path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(e.into()),
+        let tokenizer = self.tokenizer;
+        // 先释放旧 index/reader/字段再删目录：Windows 不允许删除仍被
+        // 句柄/mmap 占用的文件（tantivy reader 的重载线程、段文件），
+        // 不 drop 会以 DirectoryNotEmpty 失败；unix 语义无此限制，
+        // 先 drop 同样无害。旧 writer/reader 在此之后全部失效，调用方不得再持有。
+        let old = std::mem::replace(self, Self::open_in_memory_with(tokenizer)?);
+        drop(old);
+        // reader 的后台重载线程停止是异步的，删除留少量重试窗口兜竞态。
+        let mut last_err: Option<std::io::Error> = None;
+        for attempt in 0..5u32 {
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        u64::from(attempt) * 50 + 20,
+                    ));
+                    last_err = Some(e);
+                }
+            }
         }
-        let (schema, _) = build_schema(self.tokenizer);
+        if let Some(e) = last_err {
+            return Err(e.into());
+        }
+        let (schema, _) = build_schema(tokenizer);
         std::fs::create_dir_all(&path)?;
         let index = TantivyIndex::builder()
             .schema(schema)
