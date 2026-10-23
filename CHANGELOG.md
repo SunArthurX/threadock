@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.6.0] - 2026-10-23
+
+会话交接（Handoff）：把归档会话连同上下文写回任意 Agent 的原生会话存储，在那边继续开发。
+
+### Added
+- **交接到其他 Agent（Handoff）**：新增 `ch-handoff` crate——threadock 迄今
+  唯一的「写出口」。把归档会话按目标工具的**原生格式**落成一条全新会话，
+  目标 `resume` 后即可基于完整上下文继续开发。五个目标全覆盖：
+  Claude Code（`~/.claude/projects/<encoded-cwd>/<uuid>.jsonl`，parentUuid
+  链 + sessionId + cwd，对齐真实文件字段集）、Codex（`~/.codex/sessions/
+  YYYY/MM/DD/rollout-*.jsonl`，session_meta + response_item）、ZCode
+  （`db.sqlite` 的 session/message/part 三表）、MiniMax Code
+  （`runtime-state.sqlite` 的 sessions + message rows，columnar_version=3）、
+  Cursor（`state.vscdb` 的 bubble 行 + composerData 索引 + composerHeaders
+  会话头，value 按新版 TEXT 形态写）。每个写回器均有**往返测试**：写出的
+  会话用 threadock 自己的同名 adapter 读回，保证格式与真实库一致
+- **上下文随行**：各 Agent 的工具协议互不相通、无法原生重放，统一折叠为
+  一段「上下文前言」（来源 / 标题 / 工作目录 / 模型 / 时间 + **执行时间线**：
+  存档里的命令、文件读写、补丁、工具调用逐条列出），再接完整的用户 /
+  助手对话。前言可关闭（`--no-context`）
+- **三端入口**：桌面端会话详情工具栏「⇄ 交接」、列表右键「交接到其他
+  Agent…」（多选整批）、弹窗内「改为交接全部会话」一键全库；目标选择器
+  自动灰掉本机未检测到会话存储的 Agent，结果区给出 `claude --resume` /
+  `codex resume` 一键复制。CLI `ch handoff <目标|all> (--all|--ids|
+  --provider|--workspace) [--cwd] [--dest] [--dry-run] [--no-context]`；
+  daemon 新增 `conversation.handoff` RPC
+- **脱敏随行**：交接与导出同一策略——配置了自定义脱敏规则时内容先脱敏
+  再写入目标库，未配置则完全不脱敏（保真优先）
+- **Cursor 路径跨平台**：`state.vscdb` 的解析提取为
+  `ch_domain::config::cursor_db_path`（macOS / Windows / Linux 各自实际
+  位置），读取侧（SourcesConfig / Tauri import）与写回侧（handoff）同源；
+  此前非 macOS 平台的 Cursor 路径是硬编码 macOS 形态（读取同样受益）
+- **home 目录解析兼容 Windows**：handoff 各端优先 `HOME`、回退
+  `USERPROFILE`
+
+### Security / Hardening
+- **纯增量写入**：永远生成全新会话 ID，不触碰目标已有数据；已存在同名
+  文件时拒绝覆盖（claude/codex）
+- **schema 守卫**：sqlite 目标（zcode/minimax/cursor）写入前校验必需表
+  存在，Agent 升级导致存储格式漂移时立即中止并给出明确错误，不写坏库
+- **预演**：`--dry-run` / 弹窗「预演（不写入）」先列出将创建的会话与落点
+- 目标 SQLite 被对应 Agent 持锁时等待 5s 后明确报错；批量交接默认排除
+  软删除与子任务会话；单条失败不中断整批
+- `docs/privacy.md` 更新「第三方数据边界」：如实说明交接是唯一的显式
+  写入例外及其边界（仅本机、仅追加、可预演、可脱敏）
+
 ## [1.5.1] - 2026-10-17
 
 Cursor 新版 state.vscdb 兼容——导入发现层修复。

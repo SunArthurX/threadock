@@ -418,6 +418,18 @@
 |------|------|
 | path, content | `void` |
 
+### `handoff_targets`
+
+| 参数 | 返回 |
+|------|------|
+| - | `HandoffTargetInfo[]` |
+
+### `handoff_conversations`
+
+| 参数 | 返回 |
+|------|------|
+| conversationIds, target, all?, dryRun?, includeContext?, cwd? | `HandoffSummary` |
+
 ### `saved_search_list`
 
 | 参数 | 返回 |
