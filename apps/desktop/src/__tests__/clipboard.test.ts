@@ -1,10 +1,10 @@
 // Round 25 续做按钮修复：clipboard 兜底策略（macOS WKWebView NotAllowedError 兼容）
 // Round 25c 续：Tauri IPC invoke("write_clipboard") 作为第一优先级（最稳）
 // Round 25d 续：失败时不降级到 navigator（避免 WebView 二次拦截），暴露真实错误
-import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi, type Mock } from "vitest";
 
 // Mock Tauri invoke（默认成功）
-let invokeMock: ReturnType<typeof vi.fn>;
+let invokeMock: Mock<(...args: unknown[]) => unknown>;
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));

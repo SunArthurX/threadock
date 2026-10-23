@@ -4,10 +4,10 @@
 // - 后端命令失败时也降级（不让用户卡死）
 // - `fetchResetDateBounds` 校验 earliest_ms=0 → today（空库约定）
 // - `resetDateBoundsSync` 始终 earliest=today（兜底）
-import { describe, expect, it, beforeEach, vi, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, vi, afterEach, type Mock } from "vitest";
 
 // 用 vi.mock 在文件顶部（ESM module frozen 必须在 import 之前）
-let invokeMock: ReturnType<typeof vi.fn>;
+let invokeMock: Mock<(...args: unknown[]) => unknown>;
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));

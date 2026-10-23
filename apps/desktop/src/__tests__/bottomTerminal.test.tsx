@@ -18,7 +18,7 @@ const termInstances: {
 }[] = [];
 
 vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn().mockImplementation(() => {
+  Terminal: vi.fn().mockImplementation(function () {
     const t = {
       open: vi.fn(),
       write: vi.fn(),
@@ -36,7 +36,9 @@ vi.mock("@xterm/xterm", () => ({
   }),
 }));
 vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn().mockImplementation(() => ({ fit: vi.fn() })),
+  FitAddon: vi.fn().mockImplementation(function () {
+    return { fit: vi.fn() };
+  }),
 }));
 
 // invoke / listen mock：事件处理器按名捕获
