@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.6.1] - 2026-10-23
+
+v1.6.0 发布当日补丁：供应链修复与稳定性（不涉及交接功能行为变化）。
+
+### Fixed
+- **供应链（进入安装包）**：rustls-webpki 0.103.14 → 0.103.16
+  （RUSTSEC-2026-0382：证书校验可接受不受信中间人）、webpki-roots 1.0.9 →
+  1.0.10（RUSTSEC-2026-0381：内置根证书信任已弃用 emSign 中间人）。两份
+  Cargo.lock 同步（来源链 ureq→rustls，影响 ch-llm 的 HTTPS 调用）
+- **Windows「重建索引」间歇失败**：`SearchIndex::recreate` 先释放旧
+  index/reader 再删目录并带退避重试——Windows 不允许删除仍被句柄/mmap
+  占用的文件，旧实现以 DirectoryNotEmpty 失败（连续两轮 CI 在
+  macOS/Windows 各挂一次同源竞态测试）
+- 测试：handoff 往返测试路径断言改平台无关（Windows 分隔符 \），
+  产品代码不受影响
+
 ## [1.6.0] - 2026-10-23
 
 会话交接（Handoff）：把归档会话连同上下文写回任意 Agent 的原生会话存储，在那边继续开发。

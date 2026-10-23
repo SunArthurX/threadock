@@ -936,6 +936,10 @@ export const EN: Record<string, string> = {
   "🤖 助手": "🤖 Assistant",
   "🧹 清理未引用归档": "🧹 Clean unreferenced archives",
 
+  "供应链修复：rustls-webpki 0.103.16 / webpki-roots 1.0.10（RUSTSEC-2026-0381/0382）":
+    "Supply-chain fix: rustls-webpki 0.103.16 / webpki-roots 1.0.10 (RUSTSEC-2026-0381/0382)",
+  "Windows「重建索引」间歇失败修复（索引目录删除竞态）":
+    "Fixed intermittent Windows \"Rebuild index\" failure (index directory deletion race)",
   // ── v1.6.0 更新日志 ────────────────────────────────────────────────────
   "会话交接（Handoff）：把归档会话连同上下文写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的原生会话库，在那边 resume 继续开发":
     "Handoff: write archived sessions, with context, back into Claude Code / Codex / ZCode / MiniMax Code / Cursor native session stores and resume there",

@@ -15,6 +15,14 @@ interface ChangelogEntry {
 
 const CHANGELOG = (): ChangelogEntry[] => [
   {
+    version: "1.6.1",
+    date: "2026-10-23",
+    highlights: [
+      t("供应链修复：rustls-webpki 0.103.16 / webpki-roots 1.0.10（RUSTSEC-2026-0381/0382）"),
+      t("Windows「重建索引」间歇失败修复（索引目录删除竞态）"),
+    ],
+  },
+  {
     version: "1.6.0",
     date: "2026-10-23",
     highlights: [
