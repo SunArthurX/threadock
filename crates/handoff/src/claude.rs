@@ -165,7 +165,20 @@ mod tests {
                 .and_then(|e| e.to_str()),
             Some("jsonl")
         );
-        assert!(out.destination.contains("projects/-tmp-demo-proj-06-code"));
+        // 平台无关断言：位于 projects/<编码目录>/ 下（Windows 分隔符为 \）
+        let path = std::path::Path::new(&out.destination);
+        let encoded_dir = path.parent().and_then(|p| p.file_name());
+        assert_eq!(
+            encoded_dir.and_then(|d| d.to_str()),
+            Some("-tmp-demo-proj-06-code")
+        );
+        assert_eq!(
+            path.parent()
+                .and_then(|p| p.parent())
+                .and_then(|p| p.file_name())
+                .and_then(|d| d.to_str()),
+            Some("projects")
+        );
 
         let file = std::path::Path::new(&out.destination);
         assert!(file.exists());

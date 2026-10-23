@@ -145,7 +145,11 @@ mod tests {
             ..HandoffOptions::new("/nonexistent-home")
         };
         let out = write(&input, &opts).expect("write failed");
-        assert!(out.destination.contains("sessions/"));
+        // 平台无关断言：sessions 日分桶目录下（Windows 分隔符为 \）
+        let in_sessions = std::path::Path::new(&out.destination)
+            .components()
+            .any(|c| c.as_os_str() == "sessions");
+        assert!(in_sessions);
         assert!(out.destination.contains("rollout-"));
 
         let raw =
