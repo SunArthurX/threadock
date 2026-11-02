@@ -58,9 +58,19 @@ Threadock 的设计前提是：**你的 AI 编程会话历史属于你本人，�
 | Claude Code | `~/.claude/projects/` 下的 `.jsonl` 文件 | JSONL 会话文件 |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | SQLite 数据库 |
 | MiniMax Code | `~/.minimax/v2/sqlite/runtime-state.sqlite` | SQLite 数据库 |
-| Codex | `~/.codex/sessions/` 下的 `.jsonl` 文件 | JSONL 会话文件 |
+| Codex | `~/.codex/sessions/` 与 `~/.codex/archived_sessions/` 下的 `.jsonl` / `.jsonl.zst` 文件 | JSONL 会话文件（可 zstd 压缩） |
+| DeepSeek Harness | `~/.dsh/sessions/` 下的 `session.jsonl(.zstd)` | JSONL 事件日志（可 zstd 压缩） |
 
 读取的内容包括：会话元信息、用户消息与助手回复、工具调用记录、命令、代码 Diff、产物（Artifact），以及用于治理视图的请求级用量指标（Token 数、模型、耗时等）。治理中的资产盘点还会读取各 Agent 已安装的 skills / plugins 清单与定时任务配置（同样只读）。
+
+**全保真上下文**：为保留可回溯的完整上下文，Threadock 还会读取并入库以下此前被丢弃或截断的内容：
+
+- **模型思考过程**（thinking / reasoning）：Claude Code 的 thinking 块、ZCode 的 reasoning part、MiniMax Code 的 `thinking_content`、DeepSeek Harness 的 reasoning 块。Codex 的 reasoning 为服务端加密内容，无法还原，不读取；
+- **系统注入块**：Agent 运行时注入的上下文（如 `<system-reminder>`、IDE 选区、命令回显）与钩子（hook）注入。钩子注入在每个会话重复出现同一段样板内容，Threadock 只保留一条轻量标记、内容不落库；
+- **完整工具输出**：此前工具输出被截断在 4096 字符，现全量保留；
+- **图片**：只保留媒体类型引用与所在路径，图片本体（base64）不入库。
+
+这些内容**不进全文索引**（不影响搜索命中），仅在会话详情页的上下文查看器中展示。
 
 **只读快照原则**：Threadock 以只读方式打开上述数据库与文件，将内容复制（快照）到自己的库中后立即关闭，不持有任何写句柄。上述目录之外的个人文件不会被扫描。
 
@@ -132,6 +142,10 @@ CLI `ch handoff`、daemon `conversation.handoff`）把归档会话写回某个 A
 Threadock 会在该库中**追加**一条全新会话（全新会话 ID），**绝不改动、覆盖或删除该库中
 任何已有数据**；写入前校验目标库结构，支持 `--dry-run` 预演与自定义脱敏规则。该操作
 永远只在你本机的各 Agent 数据目录内进行，不经网络传输。
+
+交接写入目标库的上下文前言只包含**执行时间线**（命令 / 文件改动 / 工具调用）与对话正文：
+模型思考过程与系统注入块**不写入**第三方会话库（单会话可达数千条，写入会淹没执行时间线，
+也不应外溢到来源工具）。
 
 ## 8. 删除你的数据
 

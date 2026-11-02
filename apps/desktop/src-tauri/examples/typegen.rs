@@ -93,6 +93,21 @@ fn main() {
         ("list_messages", "conversationId", "MessageDto[]"),
         ("list_events", "conversationId", "EventDto[]"),
         (
+            "event_payload_full",
+            "eventId",
+            "string?（事件完整 payload JSON，不截断）",
+        ),
+        (
+            "conversation_context_usage",
+            "conversationId",
+            "ContextUsageSummary?（上下文窗口用量）",
+        ),
+        (
+            "conversation_digest",
+            "conversationId",
+            "ConversationDigest?（会话结构化摘要）",
+        ),
+        (
             "get_conversation_detail",
             "conversationId",
             "ConversationDetailDto",

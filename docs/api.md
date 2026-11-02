@@ -226,6 +226,24 @@
 |------|------|
 | conversationId | `EventDto[]` |
 
+### `event_payload_full`
+
+| 参数 | 返回 |
+|------|------|
+| eventId | `string?（事件完整 payload JSON，不截断）` |
+
+### `conversation_context_usage`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `ContextUsageSummary?（上下文窗口用量）` |
+
+### `conversation_digest`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `ConversationDigest?（会话结构化摘要）` |
+
 ### `get_conversation_detail`
 
 | 参数 | 返回 |

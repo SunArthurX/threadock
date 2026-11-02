@@ -120,7 +120,7 @@ Threadock 按功能分为七个视图。侧边栏上有八个导航入口（`⌘
 **会话列表**
 
 - 顶部搜索框支持全文搜索与查询语法（见[第 6 章](#6-搜索技巧)）；
-- 来源筛选：导入后出现按工具（ZCode / Claude Code / Cursor / MiniMax / Codex）的筛选标签；
+- 来源筛选：导入后出现按工具（ZCode / Claude Code / Cursor / MiniMax / Codex / DeepSeek Harness）的筛选标签；
 - 四个列表维度：**全部 / 收藏 / 已归档 / 回收站**；
 - 每条会话显示标题、来源、时间与完整度标签。
 
@@ -139,6 +139,9 @@ Threadock 按功能分为七个视图。侧边栏上有八个导航入口（`⌘
 
 - **时间线**：用户消息、助手回复、工具调用、命令、Diff、产物等按时间戳合并展示；
 - **执行事件随消息展示**：工具调用、命令、文件变更等执行事件自动挂在它所属的那条消息下方（按事件序号归属），点击事件行可展开详情（完整摘要、状态、起止时间与耗时、payload JSON）；单条消息超过 4 个事件折叠显示；
+- **上下文查看器**：模型思考过程（thinking）与系统注入块（钩子注入 / `<system-reminder>` 等）默认折叠，只显示摘要行与字数，点击展开等宽正文并可一键复制。超过 8KB 的内容在展开时才拉取全文，避免长输出拖慢详情页。工具事件的详情改为结构化视图（命令 / 完整输出 / 工具入参），替代直接展示裸 JSON。这些内容**不进全文索引**，只在此处展示；
+- **会话摘要**：从已入库内容确定性解析出诉求（首末用户消息）、动作统计（命令 / 读文件 / 新建 / 修改 / 错误 / 思考 / 系统注入次数）、主要文件、里程碑、最近错误与结尾回复。离线可用、不调用大模型；「复制摘要」可导出 Markdown，直接喂给 LLM 做叙述式总结；
+- **上下文窗口**：显示本次会话占用的上下文容量（总量 / 窗口上限与占比）、按消息 / 工具输出 / 思考 / 系统注入分类的分段构成、最近若干轮的上下文增长曲线，以及请求数、输出与推理 token、缓存命中率明细；
 - **本机图片内联**：消息里引用的本机图片（Markdown 图片语法、`/Users/...` 或 `C:\...` 绝对路径、`file://` 链接）若仍在本机原位置，会在对话流中直接展示；已移动/删除的显示灰色占位并标注原路径。单条消息最多内联 6 张，单图上限 20MB，支持 png/jpg/gif/webp/bmp/svg/ico；
 - **子任务**：Agent 派生的子会话按父子关系挂在主会话下；
 - **私人笔记**：给会话添加自己的备注，仅存于 Threadock；
@@ -226,7 +229,7 @@ Threadock 目前支持从以下六个 AI 编程工具导入会话，**全部只�
 | Claude Code | `~/.claude/projects/` 下的 `.jsonl` 文件 | JSONL 会话文件 |
 | Cursor | `~/Library/Application Support/Cursor/User/globalStorage/state.vscdb` | SQLite 数据库 |
 | MiniMax Code | `~/.minimax/v2/sqlite/runtime-state.sqlite` | SQLite 数据库 |
-| Codex | `~/.codex/sessions/` 下的 `.jsonl` 文件 | JSONL 会话文件 |
+| Codex | `~/.codex/sessions/` 与 `~/.codex/archived_sessions/` 下的 `.jsonl` / `.jsonl.zst` 文件 | JSONL 会话文件（可 zstd 压缩） |
 | DeepSeek Harness (dsh) | `~/.dsh/sessions/` 下的 `session.jsonl(.zstd)` | JSONL 事件日志（可 zstd 压缩） |
 
 > **dsh 外部导入镜像不消费**：dsh 自身的 session-import 功能会把 ZCode / Codex /
