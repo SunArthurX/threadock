@@ -82,7 +82,16 @@ function TaskCard({ task, now, onOpen, onJump }: {
   const running = task.state === "running";
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-label={`${t("点击查看实时流")}：${task.title ?? t("（未命名任务）")}`}
       onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       style={{
         background: "var(--bg-panel)", border: "1px solid var(--border-default)",
         borderLeft: `3px solid ${meta.color}`, borderRadius: 10, padding: "10px 12px",

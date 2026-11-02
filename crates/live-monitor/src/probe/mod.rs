@@ -37,6 +37,71 @@ pub fn scan_all(now_ms: i64) -> ScanOutcome {
     out
 }
 
+/// 按源分发 transcript（commands/live.rs 的 live_transcript 同款路径；测试辅助）。
+#[must_use]
+pub fn transcript_for(task: &LiveTask, limit: usize) -> Vec<crate::types::LiveActivity> {
+    let Ok(home) = crate::home_dir() else {
+        return vec![];
+    };
+    match task.source {
+        LiveSource::ClaudeCode => {
+            let projects = home.join(".claude/projects");
+            let mut found = None;
+            if let Ok(dirs) = std::fs::read_dir(&projects) {
+                for d in dirs.filter_map(std::result::Result::ok) {
+                    let c = d.path().join(format!("{}.jsonl", task.session_id));
+                    if c.is_file() {
+                        found = Some(c);
+                        break;
+                    }
+                }
+            }
+            found
+                .map(|p| claude::transcript(&p, limit))
+                .unwrap_or_default()
+        }
+        LiveSource::Codex => {
+            let sessions = home.join(".codex/sessions");
+            let mut found = None;
+            let mut stack = vec![sessions];
+            while let Some(dir) = stack.pop() {
+                let Ok(entries) = std::fs::read_dir(&dir) else {
+                    continue;
+                };
+                for e in entries.filter_map(std::result::Result::ok) {
+                    let p = e.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                        && p.file_stem()
+                            .and_then(|s| s.to_str())
+                            .is_some_and(|s| s.ends_with(&task.session_id))
+                    {
+                        found = Some(p);
+                        break;
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+            found
+                .map(|p| codex::transcript(&p, limit))
+                .unwrap_or_default()
+        }
+        LiveSource::ZCode => zcode::transcript(
+            &home.join(".zcode/cli/db/db.sqlite"),
+            &task.session_id,
+            limit,
+        ),
+        LiveSource::MinimaxCode => minimax::transcript(
+            &home.join(".minimax/v2/sqlite/runtime-state.sqlite"),
+            &task.session_id,
+            limit,
+        ),
+    }
+}
+
 fn state_rank(state: LiveState) -> u8 {
     match state {
         LiveState::Running => 0,
@@ -103,5 +168,23 @@ mod tests {
             println!("[ERR {:>12}] {}", e.source.label(), e.message);
         }
         assert!(out.errors.is_empty(), "真机扫描不应有 probe 级错误");
+
+        // transcript 冒烟：对每个 live task 取最近 5 条活动（live_transcript 命令的同一代码路径）
+        for t in &out.tasks {
+            let items = transcript_for(t, 5);
+            println!(
+                "── transcript [{:?}] {} → {} 条",
+                t.source,
+                t.session_id,
+                items.len()
+            );
+            for a in &items {
+                println!(
+                    "   {:>8} | {}",
+                    a.kind,
+                    a.snippet.chars().take(60).collect::<String>()
+                );
+            }
+        }
     }
 }
