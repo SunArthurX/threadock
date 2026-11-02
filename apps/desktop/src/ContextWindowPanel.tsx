@@ -85,6 +85,7 @@ export default function ContextWindowPanel({ convId }: { convId: string }) {
   const [usage, setUsage] = useState<ContextUsageSummary | null>(null);
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切换会话时清旧用量再异步加载
     setUsage(null);
     invoke<ContextUsageSummary | null>("conversation_context_usage", {
       conversationId: convId,

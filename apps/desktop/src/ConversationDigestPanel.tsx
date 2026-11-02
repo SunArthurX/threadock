@@ -78,6 +78,7 @@ export default function ConversationDigestPanel({ convId }: { convId: string }) 
   const [digest, setDigest] = useState<ConversationDigest | null>(null);
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 切换会话时清旧摘要再异步加载
     setDigest(null);
     invoke<ConversationDigest | null>("conversation_digest", { conversationId: convId })
       .then((d) => {
