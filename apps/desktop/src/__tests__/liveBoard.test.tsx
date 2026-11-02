@@ -40,7 +40,7 @@ describe("LiveBoard", () => {
   });
 
   it("渲染任务卡片：源徽标 / 标题 / 运行中状态 / 活动摘要", async () => {
-    invoke.mockResolvedValue(dto([{ source: "claudeCode", title: "修 bug", state: "running" }]));
+    invoke.mockResolvedValue(dto([{ source: "claude-code", title: "修 bug", state: "running" }]));
     render(<LiveBoard onJumpToConversation={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("修 bug")).toBeTruthy());
     expect(screen.getByText("Claude Code")).toBeTruthy();

@@ -4,11 +4,14 @@ use serde::Serialize;
 
 /// 数据源（与 `ch_domain::Provider::as_str` 保持同一套字符串标识）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub enum LiveSource {
+    #[serde(rename = "claude-code")]
     ClaudeCode,
+    #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "zcode")]
     ZCode,
+    #[serde(rename = "minimax-code")]
     MinimaxCode,
 }
 
@@ -115,7 +118,7 @@ mod tests {
     #[test]
     fn serializes_camel_case() {
         let json = serde_json::to_string(&LiveSource::MinimaxCode).expect("serialize");
-        assert_eq!(json, r#""minimaxCode""#);
+        assert_eq!(json, r#""minimax-code""#);
         let task = LiveTask {
             source: LiveSource::ZCode,
             session_id: "s1".into(),

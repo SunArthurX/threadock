@@ -1,7 +1,7 @@
 // 实时任务监控（Live Board）前端类型与展示工具。
 // 后端对应 apps/desktop/src-tauri/src/commands/live.rs（serde camelCase）。
 
-export type LiveSource = "claudeCode" | "codex" | "zcode" | "minimaxCode";
+export type LiveSource = "claude-code" | "codex" | "zcode" | "minimax-code";
 export type LiveState = "running" | "waiting" | "idle" | "recent";
 
 export interface LiveActivity {
@@ -48,10 +48,10 @@ import { t } from "./i18n";
 /** 源展示名。 */
 export function liveSourceLabel(source: LiveSource): string {
   switch (source) {
-    case "claudeCode": return "Claude Code";
+    case "claude-code": return "Claude Code";
     case "codex": return "Codex";
     case "zcode": return "ZCode";
-    case "minimaxCode": return "MiniMax Code";
+    case "minimax-code": return "MiniMax Code";
   }
 }
 
