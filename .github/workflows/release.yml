@@ -66,7 +66,7 @@ jobs:
 
       # tauri-action：构建 + 打包 + 建 Release + 上传产物（含 CLI 工作区一并编译）
       - name: Build and release Tauri bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
