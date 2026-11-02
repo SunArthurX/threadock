@@ -36,9 +36,23 @@ jobs:
         working-directory: apps/desktop/src-tauri
         run: cargo clippy --all-targets -- -D warnings
 
+      # docs/api.md 是自动生成的（examples/typegen.rs），但命令清单在生成器里
+      # 是手工维护的——只跑生成器不校验 diff 的话，新增 Tauri 命令时文档会
+      # 静默过期且 CI 永远绿。这里生成后校验 diff：文档与生成器不一致即失败。
       - name: Generate API docs
         working-directory: apps/desktop/src-tauri
         run: cargo run --example typegen
+
+      - name: Verify API docs are up to date
+        run: git diff --exit-code docs/api.md
+
+      # src-tauri 是独立 workspace（有自己的 Cargo.lock，不在根 workspace 的
+      # members 里），test-matrix 的 `cargo test --workspace` 覆盖不到它——
+      # 旧版 CI 只对它跑 clippy，导致这里的集成测试挂了 CI 一声不吭。
+      # 本机补跑见 scripts/precheck.sh test。
+      - name: Test (tauri commands)
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
 
   test-matrix:
     name: Tests (${{ matrix.os }})

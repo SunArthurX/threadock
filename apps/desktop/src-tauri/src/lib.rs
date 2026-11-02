@@ -394,6 +394,9 @@ mod llm_journeys;
 mod adapter_journeys;
 
 #[cfg(test)]
+mod api_doc_coverage;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
