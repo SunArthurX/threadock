@@ -198,6 +198,11 @@ pub fn parse_session(
     // 2. 消息 + parts
     let mut messages = Vec::new();
     let mut events = Vec::new();
+    // 高保真上下文事件（thinking / 系统注入）：单独收集、最后整体 append。
+    // 事件序号按 vec 位置分配（normalize），追加可保证存量已导入事件的 seq
+    // 稳定（重导 upsert 按 (conversation_id, sequence_number) 命中旧行），
+    // 展示层按 created_at 排序，时间线顺序不受影响。
+    let mut context_events = Vec::new();
 
     // 查所有消息（按 time_created 排序）
     let mut msg_stmt = conn.prepare(
@@ -253,11 +258,44 @@ pub fn parse_session(
             match part_type {
                 "text" => {
                     if let Some(t) = part_obj.get("text").and_then(|t| t.as_str()) {
-                        // 过滤 system-reminder 噪声
-                        if !t.starts_with("<system-reminder>") {
+                        // system-reminder 是 runtime 注入的上下文（非对话正文）：
+                        // 不进消息正文，转为 SystemBlock 事件全量保留（可检索查看）
+                        if t.starts_with("<system-reminder>") {
+                            context_events.push(RawEvent {
+                                event_type: EventType::SystemBlock,
+                                summary: Some(truncate_chars(t.trim(), 100)),
+                                payload_json: Some(serde_json::json!({ "block": t })),
+                                source_event_id: None,
+                                created_at: msg_created_at,
+                            });
+                        } else {
                             text_parts.push(t.to_string());
                         }
                     }
+                }
+                "reasoning" => {
+                    // 模型思考过程全量保留为 Thinking 事件（不进全文索引）
+                    if let Some(t) = part_obj.get("text").and_then(|t| t.as_str()) {
+                        if !t.trim().is_empty() {
+                            context_events.push(RawEvent {
+                                event_type: EventType::Thinking,
+                                summary: Some(truncate_chars(t.trim(), 100)),
+                                payload_json: Some(serde_json::json!({ "thinking": t })),
+                                source_event_id: None,
+                                created_at: msg_created_at,
+                            });
+                        }
+                    }
+                }
+                "compaction" => {
+                    // 上下文压缩标记：窗口被压缩的位置是重要上下文信息
+                    context_events.push(RawEvent {
+                        event_type: EventType::SystemBlock,
+                        summary: Some("上下文压缩（compaction）".to_string()),
+                        payload_json: Some(part_obj.clone()),
+                        source_event_id: None,
+                        created_at: msg_created_at,
+                    });
                 }
                 "tool" => {
                     // 新 schema（2026-08 实测）：{callID, tool, state:{status,
@@ -275,8 +313,9 @@ pub fn parse_session(
                         "tool": tool_name,
                         "input": input,
                     });
+                    // 输出全量保留（全保真导入：放开 4096 截断）
                     if let Some(out) = state.get("output").and_then(|o| o.as_str()) {
-                        payload["output"] = serde_json::json!(truncate_chars(out, 4096));
+                        payload["output"] = serde_json::json!(out);
                     }
                     if let Some(t) = state.get("time") {
                         payload["time"] = t.clone();
@@ -370,6 +409,9 @@ pub fn parse_session(
             });
         }
     }
+
+    // 高保真上下文事件追加在末尾（保证存量事件 seq 稳定，见 context_events 注释）
+    events.append(&mut context_events);
 
     if messages.is_empty() && events.is_empty() {
         return Err(ZCodeError::Empty(session_id.to_string()));
@@ -605,6 +647,106 @@ mod tests {
         let raw = super::parse_session(&db, "s").expect("parse failed");
         assert_eq!(raw.messages.len(), 1);
         assert_eq!(raw.messages[0].text.as_deref(), Some("真实内容"));
+        // 注入块不再静默丢弃：转为 SystemBlock 事件全量保留（可检索查看）
+        assert_eq!(raw.events.len(), 1);
+        assert_eq!(raw.events[0].event_type, EventType::SystemBlock);
+        assert!(raw.events[0]
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("block"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("noise")));
+    }
+
+    /// 全保真上下文：reasoning part → Thinking 事件；注入文本 → SystemBlock；
+    /// 上下文事件追加在事件列表末尾（保证存量事件 seq 稳定）。
+    #[test]
+    fn reasoning_and_injection_become_context_events_appended_last() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("t.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
+        ).expect("unexpected None");
+        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
+            .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO message VALUES ('m1','s',0,0,'{\"role\":\"assistant\"}',0)",
+            [],
+        )
+        .expect("unexpected None");
+        // 工具 part 在前（存量事件 seq 稳定性），reasoning / 注入在后
+        conn.execute(
+            "INSERT INTO part VALUES ('p1','m1','s',0,0,'{\"type\":\"tool\",\"callID\":\"c1\",\"tool\":\"Bash\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"ls\"},\"output\":\"ok\"}}',0)",
+            [],
+        )
+        .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO part VALUES ('p2','m1','s',0,0,'{\"type\":\"reasoning\",\"text\":\"让我分析这个任务\"}',1)",
+            [],
+        )
+        .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO part VALUES ('p3','m1','s',0,0,'{\"type\":\"text\",\"text\":\"<system-reminder>提醒内容</system-reminder>\"}',2)",
+            [],
+        )
+        .expect("unexpected None");
+        drop(conn);
+        let raw = super::parse_session(&db, "s").expect("parse failed");
+        assert_eq!(raw.events.len(), 3, "工具 + thinking + system_block");
+        assert_eq!(
+            raw.events[0].event_type,
+            EventType::CommandCompleted,
+            "存量事件仍在前"
+        );
+        assert_eq!(raw.events[1].event_type, EventType::Thinking);
+        assert!(raw.events[1]
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("thinking"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("分析这个任务")));
+        assert_eq!(raw.events[2].event_type, EventType::SystemBlock);
+    }
+
+    /// 全保真：工具输出不再截 4096 字（ZCode 源实测 51.3 MB 尾巴全量入库）。
+    #[test]
+    fn tool_output_not_truncated() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = dir.path().join("t.db");
+        let conn = Connection::open(&db).expect("database connection failed");
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT PRIMARY KEY, title TEXT NOT NULL, directory TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, parent_id TEXT);
+             CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);
+             CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL, sequence INTEGER);",
+        ).expect("unexpected None");
+        conn.execute("INSERT INTO session VALUES ('s','t','d',0,0,NULL)", [])
+            .expect("unexpected None");
+        conn.execute(
+            "INSERT INTO message VALUES ('m1','s',0,0,'{\"role\":\"assistant\"}',0)",
+            [],
+        )
+        .expect("unexpected None");
+        let long_output = "y".repeat(10_000);
+        let part = format!(
+            r#"{{"type":"tool","callID":"c1","tool":"Bash","state":{{"status":"completed","input":{{"command":"big"}},"output":"{long_output}"}}}}"#
+        );
+        conn.execute(
+            "INSERT INTO part VALUES ('p1','m1','s',0,0,?1,0)",
+            rusqlite::params![part],
+        )
+        .expect("unexpected None");
+        drop(conn);
+        let raw = super::parse_session(&db, "s").expect("parse failed");
+        let out = raw.events[0]
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("output"))
+            .and_then(serde_json::Value::as_str)
+            .expect("output");
+        assert_eq!(out.len(), 10_000, "长输出应全量保留，不截 4096");
     }
 
     #[test]

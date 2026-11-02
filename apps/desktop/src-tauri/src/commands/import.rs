@@ -44,7 +44,14 @@ pub(crate) fn import_file_inner(
     conv.workspace_id = workspace_id.clone();
     conv.raw_payload_id = Some(raw_payload.hash);
     let conversation_id = repo
-        .import_conversation_batch(&conv, &normalized.messages, &normalized.events, None, None)
+        .import_conversation_batch(
+            &conv,
+            &normalized.messages,
+            &normalized.events,
+            None,
+            None,
+            false,
+        )
         .map_err(|e| storage_err(e))?;
     // 读取入库后的消息用于索引
     let messages = repo
@@ -912,7 +919,8 @@ fn auto_sync_inner_with(
             }
             match (src.parse)(&item) {
                 Ok(raw) => {
-                    match import_raw_inner(state, raw, Some(src.workspace), item.observed_ms) {
+                    match import_raw_inner(state, raw, Some(src.workspace), item.observed_ms, false)
+                    {
                         Ok(o) => {
                             pending_index.extend(o.indexable);
                             ok += 1;
@@ -1041,11 +1049,14 @@ pub(crate) struct ImportOutcome {
 
 /// 通用导入（不含索引）：RawConversation → DaemonState。
 /// 性能：单事务批量写入（每会话一次 fsync），大幅降低主锁占用 → UI 不卡。
+/// `replace_content`：全保真重导用——事务内先清空该会话旧消息/事件再写，
+/// 适配器解析形态变化（thinking 成事件/注入消息改判）导致序号移动时不残留旧行。
 pub(crate) fn import_raw_inner(
     state: &DaemonState,
     raw: RawConversation,
     workspace_name: Option<&str>,
     observed_updated_ms: Option<i64>,
+    replace_content: bool,
 ) -> Result<ImportOutcome, String> {
     let provider = raw.provider;
     let raw_bytes = serde_json::to_vec(&raw).map_err(|e| storage_err(e))?;
@@ -1066,6 +1077,7 @@ pub(crate) fn import_raw_inner(
             &normalized.events,
             workspace_name,
             observed_updated_ms,
+            replace_content,
         )
         .map_err(|e| storage_err(e))?;
     let workspace_id = conv.workspace_id.clone();
@@ -1172,6 +1184,70 @@ pub(crate) fn minimax_reimport_all(state: &DaemonState) -> Result<usize, String>
         }
     }
     Ok(ok)
+}
+
+/// 全保真上下文回填（一次性迁移，app_settings 标记 `full_fidelity_backfill`）：
+/// 适配器升级（thinking/系统块成事件 + 放开 4096 输出截断 + Claude 钩子附件
+/// 去重 + 图片 base64 剥离 + Codex .jsonl.zst 补发现）后，把变更源的全部会话
+/// 按 replace 模式重导一遍，历史对话的完整上下文自动补齐。Cursor 适配器无
+/// 变化，跳过。失败逐条继续（warn 留痕，库内存量保留）。
+/// 返回 (成功数, 失败数)。整轮处于 bulk 模式（摘 FTS 删除触发器，残留最后
+/// 一次扫清）；tantivy 索引由调用方在完成后整库重建（replace 删除旧消息行 →
+/// 旧文档 id 失效，重建一次性纠正）。
+pub(crate) fn full_fidelity_backfill(
+    state: &DaemonState,
+    mut progress: impl FnMut(usize, usize, &str),
+) -> Result<(usize, usize), String> {
+    let home = std::env::var("HOME").map_err(|_| "no HOME".to_string())?;
+    // bulk 模式：contentless FTS5 逐行删是全索引扫描，replace 每会话摘/建
+    // 触发器 3000 次仍然太慢——整轮摘一次，结束时一次扫清残留
+    {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.begin_bulk_message_reload()
+            .map_err(|e| storage_err(e))?;
+    }
+    let mut ok = 0usize;
+    let mut failed = 0usize;
+    for src in source_table(&home) {
+        if src.provider_id == "prov_cursor" {
+            continue; // 适配器无变化，无需重导
+        }
+        let items = match (src.discover)() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(provider = src.provider_id, error = %e, "全保真回填发现失败");
+                continue;
+            }
+        };
+        for item in &items {
+            let raw = match (src.parse)(item) {
+                Ok(r) => r,
+                Err(_e) => {
+                    failed += 1;
+                    continue; // 空会话/解析失败：保留库内存量，不打断整轮
+                }
+            };
+            match import_raw_inner(state, raw, Some(src.workspace), item.observed_ms, true) {
+                Ok(_) => {
+                    ok += 1;
+                    if ok.is_multiple_of(5) {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+                Err(e) => {
+                    failed += 1;
+                    tracing::warn!(session = %item.session_id, error = %e, "全保真回填重导失败");
+                }
+            }
+            progress(ok, ok + failed, src.workspace);
+        }
+    }
+    // 无论循环如何：退出 bulk 模式 + 重建触发器 + 扫清 FTS 残留
+    {
+        let repo = state.repo.lock().map_err(|e| storage_err(e))?;
+        repo.end_bulk_message_reload().map_err(|e| storage_err(e))?;
+    }
+    Ok((ok, failed))
 }
 
 /// Codex 注入过滤补全 + Claude Code 标题兜底后的存量重导（一次性迁移用）：
@@ -1304,7 +1380,7 @@ pub(crate) fn import_raw_to_state(
     workspace_name: Option<&str>,
     observed_updated_ms: Option<i64>,
 ) -> Result<ImportResultDto, String> {
-    let outcome = import_raw_inner(state, raw, workspace_name, observed_updated_ms)?;
+    let outcome = import_raw_inner(state, raw, workspace_name, observed_updated_ms, false)?;
     commit_index(state, &outcome.indexable)?;
     Ok(outcome.dto)
 }

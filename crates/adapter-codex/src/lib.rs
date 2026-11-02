@@ -3,7 +3,8 @@
 //! ## 数据源
 //!
 //! Codex 把会话存在 `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<uuid>.jsonl`
-//! 与 `~/.codex/archived_sessions/`，每行一个 JSON 记录：
+//! 与 `~/.codex/archived_sessions/`（旧会话可能压缩为 `.jsonl.zst`，读取时
+//! 流式解压），每行一个 JSON 记录：
 //!
 //! - `session_meta`：`payload.{id, timestamp, cwd, source}` 会话元信息
 //! - `response_item`：`payload.type`：
@@ -68,7 +69,9 @@ pub struct DiscoveredSession {
     pub mtime_ms: Option<i64>,
 }
 
-/// 扫描目录下所有 .jsonl（按修改时间降序）。
+/// 扫描目录下所有 .jsonl / .jsonl.zst（按修改时间降序）。
+/// Codex 会把旧会话压缩成 .jsonl.zst（实测一机 96 个、13 GB），只扫 .jsonl 会
+/// 整批丢失这些会话——压缩文件文本占比 <0.1%，解压后按普通会话导入。
 fn scan_dir(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -77,10 +80,38 @@ fn scan_dir(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
         let p = e.path();
         if p.is_dir() {
             scan_dir(&p, out);
-        } else if p.extension().and_then(|x| x.to_str()) == Some("jsonl") {
+        } else if is_jsonl_path(&p) {
             out.push(p);
         }
     }
+}
+
+/// 是否为会话文件：.jsonl 或压缩形态 .jsonl.zst。
+fn is_jsonl_path(p: &Path) -> bool {
+    match p.extension().and_then(|x| x.to_str()) {
+        Some(ext) if ext.eq_ignore_ascii_case("jsonl") => true,
+        Some(ext) if ext.eq_ignore_ascii_case("zst") => {
+            // .jsonl.zst → file_stem 是 "xxx.jsonl"，取其扩展名比对
+            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            Path::new(stem)
+                .extension()
+                .and_then(|x| x.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("jsonl"))
+        }
+        _ => false,
+    }
+}
+
+/// 按扩展名打开会话文件（.jsonl.zst 自动流式解压），返回 Buffered reader。
+fn open_session_reader(path: &Path) -> std::io::Result<std::io::BufReader<Box<dyn std::io::Read>>> {
+    let file = std::fs::File::open(path)?;
+    let inner: Box<dyn std::io::Read> = if path.extension().and_then(|x| x.to_str()) == Some("zst")
+    {
+        Box::new(zstd::stream::read::Decoder::new(file)?)
+    } else {
+        Box::new(file)
+    };
+    Ok(std::io::BufReader::new(inner))
 }
 
 /// 列出 Codex 所有会话（sessions/ + `archived_sessions/，按文件大小降序`）。
@@ -131,11 +162,10 @@ pub fn discover_sessions(codex_home: impl AsRef<Path>) -> AdapterResult<Vec<Disc
 /// JSONL 单行上限：超过视为二进制负载跳过（防超长行内存尖峰）。
 const MAX_LINE: usize = 2 * 1024 * 1024;
 
-/// 读文件第一行并解析为 JSON（跳过空行；限行防超长 base64 行）。
+/// 读文件第一行并解析为 JSON（跳过空行；限行防超长 base64 行；.zst 透明解压）。
 fn read_first_json_line(path: &Path) -> AdapterResult<serde_json::Value> {
     use std::io::BufRead;
-    let file = std::fs::File::open(path)?;
-    let mut reader = std::io::BufReader::new(file);
+    let mut reader = open_session_reader(path)?;
     let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
     loop {
         let n = reader.read_until(b'\n', &mut buf)?;
@@ -161,8 +191,8 @@ fn read_first_json_line(path: &Path) -> AdapterResult<serde_json::Value> {
 pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversation> {
     use std::io::BufRead;
     let path = file_path.as_ref();
-    let file =
-        std::fs::File::open(path).map_err(|_| CodexError::NotFound(path.display().to_string()))?;
+    let mut reader =
+        open_session_reader(path).map_err(|_| CodexError::NotFound(path.display().to_string()))?;
 
     let mut session_id: Option<String> = None;
     let mut started_at: Option<time::OffsetDateTime> = None;
@@ -173,8 +203,8 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
     let mut pending_outputs: HashMap<String, Vec<usize>> = HashMap::new();
     let mut item_seq: i64 = 0;
 
-    // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死）
-    let mut reader = std::io::BufReader::new(file);
+    // 限行流式读取：跳过单行 >2MB 的二进制/图片负载（防内存尖峰卡死；
+    // .jsonl.zst 已在 open_session_reader 透明解压）
     let mut buf: Vec<u8> = Vec::with_capacity(64 * 1024);
     loop {
         let n = reader.read_until(b'\n', &mut buf)?;
@@ -308,8 +338,10 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                         // 与调用按 call_id 配对：输出并入对应事件 payload；
                         // 命令类事件升格为 CommandCompleted
                         if let Some(id) = payload.get("call_id").and_then(|v| v.as_str()) {
-                            let output = output_to_text(payload.get("output").unwrap_or(
-                                payload.get("result").unwrap_or(&serde_json::Value::Null),
+                            let output = strip_base64_runs(&output_to_text(
+                                payload.get("output").unwrap_or(
+                                    payload.get("result").unwrap_or(&serde_json::Value::Null),
+                                ),
                             ));
                             if let Some(indices) = pending_outputs.get(id) {
                                 let mut merged = serde_json::Map::new();
@@ -472,6 +504,35 @@ fn truncate_chars(s: &str, max: usize) -> String {
         let cut: String = s.chars().take(max).collect();
         format!("{cut}…")
     }
+}
+
+/// 剥离超长 base64 连续串（图片/二进制负载），只留占位标记。
+/// Codex rollout（尤其 .zst 压缩历史）里图片以 base64 出现在工具输出与
+/// message 内容中，是体积黑洞（实测一机 13 GB、99.9% 是图片 base64）；
+/// 阈值 512 字符远超正常文本里的连续字母数字，文本内容不受影响。
+fn strip_base64_runs(s: &str) -> String {
+    const RUN: usize = 512;
+    let mut out = String::with_capacity(s.len());
+    let mut run = String::new();
+    for ch in s.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '+' || ch == '/' || ch == '=' {
+            run.push(ch);
+        } else {
+            if run.chars().count() >= RUN {
+                out.push_str("[base64 已剥离]");
+            } else {
+                out.push_str(&run);
+            }
+            run.clear();
+            out.push(ch);
+        }
+    }
+    if run.chars().count() >= RUN {
+        out.push_str("[base64 已剥离]");
+    } else {
+        out.push_str(&run);
+    }
+    out
 }
 
 /// Codex 注入块标签：环境上下文 / 系统指令 / 插件推荐等（runtime 注入而非用户输入）。
@@ -675,6 +736,82 @@ mod tests {
         assert_eq!(sessions[0].session_id, "a1");
     }
 
+    /// Codex 旧会话压缩为 .jsonl.zst（实测一机 96 个/13 GB 完全没导入）：
+    /// 发现阶段要能列出、解析阶段流式解压。
+    #[test]
+    fn discover_and_parse_zst_sessions() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let sub = dir.path().join("sessions/2026/08/01");
+        std::fs::create_dir_all(&sub).expect("file I/O failed");
+        let lines = [
+            r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"zst-1","timestamp":"2026-08-01T10:00:00.000Z"}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"压缩会话里的提问"}]}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"压缩会话里的回答"}]}}"#,
+        ];
+        let compressed =
+            zstd::stream::encode_all(lines.join("\n").as_bytes(), 3).expect("zstd encode failed");
+        std::fs::write(sub.join("rollout-zst.jsonl.zst"), compressed).expect("file I/O failed");
+
+        let sessions = discover_sessions(dir.path()).expect("unexpected None");
+        assert_eq!(sessions.len(), 1, ".jsonl.zst 应被发现");
+        assert_eq!(sessions[0].session_id, "zst-1");
+
+        let raw = parse_session(&sessions[0].file_path).expect("parse failed");
+        assert_eq!(raw.source_conversation_id, "zst-1");
+        assert_eq!(raw.messages.len(), 2);
+        assert!(raw.messages[0]
+            .text
+            .as_deref()
+            .is_some_and(|s| s.contains("压缩会话里的提问")));
+    }
+
+    /// 体积黑洞防护：工具输出里的超长 base64（图片等）剥离为占位标记。
+    #[test]
+    fn strips_long_base64_runs_in_output() {
+        let img = format!("iVBORw0KGgo{}", "A".repeat(2000));
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let f = dir.path().join("rollout-b64.jsonl");
+        let output = format!(r#"[{{"type":"input_text","text":"data:image/png;base64,{img}"}}]"#);
+        let lines = [
+            r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"b64-1"}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"画图"}]}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec","call_id":"c1","input":"await tools.exec_command({cmd:\"gen\"});"}}"#,
+            r#"{"timestamp":"2026-08-01T10:00:03.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c1","output":"PLACEHOLDER"}}"#,
+        ];
+        let mut lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
+        let output_line = format!(
+            r#"{{"timestamp":"2026-08-01T10:00:03.000Z","type":"response_item","payload":{{"type":"custom_tool_call_output","call_id":"c1","output":{output}}}}}"#
+        );
+        lines[3] = output_line;
+        std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+        let raw = parse_session(&f).expect("parse failed");
+        let serialized = raw
+            .events
+            .iter()
+            .find_map(|e| e.payload_json.as_ref().map(serde_json::Value::to_string))
+            .expect("payload");
+        assert!(!serialized.contains(&img), "超长 base64 必须剥离");
+        assert!(serialized.contains("[base64 已剥离]"), "应留占位标记");
+        assert!(
+            serialized.contains("data:image/png;base64,"),
+            "前缀（引用信息）保留"
+        );
+    }
+
+    /// strip_base64_runs 单元测试：正常文本不受影响，超长 base64 串被替换。
+    #[test]
+    fn strip_base64_runs_unit() {
+        let plain = "hello world 123 这是一段中文 with `-_.` punctuation";
+        assert_eq!(strip_base64_runs(plain), plain, "普通文本原样保留");
+        let with_b64 = format!("before {} after", "x".repeat(600));
+        let stripped = strip_base64_runs(&with_b64);
+        assert!(stripped.starts_with("before "));
+        assert!(stripped.ends_with(" after"));
+        assert!(stripped.contains("[base64 已剥离]"));
+        // 短字母数字串（正常命令输出）不动
+        assert_eq!(strip_base64_runs("abc123"), "abc123");
+    }
+
     #[test]
     fn filters_xml_injection_blocks_and_title_fallback() {
         let dir = tempfile::TempDir::new().expect("tempdir creation failed");
@@ -722,5 +859,67 @@ mod tests {
             Some("给我分析这个整个知识库，我想做成一个知识库管理工具"),
             "标题应取真实用户提问而非桌面端注入事件"
         );
+    }
+
+    /// .zst 流式解压要跨 64KB 缓冲边界完整读完（5000 行压缩文件全量解析）。
+    #[test]
+    fn zst_streaming_reads_whole_file() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let sub = dir.path().join("sessions/2026/08/01");
+        std::fs::create_dir_all(&sub).expect("file I/O failed");
+        let f = sub.join("rollout-big.jsonl.zst");
+        let mut lines = vec![
+            r#"{"timestamp":"2026-08-01T10:00:00.000Z","type":"session_meta","payload":{"id":"big-1"}}"#.to_string(),
+            r#"{"timestamp":"2026-08-01T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"批量任务"}]}}"#.to_string(),
+        ];
+        for i in 0..5000 {
+            lines.push(format!(
+                r#"{{"timestamp":"2026-08-01T10:00:02.000Z","type":"response_item","payload":{{"type":"message","role":"assistant","content":[{{"type":"output_text","text":"第 {i} 行输出内容，制造足够体积跨越缓冲边界。{}"}}]}}}}"#,
+                "填充".repeat(20)
+            ));
+        }
+        let compressed =
+            zstd::stream::encode_all(lines.join("\n").as_bytes(), 3).expect("zstd encode failed");
+        std::fs::write(&f, compressed).expect("file I/O failed");
+
+        let sessions = discover_sessions(dir.path()).expect("unexpected None");
+        assert_eq!(sessions.len(), 1);
+        let raw = parse_session(&sessions[0].file_path).expect("parse failed");
+        assert_eq!(
+            raw.messages.len(),
+            5001,
+            ".zst 流式解压必须读完整个文件（含跨缓冲块的数据）"
+        );
+    }
+
+    /// 真实数据冒烟（本机手跑 `cargo test -- --ignored`）：真实 .jsonl.zst
+    /// 经流式解压完整解析（CI 无 ~/.codex 数据，默认跳过）。
+    #[test]
+    #[ignore = "需要本机 ~/.codex 真实数据"]
+    fn real_zst_sessions_parse() {
+        let home = std::env::var("HOME").expect("no HOME");
+        let mut files = Vec::new();
+        scan_dir(&Path::new(&home).join(".codex/sessions"), &mut files);
+        scan_dir(
+            &Path::new(&home).join(".codex/archived_sessions"),
+            &mut files,
+        );
+        let zsts: Vec<_> = files
+            .into_iter()
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("zst"))
+            .collect();
+        assert!(!zsts.is_empty(), "本机应有 .jsonl.zst 压缩会话");
+        let mut parsed = 0usize;
+        for f in zsts.iter().take(10) {
+            let raw = parse_session(f)
+                .unwrap_or_else(|e| panic!("real zst parse failed: {}: {e}", f.display()));
+            assert!(
+                !raw.messages.is_empty() || !raw.events.is_empty(),
+                "真实压缩会话不应为空: {}",
+                f.display()
+            );
+            parsed += 1;
+        }
+        assert_eq!(parsed, 10);
     }
 }

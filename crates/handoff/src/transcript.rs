@@ -180,6 +180,9 @@ fn timeline_entry(ev: &Event) -> String {
         EventType::BrowserAction => "浏览器",
         EventType::Error => "错误",
         EventType::ArtifactCreated | EventType::PlanCreated | EventType::StatusChanged => "事件",
+        // loader 已过滤；此分支兜底（手装 Event 时可能出现）
+        EventType::Thinking => "思考",
+        EventType::SystemBlock => "系统",
     };
     let summary = ev.summary.as_deref().unwrap_or("");
     let summary = truncate_chars(summary, MAX_SUMMARY_CHARS);

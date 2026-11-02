@@ -33,7 +33,8 @@ fn golden_session_parses_domain_facts() {
     );
 
     // 事件：bash（配对输出升格 Completed）/ read（FileRead）/ 未知工具（降级 ToolCallStarted）
-    assert_eq!(raw.events.len(), 3);
+    // + 末尾追加的 thinking 事件（助手消息的 reasoning 块，全保真保留）
+    assert_eq!(raw.events.len(), 4);
     assert_eq!(raw.events[0].event_type, EventType::CommandCompleted);
     assert!(raw.events[0]
         .summary
@@ -54,6 +55,11 @@ fn golden_session_parses_domain_facts() {
         .expect("payload")
         .to_string()
         .contains("future_tool_x"));
+    assert_eq!(
+        raw.events[3].event_type,
+        EventType::Thinking,
+        "reasoning 块应转为 thinking 事件并追加在末尾"
+    );
 }
 
 #[test]

@@ -505,7 +505,14 @@ fn import_raw(
     conv.workspace_id.clone_from(&workspace_id);
     conv.raw_payload_id = Some(raw_payload.hash.clone());
     let conversation_id = repo
-        .import_conversation_batch(&conv, &normalized.messages, &normalized.events, None, None)
+        .import_conversation_batch(
+            &conv,
+            &normalized.messages,
+            &normalized.events,
+            None,
+            None,
+            false,
+        )
         .context("import conversation batch")?;
 
     // 索引

@@ -1,11 +1,13 @@
 // 消息名下的执行事件：紧凑行挂在消息气泡下，点击行展开详情
 //（完整摘要 / 状态 / 起止时间与耗时 / payload JSON）。超过 4 条折叠，
 // 「还有 N 条」展开——避免长工程会话一条消息挂几十个工具调用撑爆 DOM。
+// thinking / 系统注入块走 ContextView 插件（折叠 + 懒加载全文）。
 import { useState } from "react";
 import { t } from "./i18n";
 import { eventTypeLabel, formatTime } from "./types";
 import type { EventDto } from "./types";
 import { EVENT_ROWS_COLLAPSED } from "./eventGrouping";
+import { isContextEvent, StructuredOutput, SystemBlockRow, ThinkingRow } from "./ContextView";
 
 /** 事件行前的图标（与 eventTypeLabel 的 19 类对应常见子集，其余统一 ⚙）。 */
 const EVENT_ICONS: Record<string, string> = {
@@ -49,14 +51,27 @@ function EventDetail({ e }: { e: EventDto }) {
         {e.created_at_ms && <span>{formatTime(e.created_at_ms)}</span>}
         {dur && <span>耗时 {dur}</span>}
       </div>
+      {/* 结构化输出（命令/完整输出/入参）优先；裸 JSON payload 兜底保留 */}
+      <StructuredOutput e={e} />
       {e.payload_json && (
-        <pre className="msg-event-detail-payload mono">{prettyPayload(e.payload_json)}</pre>
+        <details className="ctx-input-details">
+          <summary className="ctx-cmd-label">{t("原始 payload")}</summary>
+          <pre className="msg-event-detail-payload mono">{prettyPayload(e.payload_json)}</pre>
+        </details>
       )}
     </div>
   );
 }
 
 function EventRow({ e }: { e: EventDto }) {
+  // thinking / 系统注入块走上下文插件（独立折叠行 + 懒加载全文）
+  if (isContextEvent(e.event_type)) {
+    return e.event_type === "thinking" ? <ThinkingRow e={e} /> : <SystemBlockRow e={e} />;
+  }
+  return <GenericEventRow e={e} />;
+}
+
+function GenericEventRow({ e }: { e: EventDto }) {
   const [open, setOpen] = useState(false);
   const summary = e.summary ?? "";
   return (

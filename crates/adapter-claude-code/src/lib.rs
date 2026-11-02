@@ -111,6 +111,10 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
 pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversation> {
     let mut messages = Vec::new();
     let mut events = Vec::new();
+    // 高保真上下文事件（thinking / 系统注入 / 钩子附件）：单独收集、最后整体
+    // append——事件序号按 vec 位置分配（normalize），追加可让存量事件 seq 稳定；
+    // 但纯注入 user 消息会从消息流移出（消息 seq 变化），重导须走 replace 路径
+    let mut context_events: Vec<RawEvent> = Vec::new();
     let mut title: Option<String> = None;
     let mut model: Option<String> = None;
     let mut first_timestamp: Option<time::OffsetDateTime> = None;
@@ -173,16 +177,33 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                     if !is_pure_tool_result {
                         if let Some(text) = extract_text(content_val) {
                             if !text.trim().is_empty() {
-                                messages.push(RawMessage {
-                                    role,
-                                    text: Some(text),
-                                    content_json: None,
-                                    source_message_id: obj
-                                        .get("uuid")
-                                        .and_then(|u| u.as_str())
-                                        .map(String::from),
-                                    created_at: msg_ts,
-                                });
+                                // 纯注入块（system-reminder / IDE 选区 / 命令回显等）
+                                // 是 runtime 上下文而非用户输入：移出消息流，转为
+                                // SystemBlock 事件全量保留（不进全文索引、不污染
+                                // 「仅用户消息」筛选与 FTS）
+                                if role == Role::User && is_injected(&text) {
+                                    context_events.push(RawEvent {
+                                        event_type: EventType::SystemBlock,
+                                        summary: Some(truncate_chars(text.trim(), 100)),
+                                        payload_json: Some(serde_json::json!({ "block": text })),
+                                        source_event_id: obj
+                                            .get("uuid")
+                                            .and_then(|u| u.as_str())
+                                            .map(String::from),
+                                        created_at: msg_ts,
+                                    });
+                                } else {
+                                    messages.push(RawMessage {
+                                        role,
+                                        text: Some(text),
+                                        content_json: None,
+                                        source_message_id: obj
+                                            .get("uuid")
+                                            .and_then(|u| u.as_str())
+                                            .map(String::from),
+                                        created_at: msg_ts,
+                                    });
+                                }
                             }
                         }
                     }
@@ -200,10 +221,12 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                                         .unwrap_or("unknown");
                                     let (event_type, summary) =
                                         summarize_tool_use(tool_name, item.get("input"));
+                                    let mut payload = item.clone();
+                                    strip_image_base64(&mut payload);
                                     events.push(RawEvent {
                                         event_type,
                                         summary,
-                                        payload_json: Some(item.clone()),
+                                        payload_json: Some(payload),
                                         source_event_id: item
                                             .get("id")
                                             .and_then(|i| i.as_str())
@@ -212,16 +235,40 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                                     });
                                 }
                                 "tool_result" => {
+                                    let mut payload = item.clone();
+                                    strip_image_base64(&mut payload);
                                     events.push(RawEvent {
                                         event_type: EventType::ToolCallCompleted,
                                         summary: Some(summarize_tool_result(item)),
-                                        payload_json: Some(item.clone()),
+                                        payload_json: Some(payload),
                                         source_event_id: item
                                             .get("tool_use_id")
                                             .and_then(|i| i.as_str())
                                             .map(String::from),
                                         created_at: msg_ts,
                                     });
+                                }
+                                "thinking" => {
+                                    // 思考过程全量保留为 Thinking 事件（不进全文索引；
+                                    // signature 是签名回传，剥离）
+                                    if let Some(t) =
+                                        item.get("thinking").and_then(|t| t.as_str())
+                                    {
+                                        if !t.trim().is_empty() {
+                                            context_events.push(RawEvent {
+                                                event_type: EventType::Thinking,
+                                                summary: Some(truncate_chars(t.trim(), 100)),
+                                                payload_json: Some(serde_json::json!({
+                                                    "thinking": t,
+                                                })),
+                                                source_event_id: item
+                                                    .get("uuid")
+                                                    .and_then(|u| u.as_str())
+                                                    .map(String::from),
+                                                created_at: msg_ts,
+                                            });
+                                        }
+                                    }
                                 }
                                 _ => {}
                             }
@@ -241,9 +288,42 @@ pub fn parse_str(content: &str, session_id: &str) -> AdapterResult<RawConversati
                         title = Some(t.to_string());
                     }
                 }
+            "attachment" => {
+                // 钩子/系统附件（SessionStart hook 注入、agent 清单等）：每个会话
+                // 重复注入同一段 boilerplate（实测 2.1 万条 114.7 MB），内容不落库，
+                // 只记一条轻量 SystemBlock 事件（类型 + 来源 + 体量），实现去重
+                let a = obj.get("attachment").cloned().unwrap_or_default();
+                let a_type = a.get("type").and_then(|t| t.as_str()).unwrap_or("attachment");
+                let hook_event = a.get("hookEvent").and_then(|t| t.as_str());
+                let hook_name = a.get("hookName").and_then(|t| t.as_str());
+                let summary = match (hook_event, hook_name) {
+                    (Some(he), Some(hn)) => format!("钩子注入 {he}:{hn}"),
+                    (Some(he), None) => format!("钩子注入 {he}"),
+                    _ => format!("系统附件 {a_type}"),
+                };
+                context_events.push(RawEvent {
+                    event_type: EventType::SystemBlock,
+                    summary: Some(summary),
+                    payload_json: Some(serde_json::json!({
+                        "attachment_type": a_type,
+                        "hook_event": hook_event,
+                        "hook_name": hook_name,
+                        "bytes": a.to_string().len(),
+                        "note": "附件内容为重复 boilerplate，不落库（去重）",
+                    })),
+                    source_event_id: None,
+                    created_at: obj
+                        .get("timestamp")
+                        .and_then(|t| t.as_str())
+                        .and_then(parse_iso_timestamp),
+                });
+            }
             _ => {}
         }
     }
+
+    // 高保真上下文事件追加在末尾（保证存量事件 seq 稳定）
+    events.append(&mut context_events);
 
     if messages.is_empty() && events.is_empty() {
         return Err(ClaudeCodeError::Empty);
@@ -408,7 +488,7 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 /// content 可能是 string，也可能是 [{type:text, text:...}, {`type:tool_use`, ...}]。
-/// 过滤 thinking 类型（内部思考，不是正文）。
+/// 过滤 thinking 类型（内部思考，不是正文；思考内容由 thinking 事件单独承载）。
 fn extract_text(content: Option<&serde_json::Value>) -> Option<String> {
     let val = content?;
     if let Some(s) = val.as_str() {
@@ -430,6 +510,41 @@ fn extract_text(content: Option<&serde_json::Value>) -> Option<String> {
         }
     }
     None
+}
+
+/// 递归剥离 JSON 里的 base64 图片数据（只留媒体类型引用）。
+/// 截图/图片 base64 是全保真导入的体积黑洞（Codex 源 13 GB 里 99.9% 是图片
+/// base64），payload 只存「这里有一张图」的引用，不存内容。
+fn strip_image_base64(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(map) => {
+            if map.get("type").and_then(|t| t.as_str()) == Some("image") {
+                let media_type = map
+                    .get("source")
+                    .and_then(|s| s.get("media_type"))
+                    .and_then(|t| t.as_str())
+                    .unwrap_or("unknown");
+                map.insert(
+                    "source".into(),
+                    serde_json::json!({
+                        "type": "stripped",
+                        "media_type": media_type,
+                        "note": "base64 图片不落库，只存引用",
+                    }),
+                );
+                return;
+            }
+            for (_, child) in map.iter_mut() {
+                strip_image_base64(child);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for child in arr.iter_mut() {
+                strip_image_base64(child);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -467,6 +582,106 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("我应该先查看")));
+    }
+
+    /// 全保真上下文：thinking 块 → Thinking 事件（全量保留，追加在事件末尾）。
+    #[test]
+    fn thinking_becomes_context_event() {
+        let raw = parse_str(SAMPLE, "test-session").expect("parse failed");
+        let th = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::Thinking)
+            .expect("thinking 事件");
+        assert!(th
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("thinking"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("我应该先查看")));
+        // 追加在末尾：thinking 事件在所有工具事件之后（存量 seq 稳定）
+        let th_idx = raw
+            .events
+            .iter()
+            .position(|e| e.event_type == EventType::Thinking)
+            .expect("idx");
+        assert!(th_idx >= raw.events.len() - 1);
+    }
+
+    /// 纯注入 user 消息（system-reminder 等）→ SystemBlock 事件，不进消息流、
+    /// 不进 FTS（全保真导入的「系统块」部分）。
+    #[test]
+    fn injected_user_message_becomes_system_block() {
+        let content = r#"{"type":"user","message":{"role":"user","content":"<system-reminder>\nSessionStart hook 注入的长文本\n</system-reminder>"}}
+{"type":"user","message":{"role":"user","content":"真实提问"}}"#;
+        let raw = parse_str(content, "s").expect("parse failed");
+        assert_eq!(raw.messages.len(), 1, "注入块移出消息流");
+        assert_eq!(raw.messages[0].text.as_deref(), Some("真实提问"));
+        let sb = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::SystemBlock)
+            .expect("system block 事件");
+        assert!(sb
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("block"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("hook 注入")));
+        // 标题兜底取真实提问，不取注入块
+        assert_eq!(raw.title.as_deref(), Some("真实提问"));
+    }
+
+    /// 钩子附件（SessionStart hook boilerplate，实测 2.1 万条 114.7 MB）：
+    /// 内容不落库，只记轻量 SystemBlock 事件（类型 + 体量），实现去重。
+    #[test]
+    fn attachment_record_becomes_light_system_block() {
+        let content = r#"{"type":"user","message":{"role":"user","content":"hi"}}
+{"parentUuid":"p1","type":"attachment","timestamp":"2026-10-01T10:00:00.000Z","attachment":{"type":"hook_success","hookName":"SessionStart:startup","hookEvent":"SessionStart","content":"","stdout":"<EXTREMELY_IMPORTANT> superpowers skill 全文……"}}"#;
+        let raw = parse_str(content, "s").expect("parse failed");
+        let sb = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::SystemBlock)
+            .expect("附件轻量事件");
+        let p = sb.payload_json.as_ref().expect("payload");
+        assert_eq!(
+            p.get("attachment_type").and_then(|v| v.as_str()),
+            Some("hook_success")
+        );
+        assert_eq!(
+            p.get("hook_name").and_then(|v| v.as_str()),
+            Some("SessionStart:startup")
+        );
+        assert!(p.get("bytes").and_then(serde_json::Value::as_i64).is_some());
+        // 内容与 stdout 都不落库（去重的关键）
+        assert!(p.get("stdout").is_none());
+        assert!(p.get("content").is_none());
+        assert!(!sb
+            .summary
+            .as_deref()
+            .unwrap_or("")
+            .contains("superpowers skill 全文"));
+    }
+
+    /// 全保真体积黑洞防护：tool_result 里的 base64 图片只留引用不落内容。
+    #[test]
+    fn tool_result_image_base64_stripped() {
+        let content = r#"{"type":"user","message":{"role":"user","content":"看图"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/a.png"}}]}}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgoAAAANSUhEUg是超长base64图片数据"}}]}]}}"#;
+        let raw = parse_str(content, "s").expect("parse failed");
+        let result = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::ToolCallCompleted)
+            .expect("tool_result 事件");
+        let serialized = result.payload_json.as_ref().expect("payload").to_string();
+        assert!(
+            !serialized.contains("iVBORw0KGgo"),
+            "base64 图片数据必须剥离"
+        );
+        assert!(serialized.contains("image/png"), "媒体类型引用保留");
     }
 
     #[test]

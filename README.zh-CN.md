@@ -108,6 +108,7 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 | 🧪 **相似会话推荐** | 有界候选集,适合回溯历史上下文 |
 | 🧠 **保存搜索** | 跨会话持久化,一键复跑 |
 | ⇄ **交接——在任意 Agent 里继续开发** | 把归档会话(对话 + 含执行时间线的上下文前言)按原生格式写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的会话库,成为可 resume 的全新会话;纯增量写入、可预演、一键全部 |
+| 🧠 **全保真上下文** | thinking 思考过程、系统注入块、完整工具输出(放开 4096 截断)按事件全量保留——不进全文索引;重复的钩子 boilerplate 去重成轻量标记;图片只存引用;Codex `.jsonl.zst` 压缩历史会话补导入;升级后首次启动自动回填存量历史 |
 
 ### CodeAgentOps 治理
 
@@ -298,7 +299,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 | | |
 |---|---|
-| **自动化测试** | Rust 608 + TS 431,由 [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) 强制把关 |
+| **自动化测试** | Rust 625 + TS 437,由 [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) 强制把关 |
 | **Gate 1** | 10 万会话 / 50 万消息 FTS5 搜索 P95 = **50.9 ms**(红线 300 ms)——见 [docs/benchmark-report-v1.0.0.md](docs/benchmark-report-v1.0.0.md) |
 | **Workspace 合并准确率** | 11 例标注样本 = 100%(错误 AutoMerge = 0) |
 | **ESLint** | 0 error / 0 warning |

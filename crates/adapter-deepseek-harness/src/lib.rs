@@ -362,6 +362,9 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
     let mut seen_msg_ids: HashSet<String> = HashSet::new();
     // callId → 该调用产生的事件下标（输出到达时合并 payload）
     let mut pending_outputs: HashMap<String, Vec<usize>> = HashMap::new();
+    // 高保真上下文事件（thinking）：单独收集、最后整体 append——事件序号按
+    // vec 位置分配，追加保证存量事件 seq 稳定（重导 upsert 按序号命中旧行）
+    let mut context_events: Vec<RawEvent> = Vec::new();
     // 外部导入镜像：发现层已按 ext- 前缀排除；此处防御直连 parse 的调用方
     // （如手动按文件路径导入）。镜像首条事件即 session-import/source，命中即中止。
     let mut external = false;
@@ -440,6 +443,25 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                     msg.get("content").unwrap_or(&serde_json::Value::Null),
                     "text",
                 );
+                // 思考过程全量保留为 Thinking 事件（不进全文索引；
+                // reasoning 块为主，兼容 thinking 命名）
+                let content_val = msg.get("content").unwrap_or(&serde_json::Value::Null);
+                let mut thinking = content_texts(content_val, "reasoning");
+                if thinking.is_empty() {
+                    thinking = content_texts(content_val, "thinking");
+                }
+                if !thinking.trim().is_empty() {
+                    context_events.push(RawEvent {
+                        event_type: EventType::Thinking,
+                        summary: Some(truncate_chars(thinking.trim(), 100)),
+                        payload_json: Some(serde_json::json!({ "thinking": thinking })),
+                        source_event_id: msg
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .map(|id| format!("{id}-thinking")),
+                        created_at: ts,
+                    });
+                }
                 if text.is_empty() {
                     return;
                 }
@@ -499,7 +521,8 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                 let Some(call_id) = call_id else { return };
                 let output = tool_result_text(&data);
                 if let Some(indices) = pending_outputs.get(&call_id) {
-                    let merged = serde_json::json!({ "output": truncate_chars(&output, 4096) });
+                    // 输出全量保留（全保真导入：放开 4096 截断）
+                    let merged = serde_json::json!({ "output": output });
                     for &idx in indices {
                         if let Some(ev) = events.get_mut(idx) {
                             if let Some(p) = ev.payload_json.as_mut() {
@@ -517,6 +540,9 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
             _ => {}
         }
     })?;
+
+    // 高保真上下文事件追加在末尾（保证存量事件 seq 稳定）
+    events.append(&mut context_events);
 
     let session_id = session_id.unwrap_or_else(|| {
         path.parent()
@@ -705,8 +731,13 @@ mod tests {
             "reasoning 块不计入正文"
         );
 
-        // bash → CommandCompleted（输出配对升格）；未知工具 → ToolCallStarted
-        assert_eq!(raw.events.len(), 2);
+        // bash → CommandCompleted（输出配对升格）；未知工具 → ToolCallStarted；
+        // thinking 追加在事件列表末尾（保证存量事件 seq 稳定）
+        assert_eq!(
+            raw.events.len(),
+            3,
+            "工具事件 ×2 + 末尾追加的 thinking 事件"
+        );
         assert_eq!(raw.events[0].event_type, EventType::CommandCompleted);
         assert!(raw.events[0]
             .summary
@@ -726,6 +757,50 @@ mod tests {
             .expect("payload")
             .to_string()
             .contains("lsp_hover"));
+        assert_eq!(raw.events[2].event_type, EventType::Thinking);
+        assert!(raw.events[2]
+            .payload_json
+            .as_ref()
+            .expect("payload")
+            .to_string()
+            .contains("思考过程"));
+    }
+
+    /// 全保真：工具输出不再截 4096 字（长输出原样入库）。
+    #[test]
+    fn tool_result_output_not_truncated() {
+        use std::fmt::Write as _;
+        let dir = tempfile::TempDir::new().expect("tempdir failed");
+        let long_output = "x".repeat(10_000);
+        let session_dir = dir.path().join("session-long");
+        std::fs::create_dir_all(&session_dir).expect("mkdir failed");
+        let path = session_dir.join("session.jsonl");
+        let lines = [
+            r#"{"type":"session","version":0,"id":"session-long","createdAt":1788601901335,"delegationDepth":0}"#,
+            r#"{"type":"user/message","seq":1,"time":1788601902996,"data":{"content":[{"type":"text","text":"run"}],"role":"user","id":"ml-1"}}"#,
+            r#"{"type":"tool/call","seq":2,"time":1788602305674,"data":{"callId":"call_l1","name":"bash","arguments":"{\"command\":\"big\"}"}}"#,
+        ];
+        let mut content = lines.join("\n");
+        content.push('\n');
+        write!(
+            content,
+            r#"{{"type":"tool/result","seq":3,"time":1788602305833,"data":{{"message":{{"source":{{"kind":"tool","callId":"call_l1"}},"content":[{{"type":"tool-result","toolCallId":"call_l1","content":[{{"type":"text","text":"{long_output}"}}]}}]}}}}}}"#
+        )
+        .expect("写入 String 不会失败");
+        std::fs::write(&path, content).expect("write failed");
+        let raw = parse_session(&path).expect("parse failed");
+        let ev = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::CommandCompleted)
+            .expect("command event");
+        let out = ev
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("output"))
+            .and_then(|o| o.as_str())
+            .expect("output");
+        assert_eq!(out.len(), 10_000, "长输出应全量保留，不截 4096");
     }
 
     #[test]

@@ -310,6 +310,9 @@ pub fn parse_session(
 
     let mut messages = Vec::new();
     let mut events = Vec::new();
+    // 高保真上下文事件（thinking）：单独收集、最后整体 append——事件序号按
+    // vec 位置分配，追加保证存量事件 seq 稳定（重导 upsert 按序号命中旧行）
+    let mut context_events = Vec::new();
     for row in rows {
         let (msg_id, role_str, created_at_ms, data_json) = row?;
         let data: serde_json::Value = serde_json::from_str(&data_json).unwrap_or_default();
@@ -357,7 +360,32 @@ pub fn parse_session(
         }
 
         events.extend(tool_calls_to_events(data.get("tool_calls"), created_at));
+
+        // 模型思考过程全量保留为 Thinking 事件（不进全文索引）
+        if let Some(t) = data
+            .get("thinking_content")
+            .and_then(|v| v.as_str())
+            .filter(|t| !t.trim().is_empty())
+        {
+            let mut payload = serde_json::json!({ "thinking": t });
+            if let Some(d) = data
+                .get("thinking_duration_ms")
+                .and_then(serde_json::Value::as_i64)
+            {
+                payload["duration_ms"] = serde_json::json!(d);
+            }
+            context_events.push(RawEvent {
+                event_type: EventType::Thinking,
+                summary: Some(truncate_chars(t.trim(), 100)),
+                payload_json: Some(payload),
+                source_event_id: Some(format!("{msg_id}-thinking")),
+                created_at,
+            });
+        }
     }
+
+    // 高保真上下文事件追加在末尾（保证存量事件 seq 稳定）
+    events.append(&mut context_events);
 
     if messages.is_empty() {
         return Err(MinimaxError::Empty(session_id.to_string()));
@@ -446,7 +474,8 @@ fn tool_calls_to_events(
                         .join("\n")
                 })
                 .unwrap_or_default();
-            payload["output"] = serde_json::json!(truncate_chars(&text, 4096));
+            // 输出全量保留（全保真导入：放开 4096 截断）
+            payload["output"] = serde_json::json!(text);
         }
         let completed = call
             .get("tool_call_status")
@@ -895,7 +924,11 @@ mod tests {
         drop(conn);
 
         let raw = parse_session(&db, "mvs_test1").expect("parse failed");
-        assert_eq!(raw.events.len(), 3, "三个 tool_calls 应各成一个事件");
+        assert_eq!(
+            raw.events.len(),
+            4,
+            "三个 tool_calls 事件 + 末尾追加的 thinking 事件"
+        );
         let bash = &raw.events[0];
         assert_eq!(bash.event_type, EventType::CommandCompleted);
         assert!(bash
@@ -920,6 +953,55 @@ mod tests {
             .as_ref()
             .is_some_and(|p| p.get("output").is_none()));
         assert_eq!(raw.events[0].source_event_id.as_deref(), Some("call_1"));
+        // thinking 追加在末尾（存量事件 seq 稳定），全量保留
+        assert_eq!(raw.events[3].event_type, EventType::Thinking);
+        assert!(raw.events[3]
+            .payload_json
+            .as_ref()
+            .and_then(|p| p.get("thinking"))
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|s| s.contains("用户要排序算法")));
+    }
+
+    /// 全保真：工具输出不再截 4096 字（MiniMax 源实测 18.6 MB 尾巴全量入库）。
+    #[test]
+    fn tool_result_output_not_truncated() {
+        let dir = tempfile::TempDir::new().expect("tempdir creation failed");
+        let db = make_test_db(dir.path());
+        let conn = Connection::open(&db).expect("database connection failed");
+        let long_text = "z".repeat(10_000);
+        let result = serde_json::json!({
+            "content": [{"type": "text", "text": long_text}]
+        })
+        .to_string();
+        let m = serde_json::json!({
+            "msg_id": "msg-long",
+            "timestamp": 1_784_560_930_000_i64,
+            "role": "assistant",
+            "msg_type": 2,
+            "msg_content": "",
+            "tool_calls": [
+                {"tool_name": "bash", "tool_call_id": "call_long", "tool_call_status": 2,
+                 "tool_call_args": "{\"command\":\"big\"}", "tool_call_result_data": result}
+            ]
+        });
+        conn.execute(
+            "INSERT INTO local_runtime_message_rows (session_id, msg_id, role, created_at_ms, data_json)
+             VALUES ('mvs_test1', 'msg-long', 'assistant', 1784560930000, ?1)",
+            params![m.to_string()],
+        )
+        .expect("unexpected None");
+        drop(conn);
+        let raw = parse_session(&db, "mvs_test1").expect("parse failed");
+        let out = raw
+            .events
+            .iter()
+            .find(|e| e.event_type == EventType::CommandCompleted)
+            .and_then(|e| e.payload_json.as_ref())
+            .and_then(|p| p.get("output"))
+            .and_then(serde_json::Value::as_str)
+            .expect("output");
+        assert_eq!(out.len(), 10_000, "长输出应全量保留，不截 4096");
     }
 
     #[test]

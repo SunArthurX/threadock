@@ -26,6 +26,10 @@ use std::sync::Mutex;
 /// [`knowledge_repo`]（知识持久化）、[`settings`]（应用设置/脱敏规则）。
 pub struct Repository {
     conn: Mutex<Connection>,
+    /// bulk 消息重载模式（全保真回填）：messages 删除触发器已摘除，
+    /// replace 清空消息时跳过逐会话 FTS 清理，残留由
+    /// [`Self::end_bulk_message_reload`] 一次性清扫。
+    bulk_message_reload: std::sync::atomic::AtomicBool,
 }
 
 /// 来源 workspace → 统一 workspace 的映射与置信度（plan §4.3，GUI 低置信度提醒用）。
@@ -52,9 +56,9 @@ pub use knowledge_repo::KnowledgeRecord;
 pub use llm_runs::LlmRunRecord;
 pub use ops_queries::{
     ActivityStats, AgentBenchmark, AgentHealth, AnomalyRow, AssetRow, AutomationRow, CacheStat,
-    CacheTrendRow, DailyTool, DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage,
-    MonthProjection, OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary,
-    WeeklySummary,
+    CacheTrendRow, ContextUsageCategory, ContextUsageSummary, ConversationDigest, DailyTool,
+    DailyUsage, DirCost, HeatCell, HourBucket, LatencyStat, ModelUsage, MonthProjection,
+    OpsOverview, ProviderUsage, TokenWaste, ToolTrend, ToolUsageRow, UsageSummary, WeeklySummary,
 };
 pub use settings::{NoteDto, RedactionRuleRecord, SavedSearchRecord, TagCountDto};
 
@@ -66,6 +70,7 @@ impl Repository {
         migration::migrate_to_latest(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            bulk_message_reload: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -76,6 +81,7 @@ impl Repository {
         migration::migrate_to_latest(&mut conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
+            bulk_message_reload: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -1041,6 +1047,7 @@ impl Repository {
     /// 只在提交时 fsync 一次，快 1-2 个数量级。
     /// `workspace_name` 非空时按名查找/创建并挂到会话上。
     #[allow(clippy::too_many_lines)] // 单事务批量导入：provider+workspace+会话+消息+事件一体，拆分损害原子性
+    #[allow(clippy::too_many_arguments)]
     pub fn import_conversation_batch(
         &self,
         conv: &Conversation,
@@ -1048,6 +1055,7 @@ impl Repository {
         events: &[Event],
         workspace_name: Option<&str>,
         observed_updated_ms: Option<i64>,
+        replace_content: bool,
     ) -> StorageResult<String> {
         let mut conn_guard = self.conn.lock().expect("mutex poisoned");
         let tx = conn_guard.transaction()?;
@@ -1156,6 +1164,36 @@ impl Repository {
                 conv.source_parent_id,
             ],
         )?;
+
+        // replace 模式（全保真重导）：先清空该会话旧消息/事件再写入，保证库内
+        // 内容与源完全一致——适配器解析形态变化（thinking 成事件、注入消息改判）
+        // 会让序号移动，幂等 upsert 只覆盖相同序号的行，移动后的旧行会残留。
+        // FTS 清理：contentless FTS5 按行删是全索引扫描，逐行触发=O(全索引)×N
+        // （真实库实测 20 分钟删不完）。bulk 模式（回填整轮）由
+        // end_bulk_message_reload 一次扫清残留；非 bulk 单独 replace 在本事务内
+        // 摘触发器 → 批量清该会话 FTS → 重建触发器（delete_conversations_by_
+        // source_prefix 同款）。tantivy 由调用方在整轮重导后统一重建索引。
+        if replace_content {
+            let bulk = self
+                .bulk_message_reload
+                .load(std::sync::atomic::Ordering::SeqCst);
+            if !bulk {
+                tx.execute("DROP TRIGGER IF EXISTS messages_ad_fts", [])?;
+                tx.execute(
+                    "DELETE FROM messages_fts WHERE message_id IN (
+                         SELECT id FROM messages WHERE conversation_id = ?1)",
+                    params![id],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM messages WHERE conversation_id = ?1",
+                params![id],
+            )?;
+            tx.execute("DELETE FROM events WHERE conversation_id = ?1", params![id])?;
+            if !bulk {
+                tx.execute_batch(crate::schema::SCHEMA_FTS_TRIGGERS)?;
+            }
+        }
 
         // 消息（幂等：conversation_id + sequence，与 upsert_message 同列集）
         for m in messages {
@@ -1562,6 +1600,51 @@ impl Repository {
             v.push(r?);
         }
         Ok(v)
+    }
+
+    /// 读取单条事件的完整 payload JSON 字符串（不截断）。
+    /// 详情列表的 payload 经 DTO 8KB 截断；前端上下文插件展开长输出/思考时
+    /// 按事件 id 懒加载全文。
+    pub fn get_event_payload(&self, event_id: &str) -> StorageResult<Option<String>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let val: Option<String> = conn
+            .query_row(
+                "SELECT payload_json FROM events WHERE id = ?1",
+                [event_id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(val)
+    }
+
+    /// 进入 bulk 消息重载模式（全保真回填整轮用）：摘除 messages 删除触发器，
+    /// 让 [`Self::import_conversation_batch`] 的 replace 清空消息不再逐行触发
+    /// contentless FTS5 全索引扫描（真实库 2.7 万行逐行删实测 20 分钟未完成，
+    /// 见 `delete_conversations_by_source_prefix` 同款问题）。bulk 期间被删消息
+    /// 在 FTS 里的残留与新增消息的正确索引并存；由
+    /// [`Self::end_bulk_message_reload`] 一次性清扫。中途崩溃只遗留 FTS 残留
+    /// （下次 end 时清）与已摘除的触发器（本方法幂等可重入）。
+    pub fn begin_bulk_message_reload(&self) -> StorageResult<()> {
+        self.bulk_message_reload
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let conn = self.conn.lock().expect("mutex poisoned");
+        conn.execute("DROP TRIGGER IF EXISTS messages_ad_fts", [])?;
+        Ok(())
+    }
+
+    /// 退出 bulk 模式：重建全部 FTS 触发器（SCHEMA_FTS_TRIGGERS 用
+    /// `IF NOT EXISTS`，对未摘除场景是 no-op），并把 FTS 里 message_id 已不
+    /// 存在的残留行一次扫清（单次全索引扫描）。
+    pub fn end_bulk_message_reload(&self) -> StorageResult<()> {
+        self.bulk_message_reload
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let conn = self.conn.lock().expect("mutex poisoned");
+        conn.execute_batch(crate::schema::SCHEMA_FTS_TRIGGERS)?;
+        conn.execute(
+            "DELETE FROM messages_fts WHERE message_id NOT IN (SELECT id FROM messages)",
+            [],
+        )?;
+        Ok(())
     }
 
     // ── Sync cursor ──────────────────────────────────────────────────────
@@ -2125,6 +2208,8 @@ fn parse_event_type(s: &str) -> EventType {
         "plan_created" => EventType::PlanCreated,
         "error" => EventType::Error,
         "artifact_created" => EventType::ArtifactCreated,
+        "thinking" => EventType::Thinking,
+        "system_block" => EventType::SystemBlock,
         _ => EventType::StatusChanged,
     }
 }
@@ -2893,7 +2978,7 @@ mod tests {
         let conv = ch_domain::Conversation::new(Provider::ZCode, "src-batch-regress");
         let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
         let id = r
-            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
+            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000), false)
             .expect("unexpected None");
         let got = r
             .get_conversation(&id)
@@ -2903,7 +2988,7 @@ mod tests {
         assert_eq!(r.list_messages(&id).expect("unexpected None").len(), 1);
         // 幂等重放
         let id2 = r
-            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000))
+            .import_conversation_batch(&conv, &msgs, &[], Some("ZCode"), Some(1000), false)
             .expect("unexpected None");
         assert_eq!(id, id2);
         assert_eq!(
@@ -2911,6 +2996,315 @@ mod tests {
             1,
             "重放不产生重复消息"
         );
+    }
+
+    #[test]
+    fn import_conversation_batch_replaces_content() {
+        // 全保真重导（replace_content=true）：适配器解析形态变化（thinking 成
+        // 事件、注入消息改判）会让消息/事件序号移动，幂等 upsert 只覆盖相同
+        // 序号的行——replace 先清空旧内容再写，保证库内与源一致、不残留旧行
+        let r = Repository::open_in_memory().expect("unexpected None");
+        let conv = ch_domain::Conversation::new(Provider::ZCode, "src-replace");
+        let m1 = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        let m2 = ch_domain::Message::new(&conv.id, ch_domain::Role::Assistant, 2);
+        let mut e1 = ch_domain::Event::new(&conv.id, ch_domain::EventType::CommandStarted, 1);
+        e1.summary = Some("old event".into());
+        let id = r
+            .import_conversation_batch(
+                &conv,
+                &[m1.clone(), m2],
+                &[e1],
+                Some("ZCode"),
+                Some(1000),
+                false,
+            )
+            .expect("first import failed");
+        assert_eq!(r.list_messages(&id).expect("unexpected None").len(), 2);
+        assert_eq!(r.list_events(&id).expect("unexpected None").len(), 1);
+
+        // 重导：消息少一条（注入块改判移出）、事件多一条（thinking 追加）
+        let m1b = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        let mut e1b = ch_domain::Event::new(&conv.id, ch_domain::EventType::CommandStarted, 1);
+        e1b.summary = Some("new event".into());
+        let mut e2 = ch_domain::Event::new(&conv.id, ch_domain::EventType::Thinking, 2);
+        e2.summary = Some("思考".into());
+        let id2 = r
+            .import_conversation_batch(&conv, &[m1b], &[e1b, e2], Some("ZCode"), Some(2000), true)
+            .expect("replace import failed");
+        assert_eq!(id2, id, "同一来源会话应命中同一库内 id");
+        let msgs = r.list_messages(&id).expect("unexpected None");
+        let evs = r.list_events(&id).expect("unexpected None");
+        assert_eq!(msgs.len(), 1, "replace 后旧消息不残留");
+        assert_eq!(evs.len(), 2, "replace 后事件与源一致");
+        assert_eq!(evs[0].summary.as_deref(), Some("new event"));
+        assert_eq!(evs[1].event_type, ch_domain::EventType::Thinking);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // 单测：摘要与用量两条口径各自铺开断言，拆分会散掉对照
+    fn conversation_digest_parses_context() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::ZCode).expect("upsert failed");
+        let mut conv = ch_domain::Conversation::new(Provider::ZCode, "src-digest");
+        conv.title = Some("评论排序改造".into());
+        let mk_msg = |seq: i64, role: ch_domain::Role, text: &str| {
+            let mut m = ch_domain::Message::new(&conv.id, role, seq);
+            m.content_text = Some(text.into());
+            m
+        };
+        let msgs = vec![
+            mk_msg(
+                1,
+                ch_domain::Role::User,
+                "给评论排序加一路新的排序服务，先出方案",
+            ),
+            mk_msg(
+                2,
+                ch_domain::Role::Assistant,
+                "好的，我先梳理现有排序链路。",
+            ),
+            mk_msg(3, ch_domain::Role::User, "按方案实施，注意兼容旧接口"),
+            mk_msg(
+                4,
+                ch_domain::Role::Assistant,
+                "完成了：新增 comment_rank_v2 服务并接入路由。",
+            ),
+        ];
+        let mk_event =
+            |seq: i64, et: ch_domain::EventType, summary: &str, payload: serde_json::Value| {
+                let mut e = ch_domain::Event::new(&conv.id, et, seq);
+                e.summary = Some(summary.into());
+                e.payload_json = Some(payload);
+                e
+            };
+        let events = vec![
+            mk_event(
+                1,
+                ch_domain::EventType::CommandStarted,
+                "cargo build",
+                serde_json::json!({"cmd": "cargo build"}),
+            ),
+            mk_event(
+                2,
+                ch_domain::EventType::FileRead,
+                "读取 main.rs",
+                serde_json::json!({"input": {"file_path": "/p/src/main.rs"}}),
+            ),
+            mk_event(
+                3,
+                ch_domain::EventType::FileUpdated,
+                "修改 rank.rs",
+                serde_json::json!({"input": {"file_path": "/p/src/rank.rs"}}),
+            ),
+            mk_event(
+                4,
+                ch_domain::EventType::FileUpdated,
+                "修改 rank.rs",
+                serde_json::json!({"input": {"file_path": "/p/src/rank.rs"}}),
+            ),
+            mk_event(
+                5,
+                ch_domain::EventType::FileCreated,
+                "新建 v2.rs",
+                serde_json::json!({"input": {"file_path": "/p/src/v2.rs"}}),
+            ),
+            mk_event(
+                6,
+                ch_domain::EventType::Error,
+                "compile error E0308",
+                serde_json::json!({}),
+            ),
+        ];
+        let cid = r
+            .import_conversation_batch(&conv, &msgs, &events, Some("ZCode"), Some(1000), false)
+            .expect("import failed");
+
+        let d = r
+            .conversation_digest(&cid)
+            .expect("digest query failed")
+            .expect("summary");
+        assert_eq!(d.title.as_deref(), Some("评论排序改造"));
+        assert_eq!(
+            d.provider, "zcode",
+            "providers.name 存枚举串，前端 sourceLabel 映射显示名"
+        );
+        assert_eq!(d.user_messages, 2);
+        assert_eq!(d.assistant_messages, 2);
+        assert_eq!(
+            d.topic_opening.as_deref(),
+            Some("给评论排序加一路新的排序服务，先出方案")
+        );
+        assert_eq!(
+            d.topic_latest.as_deref(),
+            Some("按方案实施，注意兼容旧接口")
+        );
+        assert!(d
+            .closing_reply
+            .as_deref()
+            .is_some_and(|s| s.contains("comment_rank_v2")));
+        assert_eq!(d.commands_run, 1);
+        assert_eq!(d.files_read, 1);
+        assert_eq!(d.files_updated, 2);
+        assert_eq!(d.files_created, 1);
+        assert_eq!(d.errors, 1);
+        assert_eq!(
+            d.top_files,
+            vec!["/p/src/rank.rs", "/p/src/v2.rs"],
+            "改动文件按次数排序"
+        );
+        assert!(d.recent_errors.iter().any(|s| s.contains("E0308")));
+        assert!(d.milestones.iter().any(|s| s.contains("v2.rs")));
+        // 上下文占用来自 context usage（无 usage 记录 → 估算路径，requests=0）
+        assert_eq!(d.requests, 0);
+        assert!(d.context_total_tokens > 0, "纯文本估算也要给量级");
+    }
+
+    #[test]
+    fn conversation_context_usage_aggregates() {
+        let r = Repository::open_in_memory().expect("unexpected None");
+        r.upsert_provider(Provider::ZCode).expect("upsert failed");
+        let conv = ch_domain::Conversation::new(Provider::ZCode, "src-ctx");
+        // 4000 CJK 字符 ≈ 4000 token；4000 ASCII 字符 ≈ 1000 token
+        let mut m = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        m.content_text = Some("中".repeat(4000));
+        let mut e = ch_domain::Event::new(&conv.id, ch_domain::EventType::CommandCompleted, 1);
+        e.payload_json = Some(serde_json::json!({ "output": "x".repeat(4000) }));
+        let cid = r
+            .import_conversation_batch(&conv, &[m], &[e], Some("ZCode"), Some(1000), false)
+            .expect("import failed");
+        let mk = |id: &str, sec: i64, i: i64, cr: i64| ch_domain::UsageRecord {
+            id: id.into(),
+            provider: Provider::ZCode,
+            source_session_id: "src-ctx".into(),
+            turn_id: None,
+            model: Some("glm-5".into()),
+            ts: OffsetDateTime::from_unix_timestamp(sec).expect("ts"),
+            input_tokens: i,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+            cache_read_tokens: cr,
+            cache_write_tokens: 0,
+            cost_usd: None,
+            status: ch_domain::UsageStatus::Completed,
+            duration_ms: None,
+            retry_count: None,
+            source_dir: None,
+            context_exceeded: 0,
+        };
+        r.upsert_usage_batch(&[mk("u1", 1, 100, 900), mk("u2", 2, 20_000, 80_000)])
+            .expect("usage write failed");
+
+        let s = r
+            .conversation_context_usage(&cid)
+            .expect("query failed")
+            .expect("summary");
+        // 实测总量 = 末条（ts 最大）usage 的 input + cache_read
+        assert!(s.measured);
+        assert_eq!(s.total_tokens, 100_000);
+        assert_eq!(s.window_tokens, 1_000_000, "glm-5 → 1M 窗口");
+        assert_eq!(s.model.as_deref(), Some("glm-5"));
+        let rate = s.cache_hit_rate.expect("rate");
+        assert!((rate - (900.0 + 80_000.0) / (100.0 + 900.0 + 20_000.0 + 80_000.0)).abs() < 1e-9);
+        // 分类：可观测部分精确估算，差值进 system_other
+        let cat = |k: &str| {
+            s.categories
+                .iter()
+                .find(|c| c.key == k)
+                .map_or(-1, |c| c.tokens)
+        };
+        assert_eq!(cat("messages"), 4004, "CJK 1 字 1 token + 每条 4 开销");
+        // payload = {"output":"xxxx…"} 共 4013 ASCII 字符 → 4013/4 + 8 开销
+        assert_eq!(
+            cat("tool_outputs"),
+            1003 + 8,
+            "ASCII 4 字符 1 token + 8 开销"
+        );
+        assert_eq!(cat("thinking"), 0);
+        let other = cat("system_other");
+        assert_eq!(
+            other,
+            100_000 - 4004 - 1011,
+            "实测与可观测估算的差值 = 系统提示/工具定义等"
+        );
+        // 明细数据：请求数 / 缓存绝对量 / 末次时间 / 每 turn 上下文轨迹
+        assert_eq!(s.turn_count, 2);
+        assert_eq!(s.fresh_tokens, 100 + 20_000);
+        assert_eq!(s.cache_read_tokens, 900 + 80_000);
+        assert_eq!(s.last_turn_at_ms, Some(2_000));
+        assert_eq!(s.trend, vec![1_000, 100_000], "轨迹按时间升序");
+        // 无 usage 记录的会话 → 退化估算
+        let conv2 = ch_domain::Conversation::new(Provider::ZCode, "src-ctx-noimm");
+        let mut m2 = ch_domain::Message::new(&conv2.id, ch_domain::Role::User, 1);
+        m2.content_text = Some("hello world ".repeat(100)); // 1200 ascii → 300 token
+        let cid2 = r
+            .import_conversation_batch(&conv2, &[m2], &[], Some("ZCode"), Some(1000), false)
+            .expect("import failed");
+        let s2 = r
+            .conversation_context_usage(&cid2)
+            .expect("query failed")
+            .expect("summary");
+        assert!(!s2.measured);
+        assert_eq!(s2.total_tokens, 300 + 4);
+        assert!(s2.cache_hit_rate.is_none());
+        assert!(s2.categories.iter().all(|c| c.key != "system_other"));
+        assert_eq!(s2.turn_count, 0);
+        assert!(s2.trend.is_empty());
+    }
+
+    #[test]
+    fn bulk_message_reload_cleans_fts_ghosts() {
+        // bulk 模式（回填整轮）：replace 摘除删除触发器 → 被删消息在 FTS 里
+        // 留幽灵行；end_bulk_message_reload 必须一次扫清，否则搜索返回已删消息
+        let r = Repository::open_in_memory().expect("unexpected None");
+        let conv = ch_domain::Conversation::new(Provider::ZCode, "src-bulk-fts");
+        let mut m1 = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        m1.content_text = Some("GhostTokenXYZ 旧内容".into());
+        r.import_conversation_batch(&conv, &[m1.clone()], &[], Some("ZCode"), Some(1000), false)
+            .expect("first import failed");
+        let hit = r
+            .search(&search::SearchQuery::new("GhostTokenXYZ"))
+            .expect("search failed");
+        assert!(hit.iter().any(|h| h.message_id == m1.id));
+
+        r.begin_bulk_message_reload().expect("begin bulk failed");
+        let mut m2 = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        m2.content_text = Some("FreshTokenABC 全新内容".into());
+        r.import_conversation_batch(&conv, &[m2.clone()], &[], Some("ZCode"), Some(2000), true)
+            .expect("replace import failed");
+        r.end_bulk_message_reload().expect("end bulk failed");
+
+        let ghosts = r
+            .search(&search::SearchQuery::new("GhostTokenXYZ"))
+            .expect("search failed");
+        assert!(ghosts.is_empty(), "幽灵 FTS 行必须被清扫");
+        let hits = r
+            .search(&search::SearchQuery::new("FreshTokenABC"))
+            .expect("search failed");
+        assert!(hits.iter().any(|h| h.message_id == m2.id), "新内容可搜");
+    }
+
+    #[test]
+    fn replace_mode_without_bulk_cleans_fts_immediately() {
+        // 单独 replace（非 bulk）：本事务内摘触发器批量清 FTS 再重建，
+        // 不留幽灵行
+        let r = Repository::open_in_memory().expect("unexpected None");
+        let conv = ch_domain::Conversation::new(Provider::ZCode, "src-replace-fts");
+        let mut m1 = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        m1.content_text = Some("SoloGhostToken 旧内容".into());
+        r.import_conversation_batch(&conv, &[m1.clone()], &[], Some("ZCode"), Some(1000), false)
+            .expect("first import failed");
+        let mut m2 = ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1);
+        m2.content_text = Some("SoloFreshToken 新内容".into());
+        r.import_conversation_batch(&conv, &[m2.clone()], &[], Some("ZCode"), Some(2000), true)
+            .expect("replace import failed");
+        let ghosts = r
+            .search(&search::SearchQuery::new("SoloGhostToken"))
+            .expect("search failed");
+        assert!(ghosts.is_empty(), "非 bulk replace 不应留 FTS 幽灵行");
+        let hits = r
+            .search(&search::SearchQuery::new("SoloFreshToken"))
+            .expect("search failed");
+        assert!(hits.iter().any(|h| h.message_id == m2.id));
     }
 
     #[test]
@@ -2924,7 +3318,7 @@ mod tests {
         conv.workspace_id = Some(ws_id.clone());
         let msgs = vec![ch_domain::Message::new(&conv.id, ch_domain::Role::User, 1)];
         let id = r
-            .import_conversation_batch(&conv, &msgs, &[], None, None)
+            .import_conversation_batch(&conv, &msgs, &[], None, None, false)
             .expect("unexpected None");
         let got = r
             .get_conversation(&id)

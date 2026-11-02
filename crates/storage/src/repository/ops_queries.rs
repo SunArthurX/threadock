@@ -4,7 +4,7 @@ use super::{row_to_conversation, Repository};
 use crate::error::StorageResult;
 use crate::timestamp;
 use ch_domain::now_utc;
-use rusqlite::{params, params_from_iter, types::Value as SqlValue};
+use rusqlite::{params, params_from_iter, types::Value as SqlValue, OptionalExtension};
 use std::str::FromStr as _;
 
 /// 治理总览 KPI。
@@ -252,7 +252,578 @@ pub struct ActivityStats {
     pub tool_daily: Vec<DailyTool>,
 }
 
+/// 单会话上下文窗口用量分类行（详情页「上下文窗口」面板）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextUsageCategory {
+    /// messages / tool_outputs / thinking / system_blocks / system_other
+    pub key: &'static str,
+    pub tokens: i64,
+}
+
+/// 单会话上下文窗口用量汇总（plan 外功能，2026-11 对话上下文窗口面板）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ContextUsageSummary {
+    /// 上下文占用 token：优先后末条 usage 记录（input+cache_read+cache_write，
+    /// 即最后请求的完整 prompt 侧）；无记录时为全文本估算（measured=false）。
+    pub total_tokens: i64,
+    /// true = 总量来自来源侧真实 usage 记录；false = 纯文本估算。
+    pub measured: bool,
+    /// 模型上下文窗口（按模型名/来源映射，估算档位）。
+    pub window_tokens: i64,
+    pub model: Option<String>,
+    /// 平均缓存命中率 = Σcache_read / Σ(input+cache_read+cache_write)。
+    pub cache_hit_rate: Option<f64>,
+    pub categories: Vec<ContextUsageCategory>,
+    /// ── 明细数据（实测路径才有值；估算路径多为 0/None）──
+    /// 请求次数（usage 记录条数）。
+    pub turn_count: i64,
+    /// Σ 非缓存输入 token（每次请求真实新读的部分）。
+    pub fresh_tokens: i64,
+    /// Σ 缓存命中 token。
+    pub cache_read_tokens: i64,
+    /// Σ 缓存写入 token。
+    pub cache_write_tokens: i64,
+    /// Σ 输出 token。
+    pub output_tokens: i64,
+    /// Σ 推理 token（来源侧上报时才有）。
+    pub reasoning_tokens: i64,
+    /// 末次请求时间（Unix 毫秒）。
+    pub last_turn_at_ms: Option<i64>,
+    /// 每 turn 上下文规模（input+cache_read+cache_write），时间升序，最多最近
+    /// 40 个点——上下文增长趋势 sparkline 数据。
+    pub trend: Vec<i64>,
+}
+
+/// 模型/来源 → 上下文窗口 token 档位（近似；未知回退 200K）。
+fn context_window_tokens(model: Option<&str>, provider_id: &str) -> i64 {
+    let m = model.unwrap_or("").to_ascii_lowercase();
+    let has = |needle: &str| m.contains(needle);
+    if has("glm-5") || has("flashx") || has("minimax") || has("abab") {
+        1_000_000
+    } else if has("gpt-5") || has("codex") {
+        400_000
+    } else if has("kimi") || has("k2") {
+        256_000
+    } else if has("deepseek") {
+        128_000
+    } else if has("glm") || has("claude") || has("sonnet") || has("opus") || has("haiku") {
+        200_000
+    } else {
+        match provider_id {
+            "prov_zcode" | "prov_minimax-code" => 1_000_000,
+            "prov_codex" => 400_000,
+            "prov_deepseek-harness" => 128_000,
+            _ => 200_000,
+        }
+    }
+}
+
+/// CJK 字符 ≈1 token、其余 4 字符 ≈1 token 的混合估算。
+fn estimate_tokens(s: &str) -> i64 {
+    let (mut cjk, mut rest) = (0i64, 0i64);
+    for c in s.chars() {
+        if (c as u32) > 0x2E7F {
+            cjk += 1;
+        } else {
+            rest += 1;
+        }
+    }
+    cjk + rest / 4
+}
+
+/// 单会话结构化摘要（详情页「会话摘要」面板 / 复制导出）。
+/// 全部字段从已入库上下文确定性解析，离线可用；LLM 叙述式摘要可把本结构
+/// 作为提示素材。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConversationDigest {
+    pub title: Option<String>,
+    pub provider: String,
+    pub model: Option<String>,
+    /// Unix 毫秒；None = 会话无时间。
+    pub started_at_ms: Option<i64>,
+    pub updated_at_ms: Option<i64>,
+    /// 对话规模：用户提问数 / 助手回复数 / 系统注入消息数。
+    pub user_messages: i64,
+    pub assistant_messages: i64,
+    pub system_messages: i64,
+    /// 请求次数与上下文占用（来自 conversation_context_usage；无记录为 0/估算）。
+    pub requests: i64,
+    pub context_total_tokens: i64,
+    pub context_window_tokens: i64,
+    /// 用户核心诉求：首条与末条真实用户消息（截 200 字）。
+    pub topic_opening: Option<String>,
+    pub topic_latest: Option<String>,
+    /// 结尾回复：最后一条助手消息（截 300 字）——通常是阶段性结论。
+    pub closing_reply: Option<String>,
+    /// 动作统计：命令 / 读文件 / 新建 / 修改 / 错误。
+    pub commands_run: i64,
+    pub files_read: i64,
+    pub files_created: i64,
+    pub files_updated: i64,
+    pub errors: i64,
+    /// 改动最频繁的文件（新建+修改去重，按次数降序，最多 5 个）。
+    pub top_files: Vec<String>,
+    /// 最近 3 条错误摘要。
+    pub recent_errors: Vec<String>,
+    /// 里程碑：最近 6 条建文件/改文件/补丁/产物事件摘要。
+    pub milestones: Vec<String>,
+    /// 上下文规模：thinking 与系统注入事件数（全保真新增的可解析数据）。
+    pub thinking_events: i64,
+    pub system_block_events: i64,
+}
+
+/// 从事件 payload 里递归找第一个 file_path / path 字符串值（各 adapter 形态
+/// 不一：zcode/claude 在 input.file_path，minimax 在 args.path，codex 在顶层
+/// path 等）。找到即返回（截 300 字符防超长）。
+fn extract_file_path(value: &serde_json::Value) -> Option<String> {
+    const MAX: usize = 300;
+    match value {
+        serde_json::Value::Object(map) => {
+            for key in ["file_path", "path"] {
+                if let Some(Some(s)) = map.get(key).map(|v| v.as_str()) {
+                    let s = s.trim();
+                    if !s.is_empty() && !s.starts_with("http") {
+                        return Some(s.chars().take(MAX).collect());
+                    }
+                }
+            }
+            for (_, child) in map {
+                if let Some(p) = extract_file_path(child) {
+                    return Some(p);
+                }
+            }
+            None
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(extract_file_path),
+        _ => None,
+    }
+}
+
+/// 文本截断（中英文安全，超长加省略号）。
+fn digest_truncate(s: &str, max: usize) -> Option<String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let mut out = String::new();
+    for c in s.chars() {
+        if out.chars().count() >= max {
+            out.push('…');
+            break;
+        }
+        out.push(c);
+    }
+    Some(out)
+}
+
 impl Repository {
+    /// 单会话结构化摘要（详情页「会话摘要」面板）。
+    ///
+    /// 从已入库的上下文确定性解析：诉求（首末用户消息）、动作（命令/文件/
+    /// 错误计数 + 改动文件 top5）、里程碑（最近的关键事件）、结尾结论（末条
+    /// 助手消息）、规模（消息/请求/上下文 token）。离线可用，不依赖 LLM。
+    #[allow(clippy::too_many_lines)] // 摘要装配：查询+分类+装配一体，拆分会割裂口径
+    pub fn conversation_digest(
+        &self,
+        conversation_id: &str,
+    ) -> StorageResult<Option<ConversationDigest>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let (title, provider_id, provider_str, model, started_ms, updated_ms): (
+            Option<String>,
+            String,
+            String,
+            Option<String>,
+            Option<i64>,
+            Option<i64>,
+        ) = match conn.query_row(
+            "SELECT c.title, c.provider_id, p.name, c.model, c.started_at, c.updated_at
+             FROM conversations c JOIN providers p ON p.id = c.provider_id
+             WHERE c.id = ?1",
+            [conversation_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
+        ) {
+            Ok(v) => v,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+        let _ = provider_id;
+
+        // 消息按角色计数 + 首末用户消息 + 末条助手回复
+        let (mut user_messages, mut assistant_messages, mut system_messages) = (0i64, 0i64, 0i64);
+        {
+            let mut stmt = conn.prepare(
+                "SELECT role, COUNT(*) FROM messages WHERE conversation_id = ?1 GROUP BY role",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (role, n) = row?;
+                match role.as_str() {
+                    "user" => user_messages = n,
+                    "assistant" => assistant_messages = n,
+                    "system" => system_messages = n,
+                    _ => {}
+                }
+            }
+        }
+        let msg_at = |role: &str, first: bool, max: usize| -> StorageResult<Option<String>> {
+            let mut stmt = conn.prepare(&format!(
+                "SELECT content_text FROM messages
+                 WHERE conversation_id = ?1 AND role = ?2 AND content_text IS NOT NULL
+                 ORDER BY sequence_number {} LIMIT 1",
+                if first { "ASC" } else { "DESC" }
+            ))?;
+            let val: Option<String> = stmt
+                .query_row(params![conversation_id, role], |r| {
+                    r.get::<_, Option<String>>(0)
+                })
+                .optional()?
+                .flatten()
+                .and_then(|t| digest_truncate(&t, max));
+            Ok(val)
+        };
+        let topic_opening = msg_at("user", true, 200)?;
+        let topic_latest = if user_messages > 1 {
+            msg_at("user", false, 200)?
+        } else {
+            None
+        };
+        let closing_reply = msg_at("assistant", false, 300)?;
+
+        // 事件统计：按类型计数 + 错误最近 3 条 + 里程碑最近 6 条 + 改动文件 top5
+        let (mut commands_run, mut files_read, mut files_created, mut files_updated, mut errors) =
+            (0i64, 0i64, 0i64, 0i64, 0i64);
+        let (mut thinking_events, mut system_block_events) = (0i64, 0i64);
+        {
+            let mut stmt = conn.prepare(
+                "SELECT event_type, COUNT(*) FROM events WHERE conversation_id = ?1 GROUP BY event_type",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })?;
+            for row in rows {
+                let (etype, n) = row?;
+                match etype.as_str() {
+                    "command_started" | "command_completed" => commands_run += n,
+                    "file_read" => files_read += n,
+                    "file_created" => files_created += n,
+                    "file_updated" => files_updated += n,
+                    "error" => errors += n,
+                    "thinking" => thinking_events += n,
+                    "system_block" => system_block_events += n,
+                    _ => {}
+                }
+            }
+        }
+        let recent_errors: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT COALESCE(summary, '') FROM events
+                 WHERE conversation_id = ?1 AND event_type = 'error'
+                 ORDER BY sequence_number DESC LIMIT 3",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| r.get::<_, String>(0))?;
+            rows.filter_map(Result::ok)
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| digest_truncate(&s, 120).unwrap_or(s))
+                .collect()
+        };
+        let milestones: Vec<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT COALESCE(summary, '') FROM events
+                 WHERE conversation_id = ?1
+                   AND event_type IN ('file_created', 'file_updated', 'diff_generated', 'artifact_created')
+                 ORDER BY sequence_number DESC LIMIT 6",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| r.get::<_, String>(0))?;
+            rows.filter_map(Result::ok)
+                .filter(|s| !s.trim().is_empty())
+                .map(|s| digest_truncate(&s, 100).unwrap_or(s))
+                .collect::<Vec<_>>()
+        };
+        // 改动文件 top5：payload 递归抽 file_path（新建+修改），超大会话跳过明细
+        let mut top_files: Vec<String> = Vec::new();
+        if files_created + files_updated > 0 && files_created + files_updated < 2000 {
+            let mut counts: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
+            let mut stmt = conn.prepare(
+                "SELECT payload_json FROM events
+                 WHERE conversation_id = ?1 AND event_type IN ('file_created', 'file_updated')",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| r.get::<_, Option<String>>(0))?;
+            for row in rows {
+                let payload = row?;
+                if let Some(p) = payload
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| extract_file_path(&v))
+                {
+                    *counts.entry(p).or_insert(0) += 1;
+                }
+            }
+            let mut entries: Vec<(String, i64)> = counts.into_iter().collect();
+            entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            top_files = entries
+                .into_iter()
+                .take(5)
+                .map(|(p, _)| digest_truncate(&p, 120).unwrap_or(p))
+                .collect();
+        }
+        if top_files.is_empty() && files_read > 0 && files_read < 2000 {
+            // 无改动文件时退化为读取最频繁的文件
+            let mut counts: std::collections::HashMap<String, i64> =
+                std::collections::HashMap::new();
+            let mut stmt = conn.prepare(
+                "SELECT payload_json FROM events
+                 WHERE conversation_id = ?1 AND event_type = 'file_read'",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| r.get::<_, Option<String>>(0))?;
+            for row in rows {
+                let payload = row?;
+                if let Some(p) = payload
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| extract_file_path(&v))
+                {
+                    *counts.entry(p).or_insert(0) += 1;
+                }
+            }
+            let mut entries: Vec<(String, i64)> = counts.into_iter().collect();
+            entries.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            top_files = entries
+                .into_iter()
+                .take(5)
+                .map(|(p, _)| digest_truncate(&p, 120).unwrap_or(p))
+                .collect();
+        }
+
+        // 请求次数与上下文占用：复用 conversation_context_usage（先释放本锁防重入）
+        drop(conn);
+        let (requests, context_total, context_window) = self
+            .conversation_context_usage(conversation_id)?
+            .map_or((0, 0, 0), |s| {
+                (s.turn_count, s.total_tokens, s.window_tokens)
+            });
+
+        Ok(Some(ConversationDigest {
+            title,
+            provider: provider_str,
+            model,
+            started_at_ms: started_ms,
+            updated_at_ms: updated_ms,
+            user_messages,
+            assistant_messages,
+            system_messages,
+            requests,
+            context_total_tokens: context_total,
+            context_window_tokens: context_window,
+            topic_opening,
+            topic_latest,
+            closing_reply,
+            commands_run,
+            files_read,
+            files_created,
+            files_updated,
+            errors,
+            top_files,
+            recent_errors,
+            milestones,
+            thinking_events,
+            system_block_events,
+        }))
+    }
+
+    /// 单会话上下文窗口用量聚合（详情页「上下文窗口」面板）。
+    ///
+    /// 总量：优先后末条 usage 记录的 prompt 侧（input+cache_read+cache_write，
+    /// 即最后请求时的完整上下文）；无记录（ops 未采集/来源无用量）退化为
+    /// 全文本估算。分类为可观测部分的 token 估算，实测总量与估算的差值计入
+    /// `system_other`（系统提示/工具定义等来源侧才知道的部分）。
+    #[allow(clippy::too_many_lines)] // 用量聚合：usage 采集+分类估算+口径合并一体
+    pub fn conversation_context_usage(
+        &self,
+        conversation_id: &str,
+    ) -> StorageResult<Option<ContextUsageSummary>> {
+        let conn = self.conn.lock().expect("mutex poisoned");
+        let (provider_id, source_id, model): (String, String, Option<String>) = match conn
+            .query_row(
+                "SELECT c.provider_id, c.source_conversation_id, c.model
+                 FROM conversations c WHERE c.id = ?1",
+                [conversation_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            ) {
+            Ok(v) => v,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        };
+
+        // 末条 usage 记录（最后 turn 的完整 prompt 侧；顺带取来源侧真实模型名，
+        // 会话列 model 为空时——如 ZCode——回退用它）
+        let last: Option<(i64, i64, i64, Option<String>)> = conn
+            .query_row(
+                "SELECT input_tokens, cache_read_tokens, cache_write_tokens, model
+                 FROM usage_records WHERE provider_id = ?1 AND source_session_id = ?2
+                 ORDER BY ts DESC LIMIT 1",
+                params![provider_id, source_id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .optional()?;
+        let measured_total = last.as_ref().map(|(i, cr, cw, _)| i + cr + cw);
+        let model = model.or_else(|| last.as_ref().and_then(|(_, _, _, m)| m.clone()));
+
+        // 全 turn 汇总明细：请求数 / 缓存绝对量 / 输出与推理 token / 末次时间
+        let (turn_count, fresh_tokens, cache_read_tokens, cache_write_tokens, output_tokens, reasoning_tokens, last_turn_at_ms): (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<i64>,
+        ) = conn
+            .query_row(
+                "SELECT COUNT(*), COALESCE(SUM(input_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),
+                        COALESCE(SUM(cache_write_tokens), 0), COALESCE(SUM(output_tokens), 0),
+                        COALESCE(SUM(reasoning_tokens), 0), MAX(ts)
+                 FROM usage_records WHERE provider_id = ?1 AND source_session_id = ?2",
+                params![provider_id, source_id],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .optional()?
+            .unwrap_or((0, 0, 0, 0, 0, 0, None));
+
+        // 平均缓存命中率（全 turn 汇总）
+        let prompt_sum = fresh_tokens + cache_read_tokens + cache_write_tokens;
+        let cache_hit_rate = (prompt_sum > 0).then(|| cache_read_tokens as f64 / prompt_sum as f64);
+
+        // 每 turn 上下文规模轨迹（升序，最多最近 40 点）→ 前端 sparkline
+        let trend: Vec<i64> = if turn_count > 0 {
+            let mut stmt = conn.prepare(
+                "SELECT input_tokens + cache_read_tokens + cache_write_tokens
+                 FROM usage_records WHERE provider_id = ?1 AND source_session_id = ?2
+                 ORDER BY ts DESC LIMIT 40",
+            )?;
+            let mut v: Vec<i64> = stmt
+                .query_map(params![provider_id, source_id], |r| r.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            v.reverse();
+            v
+        } else {
+            Vec::new()
+        };
+
+        // 分类估算：消息正文（按行精确数）+ 事件 payload（thinking/系统块单列，
+        // 其余并入工具调用与输出）。payload 总量超 8M 字符的超大会话退化为
+        // chars×1/3 粗估（payload 以英文/JSON 为主），避免详情页逐行拉全量。
+        let mut msg_tokens = 0i64;
+        {
+            let mut stmt =
+                conn.prepare("SELECT content_text FROM messages WHERE conversation_id = ?1")?;
+            let rows = stmt.query_map([conversation_id], |r| r.get::<_, Option<String>>(0))?;
+            for row in rows {
+                if let Some(t) = row? {
+                    msg_tokens += estimate_tokens(&t) + 4; // 每条消息角色/结构开销
+                }
+            }
+        }
+        let payload_chars: i64 = conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(payload_json)), 0) FROM events WHERE conversation_id = ?1",
+            [conversation_id],
+            |r| r.get(0),
+        )?;
+        let (mut tool_tokens, mut thinking_tokens, mut sysblock_tokens) = (0i64, 0i64, 0i64);
+        if payload_chars < 8_000_000 {
+            let mut stmt = conn.prepare(
+                "SELECT event_type, payload_json FROM events WHERE conversation_id = ?1",
+            )?;
+            let rows = stmt.query_map([conversation_id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            })?;
+            for row in rows {
+                let (etype, payload) = row?;
+                let t = estimate_tokens(payload.as_deref().unwrap_or(""));
+                match etype.as_str() {
+                    "thinking" => thinking_tokens += t,
+                    "system_block" => sysblock_tokens += t,
+                    _ => tool_tokens += t + 8,
+                }
+            }
+        } else {
+            tool_tokens = payload_chars / 3;
+        }
+
+        let mut categories = vec![
+            ContextUsageCategory {
+                key: "messages",
+                tokens: msg_tokens,
+            },
+            ContextUsageCategory {
+                key: "tool_outputs",
+                tokens: tool_tokens,
+            },
+            ContextUsageCategory {
+                key: "thinking",
+                tokens: thinking_tokens,
+            },
+            ContextUsageCategory {
+                key: "system_blocks",
+                tokens: sysblock_tokens,
+            },
+        ];
+        let estimated_sum: i64 = categories.iter().map(|c| c.tokens).sum();
+        let total = measured_total.unwrap_or(estimated_sum);
+        if measured_total.is_some() {
+            if estimated_sum > total {
+                // 估算反超实测（来源计数口径差异）：等比压缩可观测分类到 95%
+                let scale = (total as f64 * 0.95) / estimated_sum as f64;
+                for c in &mut categories {
+                    c.tokens = (c.tokens as f64 * scale) as i64;
+                }
+            }
+            let visible: i64 = categories.iter().map(|c| c.tokens).sum();
+            categories.push(ContextUsageCategory {
+                key: "system_other",
+                tokens: (total - visible).max(0),
+            });
+        }
+
+        Ok(Some(ContextUsageSummary {
+            total_tokens: total,
+            measured: measured_total.is_some(),
+            window_tokens: context_window_tokens(model.as_deref(), &provider_id),
+            model,
+            cache_hit_rate,
+            categories,
+            turn_count,
+            fresh_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            output_tokens,
+            reasoning_tokens,
+            last_turn_at_ms,
+            trend,
+        }))
+    }
+
     /// 批量写入用量记录（事务 + 幂等：UNIQUE 键冲突跳过）。
     pub fn upsert_usage_batch(&self, records: &[ch_domain::UsageRecord]) -> StorageResult<usize> {
         let mut conn = self.conn.lock().expect("mutex poisoned");

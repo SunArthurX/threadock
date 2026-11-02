@@ -1,5 +1,46 @@
 # Changelog
 
+## [Unreleased]
+
+全保真上下文（Full-fidelity context）：对话的思考过程、系统注入与完整工具输出不再被截断或丢弃，历史会话自动回填，详情页新增上下文查看插件。
+
+### Added
+- **thinking 全量保留**：四源思考过程转为 `thinking` 事件落库（不进全文索引，
+  不污染搜索）——Claude Code（content thinking 块）、ZCode（`reasoning`
+  part，实测 3.4 万条）、MiniMax Code（`thinking_content`）、DeepSeek
+  Harness（reasoning 块）；Codex 的 reasoning 为服务端加密内容，无法还原，
+  跳过
+- **系统注入块成事件**：`system_block` 事件类型承接三类此前被丢/被污染的
+  上下文——ZCode `<system-reminder>`（此前静默丢弃）、Claude Code 纯注入
+  user 消息（此前误入消息流污染「仅用户消息」筛选）、Claude 钩子附件
+  （SessionStart hook 每会话重复注入同一段 boilerplate，实测 2.1 万条
+  114.7 MB，去重为轻量标记事件，内容不落库）；ZCode `compaction` 标记
+  （上下文压缩位置）一并保留
+- **放开 4096 输出截断**：ZCode / MiniMax / DeepSeek Harness 工具输出、
+  Codex 输出合并全量入库（Claude Code 此前已全量）；实测五源有价值增量
+  ~173 MB（截断尾巴 72 + thinking 98 + 系统块 3）
+- **Codex `.jsonl.zst` 压缩会话补发现**：旧会话压缩文件（实测一机 96 个
+  13 GB）此前完全不在导入范围；zstd 流式解压（自动跨多帧），配合超长
+  base64 连续串剥离（压缩历史 99.9% 是图片 base64）与 Claude 事件 payload
+  图片剥离（只留媒体类型引用），防体积黑洞
+- **存量自动回填**：升级后首次启动按 `app_settings.full_fidelity_backfill`
+  标记一次性 replace 重导全部变更源会话（Cursor 无变化跳过），进度走
+  sync_progress 顶部进度条，完成后整库重建 tantivy 索引（FTS 由触发器
+  联动）；中途退出下次启动续跑
+- **上下文查看插件（ContextView）**：详情页 thinking / 系统注入默认折叠
+  （摘要行 + 字数 + 耗时），点击展开等宽正文 + 一键复制；工具事件详情
+  新增结构化视图（命令 / 完整输出 / 入参，替代裸 JSON）；超 8KB 的
+  payload 展开时按事件懒加载全文（新 RPC `event_payload_full`，后端
+  `Repository::get_event_payload`）
+- 事件序号稳定策略：上下文事件一律追加在事件列表末尾（序号按位置分配，
+  展示按时间排序），保证增量重导 upsert 命中旧行；handoff 时间线过滤
+  thinking/系统块，避免淹没真正的工具事件
+
+### Changed
+- `import_conversation_batch` 新增 `replace_content` 参数（全保真重导：
+  事务内先清空该会话旧消息/事件再写入，解析形态变化导致序号移动时不残留
+  旧行）；`import_raw_inner` 透传
+
 ## [1.6.1] - 2026-10-23
 
 v1.6.0 发布当日补丁：供应链修复与稳定性（不涉及交接功能行为变化）。

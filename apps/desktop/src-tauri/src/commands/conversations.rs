@@ -207,6 +207,43 @@ pub(crate) async fn list_events(
     Ok(events.into_iter().map(event_dto).collect())
 }
 
+/// 读取单条事件的完整 payload JSON 字符串（不截断）。
+/// 详情列表的 payload 经 DTO 8KB 截断；上下文插件展开长输出/思考时懒加载全文。
+#[tauri::command]
+pub(crate) async fn event_payload_full(
+    state: tauri::State<'_, DaemonState>,
+    event_id: String,
+) -> Result<Option<String>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.get_event_payload(&event_id)
+        .map_err(|e| storage_err(e))
+}
+
+/// 单会话上下文窗口用量（详情页「上下文窗口」面板）。
+/// 总量优先后末条 usage 记录（input+cache_read+cache_write），无记录退化为
+/// 文本估算（measured=false）；分类为可观测部分的 token 估算。
+#[tauri::command]
+pub(crate) async fn conversation_context_usage(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<Option<ch_storage::repository::ContextUsageSummary>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.conversation_context_usage(&conversation_id)
+        .map_err(|e| storage_err(e))
+}
+
+/// 单会话结构化摘要（详情页「会话摘要」面板）。
+/// 从已入库上下文确定性解析：诉求/动作/文件/里程碑/错误/结尾/规模，离线可用。
+#[tauri::command]
+pub(crate) async fn conversation_digest(
+    state: tauri::State<'_, DaemonState>,
+    conversation_id: String,
+) -> Result<Option<ch_storage::repository::ConversationDigest>, String> {
+    let repo = state.read_repo.lock().map_err(|e| storage_err(e))?;
+    repo.conversation_digest(&conversation_id)
+        .map_err(|e| storage_err(e))
+}
+
 /// 获取会话完整详情（消息 + 事件 + 完整度，plan §6.4）。
 #[tauri::command]
 #[tracing::instrument(skip_all, level = "debug")]

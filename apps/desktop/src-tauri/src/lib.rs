@@ -9,7 +9,7 @@ mod commands;
 use commands::*;
 
 use ch_daemon::{DaemonState, DaemonStateConfig};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 // ── Tauri commands ──────────────────────────────────────────────────────
 
@@ -186,6 +186,63 @@ pub fn run() {
                     }
                 });
             }
+            // 全保真上下文回填：适配器升级（thinking/系统块事件化 + 放开 4096
+            // 输出截断 + Claude 钩子附件去重 + Codex .jsonl.zst 补发现）后，
+            // 一次性 replace 重导全部变更源会话，把历史对话被截断/被丢弃的
+            // 上下文补齐。进度走 sync_progress 事件（顶部进度条）；完成后整库
+            // 重建 tantivy 索引（replace 删除旧消息行 → 旧文档失效）。
+            // app_settings 标记在全部完成后才写，中途退出下次启动续跑。
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let state = handle.state::<DaemonState>();
+                    let done =
+                        state.read_repo.lock().ok().and_then(|repo| {
+                            repo.get_setting("full_fidelity_backfill").ok().flatten()
+                        });
+                    if done.is_none() {
+                        tracing::info!(
+                            "全保真上下文回填：全源重导中（thinking/完整输出/系统块）……"
+                        );
+                        let emit_handle = handle.clone();
+                        let result = full_fidelity_backfill(&state, |done, total, detail| {
+                            let _ = emit_handle.emit(
+                                "sync_progress",
+                                serde_json::json!({
+                                    "current": done,
+                                    "total": total,
+                                    "detail": format!("补全上下文 {detail}"),
+                                    "finished": false,
+                                }),
+                            );
+                        });
+                        match result {
+                            Ok((ok, failed)) => {
+                                tracing::info!("全保真回填完成：重导 {ok} 个会话（失败 {failed}）");
+                                match rebuild_index_inner(&state, &mut |_| {}) {
+                                    Ok(n) => tracing::info!("全保真回填：索引重建 {n} 条消息"),
+                                    Err(e) => tracing::warn!(
+                                        "全保真回填索引重建失败（设置→存储→重建索引 可重试）：{e}"
+                                    ),
+                                }
+                                if let Ok(repo) = state.repo.lock() {
+                                    let _ = repo.set_setting("full_fidelity_backfill", "1");
+                                }
+                                let _ = handle.emit(
+                                    "sync_progress",
+                                    serde_json::json!({
+                                        "current": 1,
+                                        "total": 1,
+                                        "detail": "done",
+                                        "finished": true,
+                                    }),
+                                );
+                            }
+                            Err(e) => tracing::warn!("全保真回填失败（下次启动重试）：{e}"),
+                        }
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -196,6 +253,9 @@ pub fn run() {
             list_child_conversations,
             list_messages,
             list_events,
+            event_payload_full,
+            conversation_context_usage,
+            conversation_digest,
             get_conversation_detail,
             terminal_spawn,
             terminal_write,

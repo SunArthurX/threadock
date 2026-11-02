@@ -406,7 +406,7 @@ mod tests {
             let conv = ch_domain::Conversation::new(ch_domain::Provider::Generic, "src-gc");
             let mut c = conv;
             c.raw_payload_id = Some(referenced.hash.clone());
-            repo.import_conversation_batch(&c, &[], &[], None, None)
+            repo.import_conversation_batch(&c, &[], &[], None, None, false)
                 .expect("SQL execution failed");
         }
 
@@ -650,12 +650,12 @@ mod reset_range_tests {
         let mut c1 = Conversation::new(Provider::Generic, "src-old");
         c1.started_at = Some(ms_to_ts(old_conv_ms));
         c1.updated_at = Some(ms_to_ts(old_conv_ms));
-        repo.import_conversation_batch(&c1, &[], &[], None, Some(old_conv_ms))
+        repo.import_conversation_batch(&c1, &[], &[], None, Some(old_conv_ms), false)
             .expect("import c1");
         let mut c2 = Conversation::new(Provider::Generic, "src-new");
         c2.started_at = Some(ms_to_ts(new_conv_ms));
         c2.updated_at = Some(ms_to_ts(new_conv_ms));
-        repo.import_conversation_batch(&c2, &[], &[], None, Some(new_conv_ms))
+        repo.import_conversation_batch(&c2, &[], &[], None, Some(new_conv_ms), false)
             .expect("import c2");
 
         let u = UsageRecord {
@@ -726,7 +726,7 @@ mod reset_range_tests {
         let mut c = Conversation::new(Provider::Generic, "src-clear-me");
         c.started_at = Some(recent_ts);
         c.updated_at = Some(recent_ts);
-        repo.import_conversation_batch(&c, &[], &[], None, Some(recent_ms))
+        repo.import_conversation_batch(&c, &[], &[], None, Some(recent_ms), false)
             .expect("import");
         // 写 import_state（模拟上次同步留下的记录）
         let prov_id = Provider::Generic.as_str();

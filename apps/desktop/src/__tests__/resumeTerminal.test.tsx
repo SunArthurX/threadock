@@ -1,4 +1,6 @@
 // 「⏯ 恢复会话」按钮：点击直接在系统终端执行恢复命令；失败回退复制；右键复制命令文本。
+// mock 按命令名分派（ConversationDetail 挂载即发 conversation_context_usage 等请求，
+// 与调用顺序耦合的 Once 队列会互相吃位，故与次数/顺序解耦）。
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import ConversationDetail from "../ConversationDetail";
@@ -25,52 +27,68 @@ const base = {
   onAddTag: vi.fn(), onRemoveTag: vi.fn(), onRescanAudit: vi.fn(),
 };
 
+/** 每个用例自定命令处理器；未命中的命令一律 resolve null。 */
+let handlers: Record<string, (args: unknown) => unknown> = {};
+
 describe("恢复会话按钮", () => {
   beforeEach(() => {
+    handlers = {};
     vi.mocked(invoke).mockReset();
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: unknown) => {
+      const h = handlers[cmd as string];
+      return h ? h(args) : null;
+    });
     vi.mocked(copyToClipboard).mockClear();
   });
 
+  const callsOf = (cmd: string) =>
+    vi.mocked(invoke).mock.calls.filter(([c]) => c === cmd);
+
   it("点击 → 调 resume_in_terminal（直接开终端，不再只复制）", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("claude --resume sess-abc");
+    handlers["resume_in_terminal"] = () => "claude --resume sess-abc";
     render(<ConversationDetail {...base} />);
     fireEvent.click(screen.getByText("⏯ 恢复会话"));
     await vi.waitFor(() =>
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("resume_in_terminal", { conversationId: "c1" }),
+      expect(callsOf("resume_in_terminal")[0]).toEqual([
+        "resume_in_terminal",
+        { conversationId: "c1" },
+      ]),
     );
     expect(copyToClipboard).not.toHaveBeenCalled();
   });
 
   it("终端打开失败 → 回退复制命令文本", async () => {
-    vi.mocked(invoke)
-      .mockRejectedValueOnce("Terminal 打开失败：xxx") // resume_in_terminal 失败
-      .mockResolvedValueOnce("claude --resume sess-abc"); // 回退的 resume_command
+    handlers["resume_in_terminal"] = () => {
+      throw new Error("Terminal 打开失败：xxx");
+    };
+    handlers["resume_command"] = () => "claude --resume sess-abc";
     render(<ConversationDetail {...base} />);
     fireEvent.click(screen.getByText("⏯ 恢复会话"));
-    await vi.waitFor(() => expect(copyToClipboard).toHaveBeenCalledWith("claude --resume sess-abc"));
+    await vi.waitFor(() =>
+      expect(copyToClipboard).toHaveBeenCalledWith("claude --resume sess-abc"),
+    );
   });
 
   it("来源不支持（null）→ 提示且不动终端/剪贴板", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce(null);
     const { container } = render(
       <ConversationDetail {...base} conv={{ ...conv, provider: "zcode" }} />,
     );
     fireEvent.click(screen.getByText("⏯ 恢复会话"));
-    await vi.waitFor(() => expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(callsOf("resume_in_terminal").length).toBe(1));
     expect(copyToClipboard).not.toHaveBeenCalled();
     expect(container).toBeTruthy();
   });
 
   it("右键 → 复制命令文本（不开终端）", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce("codex resume s2");
+    handlers["resume_command"] = () => "codex resume s2";
     render(
       <ConversationDetail {...base} conv={{ ...conv, provider: "codex", source_conversation_id: "s2" }} />,
     );
     fireEvent.contextMenu(screen.getByText("⏯ 恢复会话"));
     await vi.waitFor(() => {
-      expect(vi.mocked(invoke)).toHaveBeenCalledWith("resume_command", { conversationId: "c1" });
+      expect(callsOf("resume_command")[0]).toEqual(["resume_command", { conversationId: "c1" }]);
       expect(copyToClipboard).toHaveBeenCalledWith("codex resume s2");
     });
-    expect(vi.mocked(invoke).mock.calls.some(([c]) => c === "resume_in_terminal")).toBe(false);
+    expect(callsOf("resume_in_terminal").length).toBe(0);
   });
 });

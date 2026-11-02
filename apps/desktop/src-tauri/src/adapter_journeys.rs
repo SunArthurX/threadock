@@ -6,6 +6,7 @@
 #![cfg(test)]
 
 use ch_daemon::{DaemonState, DaemonStateConfig};
+use ch_domain::EventType;
 
 /// 合成一个新 schema 的 Codex 会话文件（JS 工具桥 + 输出 + wait 噪音）。
 fn make_codex_session(dir: &std::path::Path) -> std::path::PathBuf {
@@ -147,7 +148,21 @@ fn journey_deepseek_harness_import_to_detail() {
         Some("源侧重命名"),
         "最后的 title 事件（含手动重命名）生效"
     );
-    assert_eq!(raw.events.len(), 2, "bash + 未知工具应各有 1 个事件");
+    // 全保真：助手消息里的 reasoning 块转成 thinking 事件（追加在事件列表
+    // 末尾，保证存量事件序号稳定），故工具事件 2 条 + thinking 1 条 = 3
+    assert_eq!(
+        raw.events.len(),
+        3,
+        "bash + 未知工具各 1 个事件，另加 1 条 thinking 事件"
+    );
+    assert_eq!(
+        raw.events
+            .iter()
+            .filter(|e| e.event_type == EventType::Thinking)
+            .count(),
+        1,
+        "reasoning 块应转成 1 条 thinking 事件"
+    );
 
     // 2. 入库
     let dto = crate::commands::import_raw_to_state(&state, raw, Some("DeepSeek Harness"), None)
@@ -162,7 +177,15 @@ fn journey_deepseek_harness_import_to_detail() {
     .expect("detail");
     assert_eq!(detail.conversation.title.as_deref(), Some("源侧重命名"));
     assert_eq!(detail.conversation.provider, "deepseek-harness");
-    assert_eq!(detail.events.len(), 2);
+    assert_eq!(
+        detail.events.len(),
+        3,
+        "详情事件 = 2 工具事件 + 1 thinking 事件"
+    );
+    assert!(
+        detail.events.iter().any(|e| e.event_type == "thinking"),
+        "thinking 事件应进详情（上下文插件展示用）"
+    );
     let cmd = detail
         .events
         .iter()

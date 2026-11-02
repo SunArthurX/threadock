@@ -126,6 +126,7 @@ pub fn import_markdown(
         &normalized.events,
         None,
         None,
+        false,
     )?;
 
     // 提交同步游标（plan §11.2：写库后提交游标）
@@ -488,7 +489,7 @@ mod tests {
         // 会话 1：问 "如何优化 MySQL 索引"，cost 0.10
         let mut c1 = Conversation::new(Provider::Generic, "src-mysql-1");
         c1.model = Some("gpt-4".into());
-        repo.import_conversation_batch(&c1, &[], &[], None, None)
+        repo.import_conversation_batch(&c1, &[], &[], None, None, false)
             .expect("import c1");
         let conv_id_1 = c1.id.clone();
         let m1 = ch_domain::Message {
@@ -544,7 +545,7 @@ mod tests {
         // 会话 2：问 "MySQL 索引怎么建最合适"
         let mut c2 = Conversation::new(Provider::Generic, "src-mysql-2");
         c2.model = Some("claude-opus".into());
-        repo.import_conversation_batch(&c2, &[], &[], None, None)
+        repo.import_conversation_batch(&c2, &[], &[], None, None, false)
             .expect("import c2");
         let conv_id_2 = c2.id.clone();
         let m2 = ch_domain::Message {
@@ -564,7 +565,7 @@ mod tests {
 
         // 会话 3：无关内容（"煮意大利面"）—— 不应出现在命中
         let c3 = Conversation::new(Provider::Generic, "src-cook");
-        repo.import_conversation_batch(&c3, &[], &[], None, None)
+        repo.import_conversation_batch(&c3, &[], &[], None, None, false)
             .expect("import c3");
         let conv_id_3 = c3.id.clone();
         let m3 = ch_domain::Message {

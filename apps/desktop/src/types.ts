@@ -108,7 +108,61 @@ export interface LlmConfigView {
 /** 知识提取引擎：规则（默认，离线确定性）/ 大模型（需在设置中启用）。 */
 export type KnowledgeEngine = "rule" | "llm";
 
+/** 单会话结构化摘要（conversation_digest 命令，确定性解析上下文）。 */
+export interface ConversationDigest {
+  title: string | null;
+  provider: string;
+  model: string | null;
+  started_at_ms: number | null;
+  updated_at_ms: number | null;
+  user_messages: number;
+  assistant_messages: number;
+  system_messages: number;
+  requests: number;
+  context_total_tokens: number;
+  context_window_tokens: number;
+  topic_opening: string | null;
+  topic_latest: string | null;
+  closing_reply: string | null;
+  commands_run: number;
+  files_read: number;
+  files_created: number;
+  files_updated: number;
+  errors: number;
+  top_files: string[];
+  recent_errors: string[];
+  milestones: string[];
+  thinking_events: number;
+  system_block_events: number;
+}
+
 export const COLLAPSE_THRESHOLD = 600;
+
+/** 单会话上下文窗口用量分类（conversation_context_usage 命令）。 */
+export interface ContextUsageCategory {
+  key: "messages" | "tool_outputs" | "thinking" | "system_blocks" | "system_other";
+  tokens: number;
+}
+
+export interface ContextUsageSummary {
+  /** 上下文占用 token：实测（末条 usage 的 input+cache_read+cache_write）或文本估算。 */
+  total_tokens: number;
+  measured: boolean;
+  window_tokens: number;
+  model: string | null;
+  cache_hit_rate: number | null;
+  categories: ContextUsageCategory[];
+  /** 明细：请求数 / 缓存绝对量 / 输出与推理 token / 末次请求时间。 */
+  turn_count: number;
+  fresh_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  output_tokens: number;
+  reasoning_tokens: number;
+  last_turn_at_ms: number | null;
+  /** 每 turn 上下文规模（升序，最多 40 点），sparkline 数据。 */
+  trend: number[];
+}
 
 export const sourceLabel = (p: string): string => {
   const map: Record<string, string> = {
@@ -125,6 +179,7 @@ export const eventTypeLabel = (et: string): string => {
     file_read: t("读取文件"), file_created: t("新建文件"), file_updated: t("修改文件"), file_deleted: t("删除文件"),
     approval_requested: t("请求审批"), approval_granted: t("批准"), approval_denied: t("拒绝"),
     error: t("错误"), artifact_created: t("产物"),
+    thinking: t("思考过程"), system_block: t("系统注入"),
   };
   return map[et] ?? et;
 };

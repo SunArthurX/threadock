@@ -9,6 +9,9 @@ import ScrollArea from "./ScrollArea";
 import { copyToClipboard } from "./clipboard";
 import MessageBlock from "./MessageBlock";
 import MessageEvents from "./MessageEvents";
+import { isContextEvent } from "./ContextView";
+import ContextWindowPanel from "./ContextWindowPanel";
+import ConversationDigestPanel from "./ConversationDigestPanel";
 import { groupEventsByMessage } from "./eventGrouping";
 import PrivateNoteSection from "./PrivateNoteSection";
 
@@ -185,11 +188,15 @@ export default function ConversationDetail({
 
   // 计算匹配：返回在 messages 中（按 onlyUser 过滤后）的索引列表
   const visibleMsgs = onlyUser ? messages.filter((m) => m.role === "user") : messages;
-  // 时间线合并数组（消息 + 事件，按时间排序，截断 2000）—— 用于时间线模式搜索
+  // 时间线合并数组（消息 + 事件，按时间排序，截断 2000）—— 用于时间线模式搜索。
+  // thinking/系统注入不进时间线：单会话可达数百条，会淹没执行时间线
+  //（与 handoff 时间线同一口径）；消息视图里由 ContextView 插件完整展示。
   const timelineItems = useMemo<Array<{ kind: "msg" | "event"; id: string; ts: number }>>(() => {
     return [
       ...visibleMsgs.map((m) => ({ kind: "msg" as const, id: m.id, ts: m.created_at_ms ?? 0 })),
-      ...events.map((e) => ({ kind: "event" as const, id: e.id, ts: e.created_at_ms ?? 0 })),
+      ...events
+        .filter((e) => !isContextEvent(e.event_type))
+        .map((e) => ({ kind: "event" as const, id: e.id, ts: e.created_at_ms ?? 0 })),
     ].sort((a, b) => a.ts - b.ts).slice(0, 2000);
   }, [visibleMsgs, events]);
   // 匹配描述：消息模式下用 msgId；时间线模式下用 (kind,id) 二元组
@@ -485,6 +492,10 @@ export default function ConversationDetail({
           </div>
         </div>
       )}
+      {/* 会话结构化摘要（诉求/动作/文件/里程碑/错误/结尾） */}
+      <ConversationDigestPanel convId={conv.id} />
+      {/* 上下文窗口用量面板（总量/占比/分类/缓存命中率） */}
+      <ContextWindowPanel convId={conv.id} />
       {/* 私有笔记（不参与搜索/导出/统计；折叠默认开，保存自动） */}
       {onNoteChange && (
         <PrivateNoteSection key={conv.id} note={note ?? ""} onChange={onNoteChange} />

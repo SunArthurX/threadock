@@ -115,6 +115,7 @@ Prefer building yourself? Jump to [Development → Build from source](#build-fro
 | 🧪 **Similar-session recommendations** | Bounded candidate set, useful for rediscovering past context |
 | 🧠 **Saved searches** | Cross-session persistence with one-shot re-execute |
 | ⇄ **Handoff — continue in any agent** | Write archived sessions (dialog + context preamble with the execution timeline) back into Claude Code / Codex / ZCode / MiniMax Code / Cursor native session stores as brand-new resumable sessions; additive-only, dry-run preview, one click for all |
+| 🧠 **Full-fidelity context** | Thinking processes, system injections and complete tool outputs (4096-char truncation removed) preserved as context events — never indexed into full-text search; repeated hook boilerplate deduped to lightweight markers; images kept as references only; Codex `.jsonl.zst` compressed sessions imported; existing history auto-backfilled on first launch after upgrade |
 
 ### CodeAgentOps governance
 
@@ -311,7 +312,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 | | |
 |---|---|
-| **Automated tests** | Rust 608 + TS 431, enforced by [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) |
+| **Automated tests** | Rust 625 + TS 437, enforced by [CI](https://github.com/SunArthurX/threadock/actions/workflows/ci.yml) |
 | **Gate 1** | 100k sessions / 500k messages FTS5 search P95 = **50.9 ms** (target 300 ms) — see [docs/benchmark-report-v1.0.0.md](docs/benchmark-report-v1.0.0.md) |
 | **Workspace merge accuracy** | 11 hand-labeled samples = 100% (zero erroneous auto-merge) |
 | **ESLint** | 0 errors / 0 warnings |

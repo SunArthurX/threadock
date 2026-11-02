@@ -638,6 +638,7 @@ fn handle_sync(
             &normalized.events,
             p.workspace_name.as_deref(),
             None,
+            false,
         )
         .map_err(|e| e.to_string())?;
     let workspace_id = conv.workspace_id.clone();

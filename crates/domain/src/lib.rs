@@ -151,6 +151,10 @@ pub enum EventType {
     StatusChanged,
     Error,
     ArtifactCreated,
+    /// 模型思考过程（thinking/reasoning，来源侧原样保留；不进全文索引）。
+    Thinking,
+    /// 系统注入块（hook 注入 / system-reminder 等 runtime 上下文，非对话正文）。
+    SystemBlock,
 }
 
 impl EventType {
@@ -177,6 +181,8 @@ impl EventType {
             EventType::StatusChanged => "status_changed",
             EventType::Error => "error",
             EventType::ArtifactCreated => "artifact_created",
+            EventType::Thinking => "thinking",
+            EventType::SystemBlock => "system_block",
         }
     }
 }

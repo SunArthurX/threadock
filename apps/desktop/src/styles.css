@@ -5577,3 +5577,124 @@ button {
 .handoff-modal .link-btn { background: none; border: none; padding: 0; cursor: pointer; color: inherit; }
 .handoff-modal .link-btn code { font-size: 11.5px; opacity: .85; }
 .handoff-modal .link-btn:hover code { text-decoration: underline; }
+
+/* ── 全保真上下文插件（ContextView）：thinking / 系统注入 / 完整输出 ──
+   参照主流 LLM 客户端 collapsible thinking 惯例：默认折叠摘要行、
+   独立配色视觉分隔、等宽滚动正文、一键复制。 */
+.ctx-row-wrap { display: flex; flex-direction: column; }
+.ctx-row {
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 4px 8px; border: none; border-radius: 7px; cursor: pointer;
+  background: rgba(128, 128, 128, 0.07); color: inherit; text-align: left;
+  font-size: 12px; line-height: 1.5;
+}
+.ctx-row:hover { background: rgba(128, 128, 128, 0.13); }
+.ctx-row-wrap.open .ctx-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.ctx-thinking { border-left: 2px solid #b88ede; }
+.ctx-block { border-left: 2px solid #d9a441; }
+.ctx-icon { flex: 0 0 auto; }
+.ctx-label { font-weight: 600; flex: 0 0 auto; }
+.ctx-summary { opacity: .75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.ctx-meta { margin-left: auto; opacity: .55; flex: 0 0 auto; font-size: 11.5px; }
+.ctx-detail {
+  position: relative; border: 1px solid rgba(128, 128, 128, 0.18); border-top: none;
+  border-radius: 0 0 7px 7px; padding: 8px 10px; background: rgba(128, 128, 128, 0.05);
+}
+.ctx-body {
+  margin: 0; padding: 6px 8px; border-radius: 6px; overflow: auto; max-height: 280px;
+  font-size: 11.5px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  background: rgba(128, 128, 128, 0.08);
+}
+.ctx-thinking + .ctx-detail .ctx-body { background: rgba(184, 142, 222, 0.08); }
+.ctx-copy-btn {
+  position: absolute; top: 12px; right: 14px; padding: 2px 8px; font-size: 11px;
+  border: 1px solid rgba(128, 128, 128, 0.3); border-radius: 6px; cursor: pointer;
+  background: var(--bg, rgba(30, 30, 30, .85)); color: inherit; opacity: .85;
+}
+.ctx-copy-btn:hover { opacity: 1; border-color: var(--accent); }
+.ctx-truncated-hint { font-size: 11px; opacity: .6; margin-bottom: 5px; }
+.ctx-meta-line { font-size: 11px; opacity: .6; margin-bottom: 5px; }
+.ctx-structured { display: flex; flex-direction: column; gap: 7px; }
+.ctx-cmd-wrap { position: relative; display: flex; flex-direction: column; gap: 3px; }
+.ctx-cmd-label { font-size: 11px; opacity: .6; }
+.ctx-cmd { max-height: 200px; }
+.ctx-input-details > summary { cursor: pointer; font-size: 11px; opacity: .65; }
+.ctx-input-details > summary:hover { opacity: 1; }
+.ctx-input-details[open] > summary { margin-bottom: 4px; }
+
+/* StructuredOutput 位于深色的 .msg-event-detail 面板内（--bg-1 回退 #0d0f15），
+   文字需用亮色，否则浅色主题下继承深色字 → 黑底黑字不可读 */
+.msg-event-detail .ctx-cmd-label { color: rgba(255, 255, 255, 0.55); }
+.msg-event-detail .ctx-body { background: rgba(255, 255, 255, 0.06); color: #d8dee9; }
+.msg-event-detail .ctx-copy-btn { background: rgba(50, 50, 50, 0.92); color: #e8e8e8; }
+.msg-event-detail .ctx-input-details > summary { color: rgba(255, 255, 255, 0.55); }
+
+/* ── 会话上下文窗口面板（ContextWindowPanel）────────────────────────── */
+.ctx-window-panel {
+  margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--border-subtle);
+  border-radius: 8px; background: var(--bg-1, rgba(128, 128, 128, 0.05));
+  display: flex; flex-direction: column; gap: 7px; font-size: 12px;
+}
+.ctx-window-head { display: flex; align-items: center; gap: 8px; }
+.ctx-window-title { font-weight: 600; }
+.ctx-window-est {
+  font-size: 10.5px; padding: 1px 6px; border-radius: 6px;
+  background: rgba(217, 164, 65, 0.15); color: #b8860b;
+}
+.ctx-window-total { margin-left: auto; opacity: 0.85; font-size: 12px; }
+.ctx-window-bar {
+  height: 6px; border-radius: 4px; overflow: hidden;
+  background: rgba(128, 128, 128, 0.18);
+}
+.ctx-window-bar-fill { height: 100%; border-radius: 4px; background: #3b82f6; }
+.ctx-window-cats { display: flex; flex-direction: column; gap: 3px; }
+.ctx-window-row { display: flex; align-items: center; gap: 7px; }
+.ctx-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; }
+.ctx-window-cat { opacity: 0.85; }
+.ctx-window-pct { margin-left: auto; opacity: 0.75; font-size: 11.5px; }
+.ctx-window-cache {
+  display: flex; justify-content: space-between; padding-top: 6px;
+  border-top: 1px solid var(--border-subtle); opacity: 0.8;
+}
+
+/* ── 上下文窗口面板·增强（分段条/数值列/sparkline/明细栅格）──────────── */
+.ctx-window-seg { height: 100%; flex: 0 0 auto; }
+.ctx-window-seg:first-child { border-radius: 4px 0 0 4px; }
+.ctx-window-seg-remain { background: rgba(128, 128, 128, 0.18); border-radius: 0 4px 4px 0; flex: 1 1 auto; }
+.ctx-window-bar { display: flex; }
+.ctx-window-nums { margin-left: auto; opacity: 0.8; font-size: 11.5px; white-space: nowrap; }
+.ctx-window-sep { margin: 0 4px; opacity: 0.45; }
+.ctx-dot-remain { background: rgba(128, 128, 128, 0.35); }
+.ctx-window-trend { display: flex; flex-direction: column; gap: 3px; }
+.ctx-window-trend-head {
+  display: flex; justify-content: space-between; font-size: 11.5px; opacity: 0.8;
+}
+.ctx-trend { width: 100%; height: 26px; display: block; }
+.ctx-window-grid {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11px; opacity: 0.75;
+  padding-top: 6px; border-top: 1px solid var(--border-subtle);
+}
+.ctx-cache-nums { font-size: 10.5px; opacity: 0.85; }
+
+/* ── 会话结构化摘要面板（ConversationDigestPanel）────────────────────── */
+.digest-panel {
+  margin: 10px 0 0; padding: 10px 12px; border: 1px solid var(--border-subtle);
+  border-radius: 8px; background: var(--bg-1, rgba(128, 128, 128, 0.05));
+  display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+}
+.digest-head { display: flex; align-items: center; }
+.digest-title { font-weight: 600; }
+.digest-copy-btn {
+  margin-left: auto; padding: 2px 8px; font-size: 11px; cursor: pointer;
+  border: 1px solid rgba(128, 128, 128, 0.3); border-radius: 6px;
+  background: transparent; color: inherit; opacity: 0.85;
+}
+.digest-copy-btn:hover { opacity: 1; border-color: var(--accent); }
+.digest-meta { opacity: 0.7; font-size: 11.5px; }
+.digest-row { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.digest-label {
+  flex: 0 0 52px; font-weight: 600; opacity: 0.6; font-size: 11.5px;
+}
+.digest-value { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.digest-arrow { opacity: 0.5; }
+.digest-row-err .digest-value { color: #e05252; }

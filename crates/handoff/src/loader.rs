@@ -56,7 +56,17 @@ pub fn load_conversation(
         .map_err(|e| storage_err(&e))?;
     let events = repo
         .list_events(&conversation.id)
-        .map_err(|e| storage_err(&e))?;
+        .map_err(|e| storage_err(&e))?
+        .into_iter()
+        // thinking / 系统注入块是上下文插件用的高保真数据，不是工具动作；
+        // 进交接时间线会淹没真正的命令/文件事件（一次会话可达数千条 thinking）
+        .filter(|e| {
+            !matches!(
+                e.event_type,
+                ch_domain::EventType::Thinking | ch_domain::EventType::SystemBlock
+            )
+        })
+        .collect();
     let workspace = match &conversation.workspace_id {
         Some(ws) => repo.get_workspace(ws).map_err(|e| storage_err(&e))?,
         None => None,
