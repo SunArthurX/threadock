@@ -185,6 +185,12 @@ fn main() {
         ("import_from_claude_code", "sessionId", "ImportResultDto"),
         ("import_from_codex", "sessionId", "ImportResultDto"),
         ("import_from_cursor", "sessionId", "ImportResultDto"),
+        ("live_tasks", "-", "LiveTasksDto"),
+        (
+            "live_transcript",
+            "source, sessionId, limit?",
+            "LiveActivity[]",
+        ),
         ("import_from_deepseek", "sessionId", "ImportResultDto"),
         ("import_from_minimax", "sessionId", "ImportResultDto"),
         ("import_from_zcode", "sessionId", "ImportResultDto"),

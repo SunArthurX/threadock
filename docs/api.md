@@ -556,6 +556,18 @@
 |------|------|
 | sessionId | `ImportResultDto` |
 
+### `live_tasks`
+
+| 参数 | 返回 |
+|------|------|
+| - | `LiveTasksDto` |
+
+### `live_transcript`
+
+| 参数 | 返回 |
+|------|------|
+| source, sessionId, limit? | `LiveActivity[]` |
+
 ### `import_from_deepseek`
 
 | 参数 | 返回 |

@@ -246,6 +246,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            live_tasks,
+            live_transcript,
             list_workspaces,
             list_conversations,
             list_conversations_by_date,

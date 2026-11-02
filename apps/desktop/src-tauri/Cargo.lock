@@ -853,6 +853,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-live-monitor"
+version = "1.6.1"
+dependencies = [
+ "ch-adapter-sdk",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ch-llm"
 version = "1.6.1"
 dependencies = [
@@ -5113,6 +5123,7 @@ dependencies = [
  "ch-handoff",
  "ch-identity-resolver",
  "ch-knowledge",
+ "ch-live-monitor",
  "ch-llm",
  "ch-normalization",
  "ch-ops-metrics",

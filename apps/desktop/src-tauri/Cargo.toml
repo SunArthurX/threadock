@@ -32,6 +32,7 @@ ch-storage = { path = "../../../crates/storage" }
 ch-domain = { path = "../../../crates/domain" }
 ch-search = { path = "../../../crates/search" }
 ch-daemon = { path = "../../../crates/daemon" }
+ch-live-monitor = { path = "../../../crates/live-monitor" }
 ch-raw-store = { path = "../../../crates/raw-store" }
 ch-identity-resolver = { path = "../../../crates/identity-resolver" }
 ch-normalization = { path = "../../../crates/normalization" }
