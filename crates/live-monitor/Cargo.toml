@@ -1,0 +1,18 @@
+[package]
+name = "ch-live-monitor"
+description = "Conversation Hub 实时任务监控：被动只读探测各 coding agent 的活跃会话"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+ch-adapter-sdk = { path = "../adapter-sdk" }
+serde.workspace = true
+serde_json.workspace = true
+# 只读打开来源 SQLite（ZCode / MiniMax）
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
+filetime = "0.2"

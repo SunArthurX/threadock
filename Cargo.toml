@@ -26,6 +26,7 @@ members = [
     "crates/ops-metrics",
     "crates/audit",
     "crates/adapter-jsonl",
+    "crates/live-monitor",
     "crates/cli",
 ]
 
