@@ -116,6 +116,7 @@ Prefer building yourself? Jump to [Development → Build from source](#build-fro
 | 🧠 **Saved searches** | Cross-session persistence with one-shot re-execute |
 | ⇄ **Handoff — continue in any agent** | Write archived sessions (dialog + context preamble with the execution timeline) back into Claude Code / Codex / ZCode / MiniMax Code / Cursor native session stores as brand-new resumable sessions; additive-only, dry-run preview, one click for all |
 | 🧠 **Full-fidelity context** | Thinking processes, system injections and complete tool outputs (4096-char truncation removed) preserved as context events — never indexed into full-text search; repeated hook boilerplate deduped to lightweight markers; images kept as references only; Codex `.jsonl.zst` compressed sessions imported; existing history auto-backfilled on first launch after upgrade |
+| 📡 **Live Tasks — every agent, one window** | Real-time board of running sessions across Claude Code / Codex (Desktop & CLI) / ZCode / MiniMax Code: passive read-only probing of each agent's local store (mtime freshness, native running states, approval events), per-task progress (todos, message count, token estimate, latest activity) and a live-stream drawer (⌘9); one click jumps to the imported conversation |
 
 ### CodeAgentOps governance
 
@@ -134,16 +135,17 @@ A second surface for teams and heavy users: usage, cost, security, automation.
 - **Data lifecycle** — storage dashboard, orphan-blob GC, retention policy, index rebuild
 - **Governance audit trail** — every sensitive action logged
 
-### Desktop GUI (7 views)
+### Desktop GUI (8 views)
 
-`Overview` · `Conversations` (timeline + bulk ops) · `Knowledge` (cross-session + dual engine) ·
+`Overview` · `Conversations` (timeline + bulk ops) · `Live Tasks` (running agents across sources,
+real-time progress) · `Knowledge` (cross-session + dual engine) ·
 `Activity` (GitHub-style heatmap + conversation gantt) · `Projects` · `Ops` (cost · assets ·
 security · automation) · `Settings`.
 
 - Apple-style light / dark themes, 4 font-size presets (macOS *Larger Text*)
 - English / 简体中文 interface (930+ strings, Settings → Appearance → Language)
 - Command palette, onboarding tour, first-launch changelog
-- Per-conversation private notes, sticky ⌘1–⌘8 sidebar, in-app bottom terminal dock (⌘J)
+- Per-conversation private notes, sticky ⌘1–⌘9 sidebar, in-app bottom terminal dock (⌘J)
 - Search history dropdown with per-entry delete, conversation gantt chart, conversation list
   horizontal scroll, in-message native image preview
 - Same-title conversation collapse (batch runs fold into one `×N` row), search left-panel
@@ -219,7 +221,7 @@ touches existing ones.
 - **Core (`DaemonState`)** — the only writer. BLAKE3 content addressing, zstd compression,
   idempotency, completeness scoring, an audit trail. Twenty-five-plus SQLite tables (V16) plus a
   Tantivy index with N-gram Chinese tokenization (or jieba, opt-in).
-- **Frontends** — a Tauri 2 desktop app (React + TS, 101 commands, 7 views), a `ch` CLI, a
+- **Frontends** — a Tauri 2 desktop app (React + TS, 133 commands, 8 views), a `ch` CLI, a
   long-lived JSON-RPC daemon (15 methods), and a documented public API for external clients.
 
 ## Repository layout
@@ -254,7 +256,7 @@ threadock/
 │   ├── daemon/              long-running service (JSON-RPC over stdio)
 │   └── cli/                 `ch` command-line
 ├── apps/desktop/            Tauri 2 desktop (React + TS)
-│   ├── src/                 7 views · 101 commands · 90+ SVG icons
+│   ├── src/                 8 views · 133 commands · 90+ SVG icons
 │   └── src-tauri/           Rust backend
 ├── docs/                    plans, user guide, privacy, API, benchmarks
 ├── fixtures/                anonymized golden fixtures + adapter tests

@@ -109,6 +109,7 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 | 🧠 **保存搜索** | 跨会话持久化,一键复跑 |
 | ⇄ **交接——在任意 Agent 里继续开发** | 把归档会话(对话 + 含执行时间线的上下文前言)按原生格式写回 Claude Code / Codex / ZCode / MiniMax Code / Cursor 的会话库,成为可 resume 的全新会话;纯增量写入、可预演、一键全部 |
 | 🧠 **全保真上下文** | thinking 思考过程、系统注入块、完整工具输出(放开 4096 截断)按事件全量保留——不进全文索引;重复的钩子 boilerplate 去重成轻量标记;图片只存引用;Codex `.jsonl.zst` 压缩历史会话补导入;升级后首次启动自动回填存量历史 |
+| 📡 **实时任务——所有 Agent 一窗尽览** | 一个面板看到正在运行的 Claude Code / Codex(桌面+CLI)/ ZCode / MiniMax Code 会话:被动只读探测各 Agent 本地存储(mtime 新鲜度、源侧运行态、审批事件),每任务实时进度(TODO、消息数、token 估算、最近活动)+ 实时流抽屉(⌘9);一键跳转已导入会话 |
 
 ### CodeAgentOps 治理
 
@@ -127,15 +128,15 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 - **数据生命周期** —— 存储看板、孤儿 blob GC、保留策略、索引重建
 - **治理审计轨迹** —— 敏感操作全记录
 
-### 桌面 GUI(7 视图)
+### 桌面 GUI(8 视图)
 
-`概览` · `会话`(时间线 + 批量操作)· `知识库`(跨会话 + 双引擎)· `活动`(GitHub 风格
+`概览` · `会话`(时间线 + 批量操作)· `实时任务`(跨 Agent 运行中任务与实时进度)· `知识库`(跨会话 + 双引擎)· `活动`(GitHub 风格
 热力图 + 会话甘特图)· `项目` · `治理`(成本 · 资产 · 安全 · 自动化)· `设置`。
 
 - Apple 风格浅色 / 深色主题,4 档字号(macOS *Larger Text*)
 - 中英文双语界面(930+ 条文案,设置 → 外观 → 语言)
 - Command Palette、首次启动引导、启动更新日志
-- 每会话私人笔记、⌘1–⌘8 侧栏快捷键、应用内底部终端 dock(⌘J)
+- 每会话私人笔记、⌘1–⌘9 侧栏快捷键、应用内底部终端 dock(⌘J)
 - 搜索历史下拉(单条删除)、会话甘特图、列表横向滚动、消息内联本机图片预览
 - 同名会话折叠(批量任务折成一行 ×N)、搜索左栏右键菜单(收藏 / 归档 / 置顶 / 加标签 / 删除)
 
@@ -206,7 +207,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
   跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
 - **Core(`DaemonState`)** —— 唯一的写者。BLAKE3 内容寻址、zstd 压缩、幂等去重、完整度
   评分、审计日志。SQLite V16(25+ 表) + Tantivy 索引(N-gram 中文 + 可选 jieba)
-- **Frontends** —— Tauri 2 桌面(React + TS,101 个命令,7 个视图)、`ch` CLI、常驻 JSON-RPC
+- **Frontends** —— Tauri 2 桌面(React + TS,133 个命令,8 个视图)、`ch` CLI、常驻 JSON-RPC
   Daemon(15 个方法)、公开 API 给外部客户端
 
 ## 项目结构
@@ -241,7 +242,7 @@ threadock/
 │   ├── daemon/              常驻服务(JSON-RPC over stdio)
 │   └── cli/                 `ch` 命令行
 ├── apps/desktop/            Tauri 2 桌面(React + TS)
-│   ├── src/                 7 视图 · 101 命令 · 90+ SVG 图标
+│   ├── src/                 8 视图 · 133 命令 · 90+ SVG 图标
 │   └── src-tauri/           Rust 后端
 ├── docs/                    方案、用户指南、隐私、API、基准
 ├── fixtures/                脱敏样本 + Adapter golden tests
@@ -322,7 +323,7 @@ cargo test --release -p ch-benchmarks --test perf large_scale -- --ignored --noc
 
 ## 文档
 
-- [用户指南](docs/user-guide.md) —— 安装、七个视图、同步、搜索、知识、备份
+- [用户指南](docs/user-guide.md) —— 安装、八个视图、同步、搜索、知识、备份
 - [隐私声明](docs/privacy.md) —— 读什么、存什么、**不**做什么
 - [API 参考](docs/api.md) —— 自动生成的 Tauri 命令面 + Daemon JSON-RPC 方法
 - [性能基准报告](docs/benchmark-report-v1.0.0.md) —— Gate 1 大规模结果
