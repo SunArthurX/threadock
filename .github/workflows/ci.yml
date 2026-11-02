@@ -130,6 +130,14 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      # 供应链门禁（与 Rust 侧的 cargo audit 对应）：npm advisory 发版频繁，
+      # 且常出现「上游未发修复版」的情况（minimatch 11 就是靠 overrides 顶的），
+      # 一律拦会逼人绕过门禁。故 high/critical 才拦（退出码非零），
+      # moderate/low 仍由报告完整列出，需要时再单独处理。
+      - name: Supply-chain audit (npm)
+        working-directory: apps/desktop
+        run: npm audit --audit-level=high
+
       - name: TypeScript check
         working-directory: apps/desktop
         run: npx tsc --noEmit
