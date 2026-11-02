@@ -8,10 +8,11 @@ import { formatTime } from "./types";
 import ScrollArea from "./ScrollArea";
 import { Icon, type IconName } from "./Icon";
 
-export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects";
+export type Page = "chat" | "overview" | "cost" | "security" | "assets" | "knowledge" | "activity" | "projects" | "live";
 
 const PAGES = (): { key: Page; icon: IconName; label: string; hint: string }[] => [
   { key: "chat", icon: "chat", label: t("对话"), hint: t("会话列表 / 搜索") },
+  { key: "live", icon: "pulse", label: t("实时"), hint: t("多 Agent 运行中任务") },
   { key: "overview", icon: "overview", label: t("概览"), hint: t("治理总览") },
   { key: "cost", icon: "cost", label: t("成本"), hint: t("成本 / 预算") },
   { key: "security", icon: "shield", label: t("安全"), hint: t("审计 / 风险") },

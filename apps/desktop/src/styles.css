@@ -5698,3 +5698,10 @@ button {
 .digest-value { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .digest-arrow { opacity: 0.5; }
 .digest-row-err .digest-value { color: #e05252; }
+
+/* ── Live Board：运行中状态呼吸灯 ─────────────────────────────── */
+@keyframes live-dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+.live-dot-pulse { animation: live-dot-pulse 1.6s ease-in-out infinite; }

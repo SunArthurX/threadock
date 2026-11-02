@@ -15,7 +15,7 @@ export type IconName =
   | "history" | "clock" | "calendar-plus" | "trend-up" | "trend-down" | "database" | "zap"
   | "flame" | "bookmark" | "package" | "cpu" | "dollar" | "token" | "git" | "wand"
   | "scan" | "bug" | "lightbulb" | "rocket" | "compass" | "globe" | "mic" | "key"
-  | "mailbox" | "empty-state" | "circle-dot" | "panel-left" | "heart" | "paperclip" | "bookmark-filled" | "headphones" | "shield-check" | "shield-alert" | "stopwatch" | "magnet" | "puzzle" | "ban" | "list-tree" | "chevrons-up" | "chevrons-down" | "trending" | "chart";
+  | "mailbox" | "empty-state" | "circle-dot" | "panel-left" | "heart" | "paperclip" | "bookmark-filled" | "headphones" | "shield-check" | "shield-alert" | "stopwatch" | "magnet" | "puzzle" | "ban" | "list-tree" | "chevrons-up" | "chevrons-down" | "trending" | "chart" | "pulse";
 
 export interface IconProps {
   name: IconName;
@@ -29,6 +29,7 @@ export interface IconProps {
 const PATHS: Record<IconName, string> = {
   // ─── Sidebar nav ─────────────────────────────────────
   "chat": '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>',
+  "pulse": '<path d="M3 12h4l2.5-7 5 14 2.5-7H21"/>',
   "overview": '<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>',
   "cost": '<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
   "shield": '<path d="M12 2 4 5v7c0 5 3.5 9 8 10 4.5-1 8-5 8-10V5l-8-3z"/><path d="m9 12 2 2 4-4"/>',

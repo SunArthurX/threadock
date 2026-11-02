@@ -16,6 +16,7 @@ import BudgetBar from "./BudgetBar";
 import KnowledgeModal from "./KnowledgeModal";
 import KnowledgeView from "./KnowledgeView";
 import ActivityView from "./ActivityView";
+import LiveBoard from "./LiveBoard";
 import ProjectsView from "./ProjectsView";
 import ReportModal from "./ReportModal";
 import HandoffModal from "./HandoffModal";
@@ -50,12 +51,13 @@ const NAV_ITEMS = (): readonly NavItem[] => [
   { view: "knowledge", icon: "library",   label: t("知识库"), section: "library", shortcut: "⌘6" },
   { view: "assets",    icon: "package",   label: t("资产"),   section: "library", shortcut: "⌘7" },
   { view: "projects",  icon: "folder",    label: t("项目"),   section: "library", shortcut: "⌘8" },
+  { view: "live",      icon: "pulse",     label: t("实时"),   section: "ops",     shortcut: "⌘9" },
 ] as const;
 
 /** 视图标签（用于 window.title 反映当前页）。 */
 const VIEW_LABEL = (): Record<View, string> => ({
   chat: t("对话"), overview: t("概览"), cost: t("成本"), security: t("安全"), assets: t("资产"),
-  knowledge: t("知识库"), activity: t("活动"), projects: t("项目"),
+  knowledge: t("知识库"), activity: t("活动"), projects: t("项目"), live: t("实时"),
 });
 
 /** 底部状态栏已拆为独立组件 ./StatusBar.tsx（自管 1s 刷新，避免整树重渲染）。 */
@@ -1324,6 +1326,13 @@ export default function App() {
               else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
             }}
           />
+        ) : view === "live" ? (
+          <LiveBoard onJumpToConversation={async (cid) => {
+            setView("chat");
+            const conv = conversations.find((c) => c.id === cid);
+            if (conv) await selectConversation(conv);
+            else showError(t("未找到会话：{__0__}", { __0__: (cid) }));
+          }} />
         ) : view !== "chat" ? (
           <OpsView section={view} onJumpToConversation={jumpFromAudit} onOpenReports={() => setReportsOpen(true)} />
         ) : (
