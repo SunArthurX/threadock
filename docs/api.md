@@ -2,7 +2,7 @@
 
 > Auto-generated. Do not edit.
 
-## Commands
+## Tauri Commands
 
 ### `list_workspaces`
 
@@ -507,4 +507,378 @@
 | 参数 | 返回 |
 |------|------|
 | conversationId | `string?（CLI 来源恢复命令）` |
+
+### `add_tag`
+
+| 参数 | 返回 |
+|------|------|
+| id, tag | `void` |
+
+### `available_providers`
+
+| 参数 | 返回 |
+|------|------|
+|  | `string[]` |
+
+### `budget_get`
+
+| 参数 | 返回 |
+|------|------|
+|  | `BudgetSettings` |
+
+### `budget_set`
+
+| 参数 | 返回 |
+|------|------|
+| settings | `void` |
+
+### `get_conversation_note`
+
+| 参数 | 返回 |
+|------|------|
+| id | `NoteDto?` |
+
+### `import_from_claude_code`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `import_from_codex`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `import_from_cursor`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `import_from_deepseek`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `import_from_minimax`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `import_from_zcode`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
+### `knowledge_get_stored`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `StoredKnowledge?` |
+
+### `knowledge_xref`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId, keywords | `XrefEntry[]` |
+
+### `list_all_tags`
+
+| 参数 | 返回 |
+|------|------|
+| limit? | `TagCountDto[]` |
+
+### `list_claude_code_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_codex_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_cursor_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_deepseek_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_minimax_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_tags`
+
+| 参数 | 返回 |
+|------|------|
+| id | `string[]` |
+
+### `list_zcode_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `llm_config_get`
+
+| 参数 | 返回 |
+|------|------|
+|  | `LlmConfigView` |
+
+### `llm_config_set`
+
+| 参数 | 返回 |
+|------|------|
+| input | `LlmConfigView` |
+
+### `llm_extract_status`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `LlmExtractStatus` |
+
+### `llm_test_connection`
+
+| 参数 | 返回 |
+|------|------|
+|  | `{ok, latency_ms, model}` |
+
+### `ops_cost_recalc`
+
+| 参数 | 返回 |
+|------|------|
+|  | `{models_updated, total_cost_usd}` |
+
+### `ops_pricing_get`
+
+| 参数 | 返回 |
+|------|------|
+|  | `{模型名: {input_per_mtok, output_per_mtok}, ...}` |
+
+### `ops_pricing_set`
+
+| 参数 | 返回 |
+|------|------|
+| pricing | `void` |
+
+### `ops_usage_summary`
+
+| 参数 | 返回 |
+|------|------|
+|  | `UsageSummary` |
+
+### `policy_delete`
+
+| 参数 | 返回 |
+|------|------|
+| name | `void` |
+
+### `policy_list`
+
+| 参数 | 返回 |
+|------|------|
+|  | `PolicyRuleRecord[]` |
+
+### `policy_upsert`
+
+| 参数 | 返回 |
+|------|------|
+| rule | `void` |
+
+### `prompt_reuse_search`
+
+| 参数 | 返回 |
+|------|------|
+| query, limit? | `PromptReuseHit[]` |
+
+### `read_image_file`
+
+| 参数 | 返回 |
+|------|------|
+| path | `ImageData?` |
+
+### `read_text_file`
+
+| 参数 | 返回 |
+|------|------|
+| path | `string` |
+
+### `reset_range_bounds`
+
+| 参数 | 返回 |
+|------|------|
+|  | `{earliest_ms, latest_ms}` |
+
+### `resume_in_terminal`
+
+| 参数 | 返回 |
+|------|------|
+| conversationId | `string?` |
+
+### `search_grouped`
+
+| 参数 | 返回 |
+|------|------|
+| query, role? | `SearchHitGroupDto[]` |
+
+### `search_tree_hits`
+
+| 参数 | 返回 |
+|------|------|
+| query, rootConversationId, role? | `SearchResultDto[]` |
+
+### `set_conversation_note`
+
+| 参数 | 返回 |
+|------|------|
+| id, note? | `number` |
+
+### `set_favorite`
+
+| 参数 | 返回 |
+|------|------|
+| id, favorite | `void` |
+
+### `set_user_title`
+
+| 参数 | 返回 |
+|------|------|
+| id, title? | `void` |
+
+### `terminal_kill`
+
+| 参数 | 返回 |
+|------|------|
+|  | `void` |
+
+### `terminal_resize`
+
+| 参数 | 返回 |
+|------|------|
+| cols, rows | `void` |
+
+### `terminal_spawn`
+
+| 参数 | 返回 |
+|------|------|
+| cols, rows | `void` |
+
+### `terminal_write`
+
+| 参数 | 返回 |
+|------|------|
+| data | `void` |
+
+### `write_clipboard`
+
+| 参数 | 返回 |
+|------|------|
+| text | `void` |
+
+## Daemon JSON-RPC
+
+### `system.getInfo`
+
+| 参数 | 返回 |
+|------|------|
+| - | `{protocol_version, data_dir, conversation_count}` |
+
+### `workspace.list`
+
+| 参数 | 返回 |
+|------|------|
+| - | `Workspace[]` |
+
+### `conversation.list`
+
+| 参数 | 返回 |
+|------|------|
+| workspace_id? | `Conversation[]` |
+
+### `conversation.get`
+
+| 参数 | 返回 |
+|------|------|
+| id | `Conversation` |
+
+### `conversation.handoff`
+
+| 参数 | 返回 |
+|------|------|
+| target, ids?, all?, provider?, dry_run?, include_context?, cwd?, dest? | `{target, dry_run, results}` |
+
+### `message.list`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id | `Message[]` |
+
+### `event.list`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id | `Event[]` |
+
+### `conversation.delete`
+
+| 参数 | 返回 |
+|------|------|
+| id, hard? | `{id, deleted, hard}` |
+
+### `conversation.restore`
+
+| 参数 | 返回 |
+|------|------|
+| id, hard? | `{id, restored}` |
+
+### `conversation.similar`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id, limit? | `Conversation[]` |
+
+### `knowledge.extract`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id | `ExtractionResult` |
+
+### `knowledge.save`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id, result | `{id, saved}` |
+
+### `knowledge.get`
+
+| 参数 | 返回 |
+|------|------|
+| conversation_id | `{id, version, extractor, result}` |
+
+### `search.query`
+
+| 参数 | 返回 |
+|------|------|
+| query, engine? | `SearchResult[]` |
+
+### `provider.sync`
+
+| 参数 | 返回 |
+|------|------|
+| path, workspace_name? | `{conversation_id, workspace_id, messages, events, raw_payload_id}` |
 
