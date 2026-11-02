@@ -3,6 +3,13 @@
 // 生成自全量 t() 调用点扫描（scripts 内 codemod），随界面文案同步维护。
 export const EN: Record<string, string> = {
   "实时": "Live",
+  "只看运行中": "Running only",
+  "只显示运行中 / 等待输入的任务": "Show only running / waiting tasks",
+  "今日 {__0__} 个 · 运行中 {__1__} 个": "{__0__} today · {__1__} running",
+  "今天还没有活跃的 Agent 会话": "No active agent sessions today",
+  "去任何一个 Agent 里开工，这里会实时亮起来；当天已结束的会话也会保留在这里": "Start working in any agent — it lights up here in real time; sessions finished earlier today stay on the board",
+  "当前没有运行中的任务": "No tasks running right now",
+  "今天共 {__0__} 个会话，点右上角「只看运行中」关闭可全部查看": "{__0__} sessions today — toggle off \"Running only\" (top right) to see them all",
   "实时任务": "Live Tasks",
   "多 Agent 运行中任务": "Running tasks across agents",
   "运行中": "Running",

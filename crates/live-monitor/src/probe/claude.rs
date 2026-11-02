@@ -3,22 +3,28 @@
 
 use crate::tail::tail_lines;
 use crate::types::{LiveActivity, LiveProgress, LiveSource, LiveTask};
-use crate::{classify, home_dir, snippet, system_time_ms, BOARD_WINDOW_MS};
+use crate::{classify, home_dir, snippet, system_time_ms, today_start_ms};
 use serde_json::Value;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-/// 扫描（`claude_home` 通常为 `~/.claude`）。
+/// 扫描（`claude_home` 通常为 `~/.claude`）：上板窗口 = 本地今天零点起。
 pub fn scan(now_ms: i64) -> Result<Vec<LiveTask>, String> {
-    scan_home(&home_dir()?.join(".claude"), now_ms)
+    scan_window(&home_dir()?.join(".claude"), now_ms, today_start_ms(now_ms))
 }
 
-/// 指定根目录扫描（测试注入用）。
-pub fn scan_home(claude_home: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
+/// 指定根目录 + 窗口起点扫描（测试注入用；`since_ms` 通常为本地零点）。
+pub fn scan_window(
+    claude_home: &Path,
+    now_ms: i64,
+    since_ms: i64,
+) -> Result<Vec<LiveTask>, String> {
     let projects = claude_home.join("projects");
     if !projects.is_dir() {
         return Ok(vec![]);
     }
-    let cutoff = now_ms - BOARD_WINDOW_MS;
+    let cutoff = since_ms;
     let mut tasks = Vec::new();
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(&projects)
         .map_err(|e| format!("read_dir {}: {e}", projects.display()))?
@@ -53,19 +59,20 @@ pub fn scan_home(claude_home: &Path, now_ms: i64) -> Result<Vec<LiveTask>, Strin
             if session_id.is_empty() {
                 continue;
             }
-            let parsed = parse_tail(&f);
+            let tail = cached_tail_meta(&f, mtime_ms);
             let encoded_dir = dir
                 .file_name()
                 .and_then(|s| s.to_str())
                 .unwrap_or_default()
                 .to_string();
-            let workspace = parsed
+            let workspace = tail
                 .cwd
                 .clone()
                 .or_else(|| decode_project_dir(&encoded_dir));
-            let title = parsed
+            let title = tail
                 .summary
-                .or(parsed.first_user_text)
+                .clone()
+                .or_else(|| tail.first_user_text.clone())
                 .or_else(|| workspace_fallback_label(workspace.as_deref(), &encoded_dir));
             tasks.push(LiveTask {
                 source: LiveSource::ClaudeCode,
@@ -76,8 +83,8 @@ pub fn scan_home(claude_home: &Path, now_ms: i64) -> Result<Vec<LiveTask>, Strin
                 started_at_ms: meta.created().ok().and_then(system_time_ms),
                 last_activity_ms: mtime_ms,
                 state: classify(now_ms, mtime_ms),
-                activity: parsed.activities.last().cloned(),
-                progress: Some(parsed.progress),
+                activity: tail.activity,
+                progress: Some(tail.progress),
             });
         }
     }
@@ -232,6 +239,68 @@ pub fn transcript(path: &Path, limit: usize) -> Vec<LiveActivity> {
     let parsed = parse_tail(path);
     let start = parsed.activities.len().saturating_sub(limit);
     parsed.activities[start..].to_vec()
+}
+
+/// 卡片所需的尾部轻量元数据（不含完整活动列表，控制缓存内存）。
+#[derive(Clone)]
+struct TailMeta {
+    summary: Option<String>,
+    first_user_text: Option<String>,
+    cwd: Option<String>,
+    activity: Option<LiveActivity>,
+    progress: LiveProgress,
+}
+
+/// 尾部解析缓存：(mtime_ms, len) 命中即免重解析——当天窗口让候选文件变多，
+/// 3 秒轮询下只解析「有变化」的文件。
+/// 缓存条目：(mtime_ms, len, 轻量元数据)。
+type TailCacheEntry = (u64, u64, TailMeta);
+type TailCacheMap = HashMap<PathBuf, TailCacheEntry>;
+
+fn tail_cache() -> &'static Mutex<TailCacheMap> {
+    static CACHE: std::sync::OnceLock<Mutex<TailCacheMap>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// 缓存上限；超出后保留 mtime 最新的 512 条。
+const TAIL_CACHE_CAP: usize = 1024;
+
+fn cached_tail_meta(path: &Path, mtime_ms: i64) -> TailMeta {
+    let len = std::fs::metadata(path).map_or(0, |m| m.len());
+    let key = (u64::try_from(mtime_ms.max(0)).unwrap_or(0), len);
+    {
+        let cache = tail_cache().lock().expect("tail cache poisoned");
+        if let Some((m, l, meta)) = cache.get(path) {
+            if *m == key.0 && *l == key.1 {
+                return meta.clone();
+            }
+        }
+    }
+    let parsed = parse_tail(path);
+    let meta = TailMeta {
+        summary: parsed.summary.clone(),
+        first_user_text: parsed.first_user_text,
+        cwd: parsed.cwd,
+        activity: parsed.activities.last().cloned(),
+        progress: parsed.progress.clone(),
+    };
+    if let Ok(mut cache) = tail_cache().lock() {
+        if cache.len() >= TAIL_CACHE_CAP {
+            let mut newest: Vec<(i64, PathBuf)> = cache
+                .iter()
+                .map(|(p, (m, _, _))| (i64::try_from(*m).unwrap_or(0), p.clone()))
+                .collect();
+            newest.sort_unstable_by_key(|&(m, _)| std::cmp::Reverse(m));
+            let keep: std::collections::HashSet<PathBuf> = newest
+                .into_iter()
+                .take(TAIL_CACHE_CAP / 2)
+                .map(|(_, p)| p)
+                .collect();
+            cache.retain(|p, _| keep.contains(p));
+        }
+        cache.insert(path.to_path_buf(), (key.0, key.1, meta.clone()));
+    }
+    meta
 }
 
 fn entry_ts_ms(v: &Value) -> i64 {
@@ -400,7 +469,7 @@ mod tests {
             "s1.jsonl",
             &[U.to_string(), A.to_string(), NOISE.to_string()],
         );
-        let tasks = scan_home(dir.path(), now_ms()).expect("scan");
+        let tasks = scan_window(dir.path(), now_ms(), now_ms() - 30 * 60_000).expect("scan");
         assert_eq!(tasks.len(), 1);
         let t = &tasks[0];
         assert_eq!(t.session_id, "s1");
@@ -432,8 +501,24 @@ mod tests {
             filetime::FileTime::from_unix_time(past / 1000, ((past % 1000) * 1_000_000) as u32),
         )
         .expect("touch");
-        let tasks = scan_home(dir.path(), now_ms()).expect("scan");
+        let tasks = scan_window(dir.path(), now_ms(), now_ms() - 30 * 60_000).expect("scan");
         assert!(tasks.is_empty(), "30 分钟窗口外的会话不应上板");
+    }
+
+    #[test]
+    fn today_window_includes_older_sessions() {
+        // 当天窗口：2 小时前活跃的会话仍上板，状态为 Today
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = now_ms();
+        let p = write_session(dir.path(), "-tmp-proj", "earlier.jsonl", &[U.to_string()]);
+        let past = now - 2 * 60 * 60 * 1000;
+        let ft =
+            filetime::FileTime::from_unix_time(past / 1000, ((past % 1000) * 1_000_000) as u32);
+        filetime::set_file_times(&p, ft, ft).expect("touch");
+        // since = 3 小时前（模拟当天零点）
+        let tasks = scan_window(dir.path(), now, now - 3 * 60 * 60 * 1000).expect("scan");
+        assert_eq!(tasks.len(), 1, "当天较早会话应上板");
+        assert_eq!(tasks[0].state, crate::types::LiveState::Today);
     }
 
     #[test]

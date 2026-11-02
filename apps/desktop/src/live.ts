@@ -2,7 +2,7 @@
 // 后端对应 apps/desktop/src-tauri/src/commands/live.rs（serde camelCase）。
 
 export type LiveSource = "claude-code" | "codex" | "zcode" | "minimax-code";
-export type LiveState = "running" | "waiting" | "idle" | "recent";
+export type LiveState = "running" | "waiting" | "idle" | "recent" | "today";
 
 export interface LiveActivity {
   kind: string; // message / tool / thinking / system / status
@@ -56,12 +56,14 @@ export function liveSourceLabel(source: LiveSource): string {
 }
 
 /** 状态元数据：标签 + 主色 + 浅底色。 */
+/* today：今天零点后有过活动、已超 30 分钟（当天已结束仍可回看） */
 export function liveStateMeta(state: LiveState): { label: string; color: string; bg: string } {
   switch (state) {
     case "running": return { label: t("运行中"), color: "#16a34a", bg: "rgba(34, 197, 94, 0.12)" };
     case "waiting": return { label: t("等待输入"), color: "#d97706", bg: "rgba(245, 158, 11, 0.14)" };
     case "idle": return { label: t("空闲"), color: "#64748b", bg: "rgba(100, 116, 139, 0.12)" };
     case "recent": return { label: t("刚活跃"), color: "#2563eb", bg: "rgba(59, 130, 246, 0.12)" };
+    case "today": return { label: t("今日"), color: "#7c3aed", bg: "rgba(139, 92, 246, 0.12)" };
   }
 }
 

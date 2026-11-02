@@ -14,7 +14,10 @@ pub struct ScanOutcome {
     pub errors: Vec<SourceError>,
 }
 
-/// 扫描全部源。`now_ms` 为 Unix 毫秒（调用方注入时钟，便于测试）。
+/// 扫描全部源（上板窗口 = 本地今天零点起，见 [`crate::today_start_ms`]，
+/// 覆盖「当天已完成」的会话）。
+///
+/// `now_ms` 为 Unix 毫秒（调用方注入时钟，便于测试）。
 #[must_use]
 pub fn scan_all(now_ms: i64) -> ScanOutcome {
     let mut out = ScanOutcome::default();
@@ -108,6 +111,7 @@ fn state_rank(state: LiveState) -> u8 {
         LiveState::Waiting => 1,
         LiveState::Idle => 2,
         LiveState::Recent => 3,
+        LiveState::Today => 4,
     }
 }
 

@@ -51,6 +51,8 @@ pub enum LiveState {
     Idle,
     /// 10min ~ 30min 前有过活动。
     Recent,
+    /// 今天（本地零点后）有过活动、但已超 30 分钟——「当天已结束」仍可回看。
+    Today,
 }
 
 /// 最近一条活动摘要。

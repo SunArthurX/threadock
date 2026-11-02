@@ -251,6 +251,7 @@ function TranscriptDrawer({ task, onClose }: { task: LiveTaskDto; onClose: () =>
 export default function LiveBoard({ onJumpToConversation }: Props) {
   const [dto, setDto] = useState<LiveTasksDto | null>(null);
   const [openTask, setOpenTask] = useState<LiveTaskDto | null>(null);
+  const [runningOnly, setRunningOnly] = useState(false);
   // 展示时钟：跟随每次成功扫描更新（0 = 尚未扫描成功，回退 scannedAtMs）
   const [nowState, setNow] = useState(0);
   const [, forceTick] = useState(0);
@@ -275,11 +276,12 @@ export default function LiveBoard({ onJumpToConversation }: Props) {
   const now = nowState || dto?.scannedAtMs || 0;
 
   // 展示层自守排序：Running 最前，同级按最近活跃降序（后端 scan_all 已排，这里兜底）
-  const stateRank: Record<string, number> = { running: 0, waiting: 1, idle: 2, recent: 3 };
+  const stateRank: Record<string, number> = { running: 0, waiting: 1, idle: 2, recent: 3, today: 4 };
   const tasks = [...(dto?.tasks ?? [])].sort(
     (a, b) => (stateRank[a.state] ?? 9) - (stateRank[b.state] ?? 9) || b.lastActivityMs - a.lastActivityMs,
   );
-  const runningCount = tasks.filter((x) => x.state === "running").length;
+  const runningCount = tasks.filter((x) => x.state === "running" || x.state === "waiting").length;
+  const visible = runningOnly ? tasks.filter((x) => x.state === "running" || x.state === "waiting") : tasks;
 
   return (
     <div style={{ position: "relative", height: "100%", minWidth: 0 }} onClick={() => { if (openTask) setOpenTask(null); }}>
@@ -288,8 +290,21 @@ export default function LiveBoard({ onJumpToConversation }: Props) {
           icon="pulse"
           sub={dto ? t("扫描于 {__0__}", { __0__: new Date(dto.scannedAtMs).toLocaleTimeString() }) : undefined}
           trailing={
-            <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
-              {t("{__0__} 个任务 · {__1__} 个运行中", { __0__: tasks.length, __1__: runningCount })}
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 11.5, color: "var(--text-muted)" }}>
+                {t("今日 {__0__} 个 · 运行中 {__1__} 个", { __0__: tasks.length, __1__: runningCount })}
+              </span>
+              <button
+                className="action-btn"
+                style={{
+                  fontSize: 11, padding: "2px 9px",
+                  ...(runningOnly ? { background: "var(--accent-bg)", borderColor: "var(--accent-border)", color: "var(--accent)" } : {}),
+                }}
+                onClick={(e) => { e.stopPropagation(); setRunningOnly((v) => !v); }}
+                title={t("只显示运行中 / 等待输入的任务")}
+              >
+                {t("只看运行中")}
+              </button>
             </span>
           }
         >
@@ -305,15 +320,18 @@ export default function LiveBoard({ onJumpToConversation }: Props) {
           </div>
         )}
         {!tasks.length ? (
-          <InlineEmpty message={t("近 30 分钟没有活跃的 Agent 会话")}
-            hint={t("去任何一个 Agent 里开工，这里会实时亮起来")} />
+          <InlineEmpty message={t("今天还没有活跃的 Agent 会话")}
+            hint={t("去任何一个 Agent 里开工，这里会实时亮起来；当天已结束的会话也会保留在这里")} />
+        ) : !visible.length ? (
+          <InlineEmpty message={t("当前没有运行中的任务")}
+            hint={t("今天共 {__0__} 个会话，点右上角「只看运行中」关闭可全部查看", { __0__: tasks.length })} />
         ) : (
           <ScrollArea style={{ flex: 1 }}>
             <div style={{
               display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
               gap: 10, paddingBottom: 12,
             }}>
-              {tasks.map((task) => (
+              {visible.map((task) => (
                 <TaskCard
                   key={`${task.source}:${task.sessionId}`}
                   task={task}

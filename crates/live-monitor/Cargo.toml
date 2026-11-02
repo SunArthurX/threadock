@@ -10,6 +10,8 @@ license.workspace = true
 ch-adapter-sdk = { path = "../adapter-sdk" }
 serde.workspace = true
 serde_json.workspace = true
+# 本地时区「今天零点」计算（Today 状态的上板窗口）
+time = { workspace = true, features = ["local-offset"] }
 # 只读打开来源 SQLite（ZCode / MiniMax）
 rusqlite = { version = "0.31", features = ["bundled"] }
 

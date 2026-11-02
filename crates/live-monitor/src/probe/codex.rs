@@ -4,7 +4,7 @@
 
 use crate::tail::tail_lines;
 use crate::types::{LiveActivity, LiveProgress, LiveSource, LiveState, LiveTask};
-use crate::{classify, home_dir, iso_to_ms, snippet, system_time_ms, BOARD_WINDOW_MS};
+use crate::{classify, home_dir, iso_to_ms, snippet, system_time_ms, today_start_ms};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -29,16 +29,16 @@ const INJECTED_TAGS: &[&str] = &[
 ];
 
 pub fn scan(now_ms: i64) -> Result<Vec<LiveTask>, String> {
-    scan_home(&home_dir()?.join(".codex"), now_ms)
+    scan_window(&home_dir()?.join(".codex"), now_ms, today_start_ms(now_ms))
 }
 
-/// 指定根目录扫描（测试注入用）。
-pub fn scan_home(codex_home: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
+/// 指定根目录 + 窗口起点扫描（测试注入用；`since_ms` 通常为本地零点）。
+pub fn scan_window(codex_home: &Path, now_ms: i64, since_ms: i64) -> Result<Vec<LiveTask>, String> {
     let sessions = codex_home.join("sessions");
     if !sessions.is_dir() {
         return Ok(vec![]);
     }
-    let cutoff = now_ms - BOARD_WINDOW_MS;
+    let cutoff = since_ms;
     let mut files = Vec::new();
     collect_rollouts(&sessions, &mut files);
     let mut tasks = Vec::new();
@@ -439,7 +439,7 @@ mod tests {
                 TOKENS.to_string(),
             ],
         );
-        let tasks = scan_home(dir.path(), now_ms()).expect("scan");
+        let tasks = scan_window(dir.path(), now_ms(), now_ms() - 30 * 60_000).expect("scan");
         assert_eq!(tasks.len(), 1);
         let t = &tasks[0];
         assert_eq!(t.source, LiveSource::Codex);
@@ -465,7 +465,7 @@ mod tests {
         let p = write_rollout(dir.path(), "rollout-old.jsonl", &[META.to_string()]);
         let ft = filetime::FileTime::from_unix_time(stale / 1000, 0);
         filetime::set_file_times(&p, ft, ft).expect("touch");
-        let tasks = scan_home(dir.path(), now_ms()).expect("scan");
+        let tasks = scan_window(dir.path(), now_ms(), now_ms() - 30 * 60_000).expect("scan");
         assert!(tasks.is_empty());
     }
 
@@ -477,7 +477,7 @@ mod tests {
             "rollout-2026-11-02T10-00-00-abcde123-4567-8901-2345-6789abcdef01.jsonl",
             &[USER_ITEM.to_string()],
         );
-        let tasks = scan_home(dir.path(), now_ms()).expect("scan");
+        let tasks = scan_window(dir.path(), now_ms(), now_ms() - 30 * 60_000).expect("scan");
         assert_eq!(tasks.len(), 1);
         assert_eq!(
             tasks[0].session_id, "abcde123-4567-8901-2345-6789abcdef01",

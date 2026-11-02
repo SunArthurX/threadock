@@ -3,26 +3,27 @@
 //! 进度取 `local_runtime_token_usage`（每 turn token）与消息行数。
 
 use crate::types::{LiveActivity, LiveProgress, LiveSource, LiveState, LiveTask};
-use crate::{classify, home_dir, snippet, BOARD_WINDOW_MS};
+use crate::{classify, home_dir, snippet, today_start_ms};
 use ch_adapter_sdk::open_readonly;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::path::Path;
 
 pub fn scan(now_ms: i64) -> Result<Vec<LiveTask>, String> {
-    scan_db(
+    scan_window(
         &home_dir()?.join(".minimax/v2/sqlite/runtime-state.sqlite"),
         now_ms,
+        today_start_ms(now_ms),
     )
 }
 
-/// 指定库扫描（测试注入用）。
-pub fn scan_db(db_path: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
+/// 指定库 + 窗口起点扫描（测试注入用；`since_ms` 通常为本地零点）。
+pub fn scan_window(db_path: &Path, now_ms: i64, since_ms: i64) -> Result<Vec<LiveTask>, String> {
     if !db_path.is_file() {
         return Ok(vec![]);
     }
     let conn = open_readonly(db_path).map_err(|e| format!("open minimax db: {e}"))?;
-    let cutoff = now_ms - BOARD_WINDOW_MS;
+    let cutoff = since_ms;
     let mut stmt = conn
         .prepare(
             "SELECT session_id,
@@ -36,7 +37,7 @@ pub fn scan_db(db_path: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
                AND COALESCE(parent_session_id,
                             json_extract(record_json, '$.parentSessionId')) IS NULL
              ORDER BY updated_at_ms DESC
-             LIMIT 30",
+             LIMIT 200",
         )
         .map_err(|e| format!("prepare minimax: {e}"))?;
     let rows = stmt
@@ -290,7 +291,12 @@ mod tests {
             )
             .expect("insert msg");
         }
-        let tasks = scan_db(&dir.path().join("runtime-state.sqlite"), now).expect("scan");
+        let tasks = scan_window(
+            &dir.path().join("runtime-state.sqlite"),
+            now,
+            now - 30 * 60_000,
+        )
+        .expect("scan");
         assert_eq!(tasks.len(), 1);
         let t = &tasks[0];
         assert_eq!(t.state, LiveState::Running, "显式 running 优先");
@@ -324,7 +330,12 @@ mod tests {
             )
             .expect("insert rows");
         }
-        let tasks = scan_db(&dir.path().join("runtime-state.sqlite"), now).expect("scan");
+        let tasks = scan_window(
+            &dir.path().join("runtime-state.sqlite"),
+            now,
+            now - 30 * 60_000,
+        )
+        .expect("scan");
         let act = tasks[0].activity.as_ref().expect("activity");
         assert!(act.snippet.contains("真实回复"), "{:?}", act.snippet);
     }
@@ -357,7 +368,7 @@ mod tests {
     #[test]
     fn missing_db_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let tasks = scan_db(&dir.path().join("nope.sqlite"), 0).expect("scan");
+        let tasks = scan_window(&dir.path().join("nope.sqlite"), 0, 0).expect("scan");
         assert!(tasks.is_empty());
     }
 }

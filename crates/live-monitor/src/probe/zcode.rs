@@ -3,23 +3,27 @@
 //! 兜底 `session.time_updated` 新鲜度；进度取 `todo` 表与消息数。
 
 use crate::types::{LiveActivity, LiveProgress, LiveSource, LiveState, LiveTask};
-use crate::{classify, home_dir, snippet, BOARD_WINDOW_MS};
+use crate::{classify, home_dir, snippet, today_start_ms};
 use ch_adapter_sdk::open_readonly;
 use rusqlite::{params, Connection};
 use serde_json::Value;
 use std::path::Path;
 
 pub fn scan(now_ms: i64) -> Result<Vec<LiveTask>, String> {
-    scan_db(&home_dir()?.join(".zcode/cli/db/db.sqlite"), now_ms)
+    scan_window(
+        &home_dir()?.join(".zcode/cli/db/db.sqlite"),
+        now_ms,
+        today_start_ms(now_ms),
+    )
 }
 
-/// 指定库扫描（测试注入用）。
-pub fn scan_db(db_path: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
+/// 指定库 + 窗口起点扫描（测试注入用；`since_ms` 通常为本地零点）。
+pub fn scan_window(db_path: &Path, now_ms: i64, since_ms: i64) -> Result<Vec<LiveTask>, String> {
     if !db_path.is_file() {
         return Ok(vec![]);
     }
     let conn = open_readonly(db_path).map_err(|e| format!("open zcode db: {e}"))?;
-    let cutoff = now_ms - BOARD_WINDOW_MS;
+    let cutoff = since_ms;
     let mut stmt = conn
         .prepare(
             "SELECT s.id, s.title, s.directory, s.time_created,
@@ -29,7 +33,7 @@ pub fn scan_db(db_path: &Path, now_ms: i64) -> Result<Vec<LiveTask>, String> {
              FROM session s
              WHERE (s.parent_id IS NULL OR s.parent_id = '') AND s.time_updated > ?1
              ORDER BY eff_updated DESC
-             LIMIT 30",
+             LIMIT 200",
         )
         .map_err(|e| format!("prepare zcode: {e}"))?;
     let rows = stmt
@@ -145,7 +149,7 @@ pub fn transcript(db_path: &Path, session_id: &str, limit: usize) -> Vec<LiveAct
         "SELECT m.id, m.time_created, m.data FROM message m
          WHERE m.session_id IN (SELECT id FROM session WHERE id = ?1 OR parent_id = ?1)
          ORDER BY m.time_created DESC, m.id DESC
-         LIMIT 30",
+         LIMIT 200",
     ) else {
         return vec![];
     };
@@ -354,7 +358,8 @@ mod tests {
             )
             .expect("insert messages");
         }
-        let tasks = scan_db(&dir.path().join("db.sqlite"), now).expect("scan");
+        let tasks =
+            scan_window(&dir.path().join("db.sqlite"), now, now - 30 * 60_000).expect("scan");
         assert_eq!(tasks.len(), 1);
         let t = &tasks[0];
         assert_eq!(t.state, LiveState::Running, "running turn → Running");
@@ -382,7 +387,8 @@ mod tests {
             )
             .expect("insert");
         }
-        let tasks = scan_db(&dir.path().join("db.sqlite"), now).expect("scan");
+        let tasks =
+            scan_window(&dir.path().join("db.sqlite"), now, now - 30 * 60_000).expect("scan");
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].state, LiveState::Idle);
         assert!(tasks[0].activity.is_none());
@@ -415,9 +421,29 @@ mod tests {
     }
 
     #[test]
+    fn today_window_includes_older_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let now = 1_793_618_000_000i64;
+        {
+            let conn = create_db(dir.path());
+            // 2 小时前更新 → since=3 小时前时应上板为 Today
+            conn.execute(
+                "INSERT INTO session (id, title, directory, time_created, time_updated)
+                 VALUES ('s3','早上的会话','/tmp/proj3', ?1, ?2)",
+                params![now - 3 * 3_600_000, now - 2 * 3_600_000],
+            )
+            .expect("insert");
+        }
+        let tasks =
+            scan_window(&dir.path().join("db.sqlite"), now, now - 3 * 3_600_000).expect("scan");
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].state, LiveState::Today);
+    }
+
+    #[test]
     fn missing_db_is_empty() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let tasks = scan_db(&dir.path().join("nope.sqlite"), 0).expect("scan");
+        let tasks = scan_window(&dir.path().join("nope.sqlite"), 0, 0).expect("scan");
         assert!(tasks.is_empty());
     }
 }

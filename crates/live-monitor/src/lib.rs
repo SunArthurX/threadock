@@ -8,7 +8,8 @@
 //! - Running：近 [`RUNNING_WINDOW_MS`] 有写入，或源侧显式 running（ZCode turn_usage / MiniMax status）
 //! - Waiting：尾部出现审批类事件（Codex approval）
 //! - Idle / Recent：写入新鲜度递降
-//! - 不猜 Finished——源侧没有能证明「结束」的信号。
+//! - Today：今天零点以后有过活动、但已超过 [`RECENT_WINDOW_MS`]——「当天已结束」的会话仍可回看
+//! - 不猜 Finished——源侧没有能证明「结束」的信号，Today 只表示「今天活跃过、现在没动静」。
 
 pub mod probe;
 pub mod tail;
@@ -21,8 +22,10 @@ pub use types::{LiveActivity, LiveProgress, LiveSource, LiveState, LiveTask, Sou
 pub const RUNNING_WINDOW_MS: i64 = 45_000;
 /// 45 秒 ~ 10 分钟无写入视为 Idle。
 pub const IDLE_WINDOW_MS: i64 = 10 * 60_000;
-/// 30 分钟内有过活动的会话才上板（Live Board 只关心「现在」）。
-pub const BOARD_WINDOW_MS: i64 = 30 * 60_000;
+/// 10 分钟 ~ 30 分钟无写入视为 Recent。
+pub const RECENT_WINDOW_MS: i64 = 30 * 60_000;
+/// 超过 30 分钟但仍在今天的会话归为 Today（上板窗口 = 当天零点起，见 [`today_start_ms`]）。
+pub const BOARD_WINDOW_MS: i64 = RECENT_WINDOW_MS;
 
 /// 按写入新鲜度分级（源侧无显式状态字段时的兜底判定）。
 #[must_use]
@@ -32,9 +35,27 @@ pub fn classify(now_ms: i64, last_activity_ms: i64) -> LiveState {
         LiveState::Running
     } else if dt <= IDLE_WINDOW_MS {
         LiveState::Idle
-    } else {
+    } else if dt <= RECENT_WINDOW_MS {
         LiveState::Recent
+    } else {
+        LiveState::Today
     }
+}
+
+/// 本地时区「今天零点」的 Unix 毫秒；取不到本地时区时回退 24 小时前。
+#[must_use]
+pub fn today_start_ms(now_ms: i64) -> i64 {
+    let fallback = now_ms - 24 * 60 * 60_000;
+    let secs = now_ms.div_euclid(1000);
+    let Ok(dt) = time::OffsetDateTime::from_unix_timestamp(secs) else {
+        return fallback;
+    };
+    let Ok(offset) = time::UtcOffset::current_local_offset() else {
+        return fallback;
+    };
+    let local = dt.to_offset(offset);
+    let midnight = local.replace_time(time::Time::MIDNIGHT);
+    midnight.unix_timestamp() * 1000
 }
 
 /// 解析 HOME（约定同其他 adapter：`std::env::var("HOME")`）。
@@ -108,8 +129,31 @@ mod tests {
         assert_eq!(classify(now, now - 45_001), LiveState::Idle, "刚过 45s");
         assert_eq!(classify(now, now - 10 * 60_000), LiveState::Idle);
         assert_eq!(classify(now, now - 10 * 60_000 - 1), LiveState::Recent);
+        assert_eq!(classify(now, now - 30 * 60_000), LiveState::Recent);
+        assert_eq!(
+            classify(now, now - 30 * 60_000 - 1),
+            LiveState::Today,
+            "超 30 分钟但在今天 → Today"
+        );
         // 未来时间戳（时钟偏差）不 panic，按 Running 处理
         assert_eq!(classify(now, now + 100), LiveState::Running);
+    }
+
+    #[test]
+    fn today_start_ms_is_midnight_or_fallback() {
+        let now = 1_793_618_000_000i64; // 2026-11-02T11:13:20Z
+        let start = today_start_ms(now);
+        // 结果必须是 now 的过去（零点或 24h 兜底），且对齐到秒
+        assert!(start < now);
+        assert_eq!(start % 1000, 0);
+        // 本地时区可用时（macOS/Linux 正常环境），零点与 now 的差应在 24h 内
+        if time::UtcOffset::current_local_offset().is_ok() {
+            assert!(
+                now - start <= 24 * 60 * 60_000,
+                "零点差值应 < 24h，got {start}"
+            );
+            assert!(now - start > 0);
+        }
     }
 
     #[test]

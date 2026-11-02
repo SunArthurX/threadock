@@ -71,8 +71,28 @@ describe("LiveBoard", () => {
       errors: [{ source: "codex", message: "boom" }],
     }));
     render(<LiveBoard onJumpToConversation={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText(/近 30 分钟没有活跃的 Agent 会话/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/今天还没有活跃的 Agent 会话/)).toBeTruthy());
     expect(screen.getByText(/Codex: boom/)).toBeTruthy();
+  });
+
+  it("今日会话排在运行中之后 + 只看运行中过滤生效", async () => {
+    invoke.mockResolvedValue(dto([
+      { sessionId: "today-1", title: "早上任务", state: "today", conversationId: "conv-t" },
+      { sessionId: "run-1", title: "运行任务", state: "running", conversationId: "conv-r" },
+    ]));
+    const { rerender } = render(<LiveBoard onJumpToConversation={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("早上任务")).toBeTruthy());
+    // DOM 序：running 在 today 前
+    const cards = Array.from(document.querySelectorAll("[aria-label^='点击查看实时流']")) as HTMLElement[];
+    expect(cards.length).toBe(2);
+    expect(cards[0].textContent).toContain("运行任务");
+    // 「今日」徽标渲染
+    expect(screen.getByText("今日")).toBeTruthy();
+    // 打开只看运行中 → today 卡片隐藏
+    fireEvent.click(screen.getByText("只看运行中"));
+    rerender(<LiveBoard onJumpToConversation={vi.fn()} />);
+    expect(screen.queryByText("早上任务")).toBeNull();
+    expect(screen.getByText("运行任务")).toBeTruthy();
   });
 
   it("点击卡片打开抽屉并轮询 live_transcript", async () => {

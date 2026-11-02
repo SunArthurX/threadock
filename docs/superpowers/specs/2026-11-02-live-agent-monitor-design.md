@@ -56,7 +56,9 @@ apps/desktop/src/LiveBoard.tsx（新页面「实时」，导航 ops 组，⌘9�
 - `Running`：最近活动 ≤ 45s；或 zcode 存在 `running` turn。
 - `Waiting`：尾部出现审批/权限请求（codex approval 事件、claude 控制请求）。
 - `Idle`：45s–10min 无写入（可能等用户输入/长工具）。
-- `Recent`：10min–24h；`Stale`：更久。**不猜 Finished**（无源信号能证明）。
+- `Recent`：10min–30min。
+- `Today`：超 30 分钟但在本地今天零点后——「当天已结束」的会话保留在板上供回看（2026-11-02 追加：原 30 分钟窗口扩为当天窗口 + 前端「只看运行中」开关）。
+- **不猜 Finished**（无源信号能证明），Today 只表示「今天活跃过、现在没动静」。
 - MiniMax 显式 `status` 列优先于启发式。
 
 ## 4. 错误处理
