@@ -410,6 +410,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ch-adapter-sun-harness"
+version = "1.7.0"
+dependencies = [
+ "ch-domain",
+ "ch-normalization",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
+ "time",
+]
+
+[[package]]
 name = "ch-adapter-zcode"
 version = "1.7.0"
 dependencies = [

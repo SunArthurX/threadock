@@ -23,6 +23,7 @@ members = [
     "crates/adapter-minimax",
     "crates/adapter-codex",
     "crates/adapter-deepseek-harness",
+    "crates/adapter-sun-harness",
     "crates/ops-metrics",
     "crates/audit",
     "crates/adapter-jsonl",
