@@ -204,3 +204,75 @@ fn journey_deepseek_harness_import_to_detail() {
         "未知工具应降级为 ToolCallStarted 并保留原始名"
     );
 }
+
+/// 合成一个 Sun Harness 会话文件（标题演进 + bash 输出配对 + systemPrompt 保留）。
+fn make_sun_session(dir: &std::path::Path) -> std::path::PathBuf {
+    let f = dir.join("20261107-01journey.jsonl");
+    let lines = [
+        r#"{"seq":0,"ts":"2026-11-07T06:54:02.180Z","type":"session/meta","id":"20261107-01journey","title":"初始标题","mode":"coding","cwd":"/tmp/proj","model":"qwen/qwen-flash","createdAt":"2026-11-07T06:54:02.180Z"}"#,
+        r#"{"seq":1,"ts":"2026-11-07T06:54:02.239Z","type":"user/message","text":"跑一下测试","source":"user"}"#,
+        r#"{"seq":2,"ts":"2026-11-07T06:54:02.360Z","type":"request/header","model":"qwen/qwen-flash","systemPrompt":"You are sun-harness."}"#,
+        r#"{"seq":3,"ts":"2026-11-07T06:54:03.597Z","type":"assistant/message","text":"","toolCalls":[{"id":"call_j1","name":"bash","arguments":"{\"command\":\"cargo test -p app\"}"}],"usage":{"inputTokens":100,"outputTokens":5},"model":"qwen/qwen-flash"}"#,
+        r#"{"seq":4,"ts":"2026-11-07T06:54:03.600Z","type":"tool/result","callId":"call_j1","name":"bash","output":"test result: ok. 3 passed","isError":false,"durationMs":1200}"#,
+        r#"{"seq":5,"ts":"2026-11-07T06:54:04.000Z","type":"assistant/message","text":"测试全绿。","toolCalls":[],"usage":{"inputTokens":10,"outputTokens":2},"model":"qwen/qwen-flash"}"#,
+        r#"{"seq":6,"ts":"2026-11-07T06:55:00.000Z","type":"session/title","title":"源侧重命名"}"#,
+    ];
+    std::fs::write(&f, lines.join("\n")).expect("file I/O failed");
+    f
+}
+
+/// 旅程：sun 会话 → 入库 → 详情（标题取最后 title 事件、命令配对输出、系统块保留）。
+#[test]
+fn journey_sun_harness_import_to_detail() {
+    let app = tauri::test::mock_app();
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    use tauri::Manager as _;
+    let state = DaemonState::open(DaemonStateConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .expect("open state");
+    app.manage(state);
+    let state = app.state::<DaemonState>();
+
+    // 1. 解析：标题 / 消息 / 事件
+    let session_file = make_sun_session(dir.path());
+    let raw = ch_adapter_sun_harness::parse_session(&session_file).expect("parse sun session");
+    assert_eq!(
+        raw.title.as_deref(),
+        Some("源侧重命名"),
+        "最后的 title 事件生效"
+    );
+    assert_eq!(raw.messages.len(), 2, "user + assistant 正文各 1 条");
+    assert_eq!(raw.events.len(), 2, "bash 1 条 + 末尾 systemPrompt 1 条");
+
+    // 2. 入库
+    let dto = crate::commands::import_raw_to_state(&state, raw, Some("Sun Harness"), None)
+        .expect("import");
+    let conv_id = dto.conversation_id.clone();
+
+    // 3. 详情：标题 / provider / 命令完成 / 系统块全链路可见
+    let detail = tauri::async_runtime::block_on(crate::commands::get_conversation_detail(
+        state.clone(),
+        conv_id.clone(),
+    ))
+    .expect("detail");
+    assert_eq!(detail.conversation.title.as_deref(), Some("源侧重命名"));
+    assert_eq!(detail.conversation.provider, "sun-harness");
+    let cmd = detail
+        .events
+        .iter()
+        .find(|e| e.event_type == "command_completed")
+        .expect("bash 配对后应 Completed");
+    assert!(
+        cmd.payload_json.as_deref().unwrap().contains("3 passed"),
+        "payload 应含配对输出"
+    );
+    assert!(
+        detail
+            .events
+            .iter()
+            .any(|e| e.event_type == "system_block"),
+        "systemPrompt 系统块应进详情（上下文插件展示用）"
+    );
+}
