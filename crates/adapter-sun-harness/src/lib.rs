@@ -440,10 +440,14 @@ pub fn parse_session(file_path: impl AsRef<Path>) -> AdapterResult<RawConversati
                         if let Some(obj) = p.as_object_mut() {
                             // 输出全量保留（全保真导入：不截断）
                             obj.insert("output".into(), serde_json::json!(output));
-                            if let Some(err) = rec.get("isError").and_then(serde_json::Value::as_bool) {
+                            if let Some(err) =
+                                rec.get("isError").and_then(serde_json::Value::as_bool)
+                            {
                                 obj.insert("isError".into(), serde_json::json!(err));
                             }
-                            if let Some(d) = rec.get("durationMs").and_then(serde_json::Value::as_i64) {
+                            if let Some(d) =
+                                rec.get("durationMs").and_then(serde_json::Value::as_i64)
+                            {
                                 obj.insert("durationMs".into(), serde_json::json!(d));
                             }
                         }
@@ -615,7 +619,11 @@ mod tests {
             Some("我的重命名会话"),
             "最后的 title 事件应生效"
         );
-        assert_eq!(raw.model.as_deref(), Some("qwen/qwen-flash"), "meta 模型优先");
+        assert_eq!(
+            raw.model.as_deref(),
+            Some("qwen/qwen-flash"),
+            "meta 模型优先"
+        );
         assert_eq!(raw.source_parent_id, None);
         assert!(raw.started_at.is_some(), "createdAt 应解析为 started_at");
 
@@ -629,7 +637,7 @@ mod tests {
         assert_eq!(
             cj.get("usage")
                 .and_then(|u| u.get("inputTokens"))
-                .and_then(|v| v.as_i64()),
+                .and_then(serde_json::Value::as_i64),
             Some(100),
             "usage 应保真进 content_json"
         );
@@ -640,11 +648,20 @@ mod tests {
         assert_eq!(raw.events[0].event_type, EventType::CommandCompleted);
         assert_eq!(raw.events[0].summary.as_deref(), Some("git status --short"));
         let p = raw.events[0].payload_json.as_ref().expect("payload");
-        assert_eq!(p.get("output").and_then(|o| o.as_str()), Some(" M src/lib.rs"));
-        assert_eq!(p.get("isError").and_then(|e| e.as_bool()), Some(false));
-        assert_eq!(p.get("durationMs").and_then(|d| d.as_i64()), Some(12));
+        assert_eq!(
+            p.get("output").and_then(|o| o.as_str()),
+            Some(" M src/lib.rs")
+        );
+        assert_eq!(
+            p.get("isError").and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
+        assert_eq!(
+            p.get("durationMs").and_then(serde_json::Value::as_i64),
+            Some(12)
+        );
         assert_eq!(raw.events[1].event_type, EventType::SystemBlock);
-        assert!(raw.events[2].event_type == EventType::SystemBlock);
+        assert_eq!(raw.events[2].event_type, EventType::SystemBlock);
         assert!(raw.events[2]
             .payload_json
             .as_ref()

@@ -269,10 +269,7 @@ fn journey_sun_harness_import_to_detail() {
         "payload 应含配对输出"
     );
     assert!(
-        detail
-            .events
-            .iter()
-            .any(|e| e.event_type == "system_block"),
+        detail.events.iter().any(|e| e.event_type == "system_block"),
         "systemPrompt 系统块应进详情（上下文插件展示用）"
     );
 }

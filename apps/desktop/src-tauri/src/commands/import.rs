@@ -818,10 +818,8 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
                     .map_err(|e| e.to_string())
             }),
             parse: Box::new(move |it| {
-                ch_adapter_sun_harness::parse_session(
-                    it.file_path.as_deref().unwrap_or_default(),
-                )
-                .map_err(|e| e.to_string())
+                ch_adapter_sun_harness::parse_session(it.file_path.as_deref().unwrap_or_default())
+                    .map_err(|e| e.to_string())
             }),
         });
     }
