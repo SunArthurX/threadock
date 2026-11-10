@@ -462,6 +462,58 @@ pub(crate) async fn import_from_deepseek(
     })
 }
 
+/// Sun Harness (sun) home 路径：SUN_HOME 优先（sun 自身解析规则），缺省 ~/.sun。
+pub(crate) fn sun_home() -> Result<String, String> {
+    if let Ok(p) = std::env::var("SUN_HOME") {
+        if !p.trim().is_empty() {
+            return Ok(p);
+        }
+    }
+    let home = std::env::var("HOME").map_err(|_| "no HOME")?;
+    Ok(format!("{home}/.sun"))
+}
+
+/// 列出 Sun Harness 会话（面板只列顶层会话）。
+#[tauri::command]
+pub(crate) async fn list_sun_sessions(
+    state: tauri::State<'_, DaemonState>,
+) -> Result<Vec<SourceSessionDto>, String> {
+    let home = sun_home()?;
+    let sessions = ch_adapter_sun_harness::discover_sessions(&home)
+        .map_err(|e| format!("discover sun harness: {e}"))?;
+    let ictx = import_ctx(&state);
+    Ok(sessions
+        .into_iter()
+        .map(|s| SourceSessionDto {
+            imported: imported_flag(&ictx, "prov_sun-harness", &s.session_id, s.mtime_ms),
+            session_id: s.session_id,
+            title: s.title,
+            detail: format!("{} 条消息", s.message_count),
+            message_count: Some(s.message_count),
+        })
+        .collect())
+}
+
+/// 从 Sun Harness 导入一条会话。
+#[tauri::command]
+pub(crate) async fn import_from_sun(
+    state: tauri::State<'_, DaemonState>,
+    session_id: String,
+) -> Result<ImportResultDto, String> {
+    run_blocking(|| {
+        let home = sun_home()?;
+        let sessions = ch_adapter_sun_harness::discover_all_sessions(&home)
+            .map_err(|e| format!("discover sun harness: {e}"))?;
+        let session = sessions
+            .into_iter()
+            .find(|s| s.session_id == session_id)
+            .ok_or_else(|| format!("session not found: {session_id}"))?;
+        let raw = ch_adapter_sun_harness::parse_session(&session.file_path)
+            .map_err(|e| format!("parse sun harness: {e}"))?;
+        import_raw_to_state(&state, raw, Some("Sun Harness"), session.mtime_ms)
+    })
+}
+
 /// 启动时自动拉取 ZCode / Claude Code / Cursor / MiniMax 最新会话（plan §6.1 自动发现/同步）。
 /// 返回导入统计。最多各导入 limit 个最新会话。
 /// 若已有重置/同步在进行中，返回「同步中」标记（不阻塞 UI）。
@@ -736,6 +788,43 @@ pub(crate) fn source_table(home: &str) -> Vec<SourceSync<'_>> {
             }),
         });
     }
+
+    // Sun Harness：$SUN_HOME|~/.sun/sessions 下平铺 <id>.jsonl（或 <id>/session.jsonl）
+    let sun_root = std::env::var("SUN_HOME")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("{home}/.sun"));
+    if mk(std::path::Path::new(&format!("{sun_root}/sessions")).exists()) {
+        let root = sun_root;
+        out.push(SourceSync {
+            provider_id: "prov_sun-harness",
+            stat_key: "sun",
+            workspace: "Sun Harness",
+            records_observed: true,
+            discover: Box::new(move || {
+                ch_adapter_sun_harness::discover_all_sessions(&root)
+                    .map(|v| {
+                        v.into_iter()
+                            .map(|s| SourceItem {
+                                session_id: s.session_id.clone(),
+                                src_ms: s.mtime_ms.unwrap_or(0),
+                                observed_ms: s.mtime_ms,
+                                file_path: Some(s.file_path),
+                                parent_id: s.parent_id,
+                                title: listing_title(s.title),
+                            })
+                            .collect()
+                    })
+                    .map_err(|e| e.to_string())
+            }),
+            parse: Box::new(move |it| {
+                ch_adapter_sun_harness::parse_session(
+                    it.file_path.as_deref().unwrap_or_default(),
+                )
+                .map_err(|e| e.to_string())
+            }),
+        });
+    }
     out
 }
 
@@ -842,6 +931,7 @@ fn auto_sync_inner_with(
         ("minimax", (0, 0)),
         ("codex", (0, 0)),
         ("deepseek", (0, 0)),
+        ("sun", (0, 0)),
     ]
     .into_iter()
     .collect();
@@ -1803,6 +1893,62 @@ mod dsh_ext_tests {
                 "镜像 import_state 一并清理"
             );
         }
+    }
+
+    /// 合成 sun 会话（写入临时 ~/.sun/sessions）。
+    fn write_sun_session(sessions_dir: &std::path::Path, id: &str, imported: bool) {
+        let mut meta = format!(
+            r#"{{"seq":0,"ts":"2026-11-07T06:54:02.180Z","type":"session/meta","id":"{id}","title":"sun 会话 {id}","mode":"coding","cwd":"/tmp/p","model":"qwen/qwen-flash","createdAt":"2026-11-07T06:54:02.180Z""#
+        );
+        if imported {
+            meta.push_str(r#","importedThrough":3"#);
+        }
+        meta.push('}');
+        let body = format!(
+            "{meta}\n{{\"seq\":1,\"ts\":\"2026-11-07T06:54:02.239Z\",\"type\":\"user/message\",\"text\":\"你好\",\"source\":\"user\"}}\n"
+        );
+        std::fs::write(sessions_dir.join(format!("{id}.jsonl")), body).expect("write failed");
+    }
+
+    /// sun 接入 auto_sync：原生会话导入、importedThrough 镜像排除、重跑幂等。
+    #[test]
+    fn auto_sync_sun_imports_and_skips_mirrors() {
+        let _lock = HOME_LOCK.lock().expect("home lock");
+        let home = tempfile::TempDir::new().expect("tempdir failed");
+        let _home_guard = set_home(home.path());
+        // SUN_HOME 优先级高于 HOME：清掉以防本机环境泄漏进测试
+        std::env::remove_var("SUN_HOME");
+        let data = tempfile::TempDir::new().expect("tempdir failed");
+        let state = DaemonState::open(DaemonStateConfig {
+            data_dir: data.path().to_path_buf(),
+            ..Default::default()
+        })
+        .expect("state open");
+
+        let sessions = home.path().join(".sun/sessions");
+        std::fs::create_dir_all(&sessions).expect("mkdir failed");
+        write_sun_session(&sessions, "20261107-01native", false);
+        write_sun_session(&sessions, "20261107-02mirror", true);
+
+        let v = auto_sync_inner(&state, None).expect("sync");
+        assert_eq!(
+            v.get("sun_imported"),
+            Some(&serde_json::json!(1)),
+            "只导入原生会话"
+        );
+        // 幂等：重跑无新增
+        let v2 = auto_sync_inner(&state, None).expect("sync2");
+        assert_eq!(v2.get("sun_imported"), Some(&serde_json::json!(0)));
+        // 镜像不入库
+        let repo = state.repo.lock().expect("repo lock");
+        let sun: Vec<String> = repo
+            .list_conversation_sources()
+            .expect("sources")
+            .into_iter()
+            .filter(|(pid, _)| pid == "prov_sun-harness")
+            .map(|(_, sid)| sid)
+            .collect();
+        assert_eq!(sun, vec!["20261107-01native".to_string()]);
     }
 }
 

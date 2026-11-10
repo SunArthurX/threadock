@@ -580,6 +580,12 @@
 |------|------|
 | sessionId | `ImportResultDto` |
 
+### `import_from_sun`
+
+| 参数 | 返回 |
+|------|------|
+| sessionId | `ImportResultDto` |
+
 ### `import_from_zcode`
 
 | 参数 | 返回 |
@@ -629,6 +635,12 @@
 |  | `SourceSessionDto[]` |
 
 ### `list_minimax_sessions`
+
+| 参数 | 返回 |
+|------|------|
+|  | `SourceSessionDto[]` |
+
+### `list_sun_sessions`
 
 | 参数 | 返回 |
 |------|------|

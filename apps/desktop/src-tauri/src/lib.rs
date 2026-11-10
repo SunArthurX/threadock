@@ -287,6 +287,8 @@ pub fn run() {
             import_from_codex,
             list_deepseek_sessions,
             import_from_deepseek,
+            list_sun_sessions,
+            import_from_sun,
             ops_sync,
             ops_overview,
             ops_by_provider,
@@ -427,6 +429,7 @@ mod tests {
             "minimax",
             "codex",
             "deepseek",
+            "sun",
         ] {
             assert_eq!(
                 v.get(format!("{k}_imported")),
