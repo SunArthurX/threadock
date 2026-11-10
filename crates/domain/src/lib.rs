@@ -53,6 +53,10 @@ pub enum Provider {
     /// 按上方约定追加到枚举末尾，保证已有成员序列化稳定。
     #[serde(rename = "deepseek-harness")]
     DeepSeekHarness,
+    /// Sun Harness（sun）CLI/Desktop。
+    /// 按上方约定追加到枚举末尾，保证已有成员序列化稳定。
+    #[serde(rename = "sun-harness")]
+    SunHarness,
 }
 
 impl Provider {
@@ -69,6 +73,7 @@ impl Provider {
             Provider::Generic => "generic",
             Provider::Unknown => "unknown",
             Provider::DeepSeekHarness => "deepseek-harness",
+            Provider::SunHarness => "sun-harness",
         }
     }
 }
@@ -92,6 +97,7 @@ impl std::str::FromStr for Provider {
             "generic" => Ok(Provider::Generic),
             "unknown" => Ok(Provider::Unknown),
             "deepseek-harness" => Ok(Provider::DeepSeekHarness),
+            "sun-harness" => Ok(Provider::SunHarness),
             other => Err(DomainError::UnknownProvider(other.to_string())),
         }
     }
@@ -657,6 +663,7 @@ mod tests {
             Provider::Generic,
             Provider::Unknown,
             Provider::DeepSeekHarness,
+            Provider::SunHarness,
         ] {
             let s = p.as_str();
             let back: Provider = s.parse().expect("parse failed");
