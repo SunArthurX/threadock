@@ -260,7 +260,7 @@ export default function App() {
         setAvailableProviders(new Set(result.providers as unknown as string[]));
       }
       const parts: string[] = [];
-      for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"],["deepseek","dsh"]] as [string,string][]) {
+      for (const [key, label] of [["zcode","ZCode"],["claude_code","Claude Code"],["cursor","Cursor"],["minimax","MiniMax"],["codex","Codex"],["deepseek","dsh"],["sun","Sun"]] as [string,string][]) {
         const ok = result[`${key}_imported`] ?? 0;
         if (ok > 0) parts.push(t("{__0__}: {__1__} 新", { __0__: (label), __1__: (ok) }));
       }
@@ -1431,7 +1431,7 @@ export default function App() {
                     icon="mailbox"
                     size="lg"
                     title={t("还没有任何会话")}
-                    desc={<>把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness 里的历史对话同步进来，统一管理。</>}
+                    desc={<>把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness / Sun Harness 里的历史对话同步进来，统一管理。</>}
                     action={
                       <>
                         <button className="action-btn primary" onClick={() => setImportMenu(true)}>

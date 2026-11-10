@@ -381,7 +381,7 @@ export default function ConversationList({
   });
 
   // 来源 chip：仅显示有数据的来源
-  const providerChips = (["zcode", "claude-code", "cursor", "minimax-code", "codex", "deepseek-harness"] as const)
+  const providerChips = (["zcode", "claude-code", "cursor", "minimax-code", "codex", "deepseek-harness", "sun-harness"] as const)
     .filter((p) => !availableProviders || availableProviders.size === 0 || availableProviders.has(p));
 
   // 提交右键菜单触发的「加标签」内联输入
@@ -607,7 +607,7 @@ export default function ConversationList({
           icon="mailbox"
           size="md"
           title={t("还没有任何会话")}
-          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} />{t("同步")}</span> 按钮把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness 里的历史对话拉进来</>}
+          desc={<>点上方 <span className="hint"><Icon name="sync" size={11} />{t("同步")}</span> 按钮把 Cursor / Claude Code / ZCode / Codex / DeepSeek Harness / Sun Harness 里的历史对话拉进来</>}
         />
       )}
       {!loading && conversations.length > 0 && dateFiltered.length === 0 && (

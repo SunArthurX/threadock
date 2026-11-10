@@ -12,6 +12,7 @@ export const PROVIDER_META: Record<string, { label: string; color: string }> = {
   "minimax-code": { label: "MiniMax", color: "#f478b4" },
   codex: { label: "Codex", color: "#3ddba0" },
   "deepseek-harness": { label: "dsh", color: "#4d6bfe" },
+  "sun-harness": { label: "Sun", color: "#e8a33d" },
 };
 export const meta = (p: string) => PROVIDER_META[p] ?? { label: p, color: "#8b96ad" };
 

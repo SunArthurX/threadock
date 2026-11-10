@@ -167,7 +167,7 @@ export interface ContextUsageSummary {
 export const sourceLabel = (p: string): string => {
   const map: Record<string, string> = {
     "claude-code": "Claude Code", zcode: "ZCode", codex: "Codex",
-    cursor: "Cursor", "minimax-code": "MiniMax", "deepseek-harness": "dsh", opencode: "OpenCode", generic: t("导入"),
+    cursor: "Cursor", "minimax-code": "MiniMax", "deepseek-harness": "dsh", "sun-harness": "Sun", opencode: "OpenCode", generic: t("导入"),
   };
   return map[p] ?? p;
 };

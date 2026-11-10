@@ -12,6 +12,7 @@ export interface NewCount {
   minimax?: number;
   codex?: number;
   deepseek?: number;
+  sun?: number;
   total?: number;
 }
 
