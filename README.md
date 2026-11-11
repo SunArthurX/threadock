@@ -7,7 +7,7 @@
 **One local archive. Every AI coding agent. Fully searchable, governable, and yours.**
 
 A local-first desktop app that unifies conversations, tool calls, commands, diffs, and artifacts from
-ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness — normalizes them into a single searchable corpus,
+ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Sun Harness — normalizes them into a single searchable corpus,
 and continuously governs usage, cost, and security.
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
@@ -102,7 +102,7 @@ Prefer building yourself? Jump to [Development → Build from source](#build-fro
 
 | | |
 |---|---|
-| 🔌 **8 read-only adapters** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown · JSONL — process-isolated, crash-safe |
+| 🔌 **9 read-only adapters** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Sun Harness · Markdown · JSONL — process-isolated, crash-safe |
 | 🗄️ **SQLite V16 + WAL** | 25+ tables, FTS5 fallback, automatic schema migration on startup |
 | 🔍 **Dual search engines** | Tantivy (N-gram Chinese + jieba) primary, FTS5 fallback, query syntax, time-ordered hits |
 | 🧬 **Canonical normalization** | Unified 6-source × 19-event-type domain model, BLAKE3-hashed, idempotent, completeness-scored |
@@ -215,7 +215,7 @@ Three layers, one invariant: **third-party data is read-only** — the single de
 [Handoff](#features), which only ever *appends* brand-new sessions to an agent's store and never
 touches existing ones.
 
-- **Adapters** — eight adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness) run as
+- **Adapters** — nine adapters (markdown, jsonl, claude-code, zcode, cursor, minimax, codex, deepseek-harness, sun-harness) run as
   isolated child processes over stdio JSON-RPC. Crashes don't take down the host; timeouts
   don't hang the UI.
 - **Core (`DaemonState`)** — the only writer. BLAKE3 content addressing, zstd compression,
@@ -250,6 +250,7 @@ threadock/
 │   ├── adapter-minimax/     MiniMax Code adapter
 │   ├── adapter-codex/       Codex adapter
 │   ├── adapter-deepseek-harness/ DeepSeek Harness (dsh) adapter
+│   ├── adapter-sun-harness/ Sun Harness (sun) adapter
 │   ├── ops-metrics/         usage / cost / health metrics
 │   ├── audit/               security audit (secrets + dangerous commands)
 │   ├── benchmarks/          perf, search latency, cold start
@@ -383,7 +384,7 @@ at your option.
 - [SQLite](https://sqlite.org) for the storage layer
 - [React](https://react.dev), [Vite](https://vitejs.dev), [Vitest](https://vitest.dev) for the frontend
 - [xterm.js](https://xtermjs.org) for the in-app terminal
-- The teams behind ZCode, Claude Code, Cursor, MiniMax Code, Codex, and DeepSeek Harness for the underlying products
+- The teams behind ZCode, Claude Code, Cursor, MiniMax Code, Codex, DeepSeek Harness, and Sun Harness for the underlying products
 
 ---
 

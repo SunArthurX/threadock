@@ -7,7 +7,7 @@
 **一个本地归档，收齐所有 AI 编程工具。可全文搜索、可治理、永远是你的。**
 
 跨 AI IDE 的统一会话归档、检索、知识提取与治理平台——把 ZCode · Claude Code · Cursor ·
-MiniMax Code · Codex · DeepSeek Harness 等工具里的会话、工具调用、命令、Diff、Artifact 统一收集、标准化、
+MiniMax Code · Codex · DeepSeek Harness · Sun Harness 等工具里的会话、工具调用、命令、Diff、Artifact 统一收集、标准化、
 全文检索、知识化,并对用量 / 成本 / 安全做持续治理。
 
 [English](README.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Français](README.fr.md) · [Italiano](README.it.md) · [Español](README.es.md) · [Русский](README.ru.md)
@@ -95,7 +95,7 @@ $4,553 花费,跨 5 个 Agent、1,184 条会话**。支持明暗双主题,此处
 
 | | |
 |---|---|
-| 🔌 **8 个只读 Adapter** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Markdown · JSONL —— 进程隔离,崩溃安全 |
+| 🔌 **9 个只读 Adapter** | ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Sun Harness · Markdown · JSONL —— 进程隔离,崩溃安全 |
 | 🗄️ **SQLite V16 + WAL** | 25+ 表、FTS5 兜底、启动自动迁移 schema |
 | 🔍 **双引擎搜索** | Tantivy(N-gram + jieba 可选)主,FTS5 兜底;支持查询语法,按消息时间倒序 |
 | 🧬 **统一标准化** | 6 来源 × 19 事件类型领域模型;BLAKE3 哈希、幂等、完整度评分 |
@@ -203,7 +203,7 @@ echo '{"jsonrpc":"2.0","id":2,"method":"search.query","params":{"query":"tauri",
 三层架构,一个铁律:**第三方数据只读**——唯一的刻意例外是[交接(Handoff)](#功能特性):
 它只会往目标 Agent 的会话库里*追加*全新会话,绝不改动已有数据。
 
-- **Adapters** —— 八个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness)
+- **Adapters** —— 九个适配器(markdown、jsonl、claude-code、zcode、cursor、minimax、codex、deepseek-harness、sun-harness)
   跑在独立子进程里,通过 stdio JSON-RPC 通信。适配器崩了不会拖垮主进程;超时不会卡住 UI
 - **Core(`DaemonState`)** —— 唯一的写者。BLAKE3 内容寻址、zstd 压缩、幂等去重、完整度
   评分、审计日志。SQLite V16(25+ 表) + Tantivy 索引(N-gram 中文 + 可选 jieba)
@@ -236,6 +236,7 @@ threadock/
 │   ├── adapter-minimax/     MiniMax Code Adapter
 │   ├── adapter-codex/       Codex Adapter
 │   ├── adapter-deepseek-harness/ DeepSeek Harness (dsh) Adapter
+│   ├── adapter-sun-harness/ Sun Harness (sun) Adapter
 │   ├── ops-metrics/         用量 / 成本 / 健康度指标
 │   ├── audit/               安全审计(敏感信息 + 危险命令)
 │   ├── benchmarks/          性能基准(吞吐 / 搜索延迟 / 冷启动)
@@ -366,7 +367,7 @@ Issue 和 PR 欢迎。在开之前:
 - [SQLite](https://sqlite.org) —— 存储层
 - [React](https://react.dev)、[Vite](https://vitejs.dev)、[Vitest](https://vitest.dev) —— 前端
 - [xterm.js](https://xtermjs.org) —— 应用内终端
-- ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness 背后的团队
+- ZCode · Claude Code · Cursor · MiniMax Code · Codex · DeepSeek Harness · Sun Harness 背后的团队
 
 ---
 
